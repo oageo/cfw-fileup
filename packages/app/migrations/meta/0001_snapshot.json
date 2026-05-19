@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "18a78bb3-df80-455a-9e33-73b7110cd9a4",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "4f86c3e3-0627-4966-a53c-6c444977e6ab",
+  "prevId": "18a78bb3-df80-455a-9e33-73b7110cd9a4",
   "tables": {
     "buckets": {
       "name": "buckets",
@@ -797,6 +797,65 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "backup_codes": {
+      "name": "backup_codes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "backup_codes_user_id_users_id_fk": {
+          "name": "backup_codes_user_id_users_id_fk",
+          "tableFrom": "backup_codes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "passkeys": {
       "name": "passkeys",
       "columns": {
@@ -838,6 +897,13 @@
         },
         "transports": {
           "name": "transports",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
