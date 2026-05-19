@@ -30,9 +30,9 @@ Gitの競合マーカー（<<<<<<<, =======, >>>>>>>）が含まれるファイ�
 
 # 解決プロセス (Execution Steps)
 1. **コンテキストの解析:**
-   - 現在のブランチの変更目的と意図をコードから読み解く。
-   - マージしようとしているブランチの変更目的と意図を読み解く。
-   - HEADブランチおよびマージ元ブランチの変更内容となぜ競合しているかを分析し、 `.claude/agent-memory/memory/conflict_<yyyyMMdd_HHmmss>.md` にまとめる。
+   - HEADの変更目的と意図をコードから読み解く。
+   - MERGE_HEADの変更目的と意図を読み解く。
+   - HEADおよびMERGE_HEADの変更内容となぜ競合しているかを分析し、 `.claude/agent-memory/memory/conflict_<yyyyMMdd_HHmmss>.md` にまとめる。
    - テクニック: **Gitコマンドを使う**  
      後述するGitコマンドを駆使し、両方の変更の意図をより深く理解する。  
      競合マーカー内の比較はそこそこにして、merge-base から両方にどのような変更が加えられていったのかを把握することに注力する。
@@ -64,7 +64,7 @@ grep -rn "<<<<<<< " .
 ## 変更の経緯を調べる
 
 ```sh
-# HEADとマージ元の共通祖先（マージベース）を特定
+# 共通祖先 merge-base を特定
 git merge-base HEAD MERGE_HEAD
 
 # ファイルごとの3way diff（競合の両側と共通祖先を同時に見る）
@@ -76,12 +76,12 @@ git show $(git merge-base HEAD MERGE_HEAD):<file>
 # HEADでの変更
 git show HEAD:<file>
 
-# マージ元（MERGE_HEAD）での変更
+# MERGE_HEADでの変更
 git show MERGE_HEAD:<file>
 
 # それぞれのブランチでそのファイルに触れたコミットと意図を確認
-git log --oneline HEAD -- <file>
-git log --oneline MERGE_HEAD -- <file>
+git log --oneline $(git merge-base HEAD MERGE_HEAD)..HEAD -- <file>
+git log --oneline $(git merge-base HEAD MERGE_HEAD)..MERGE_HEAD -- <file>
 
 # 特定コミットの変更内容を確認
 git show <commit-hash>
@@ -110,7 +110,7 @@ git rebase --continue  # 解決後に続行する場合
 # HEADの変更を採用（theirs を全て捨てる）
 git checkout --ours <file>
 
-# マージ元の変更を採用（ours を全て捨てる）
+# MERGE_HEADの変更を採用（ours を全て捨てる）
 git checkout --theirs <file>
 ```
 
