@@ -7,6 +7,7 @@ export const files = sqliteTable('files', {
 	bucketId: text('bucket_id').notNull().references(() => buckets.id, { onDelete: 'cascade' }),
 	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	path: text('path').notNull(),
+	accessKey: text('access_key').notNull(),
 	r2Key: text('r2_key').notNull().unique(),
 	size: integer('size'),
 	mimeType: text('mime_type'),
@@ -21,6 +22,7 @@ export const files = sqliteTable('files', {
 	partSize: integer('part_size').notNull().default(32 * 1024 * 1024),
 }, (table) => [
 	uniqueIndex('files_bucket_path_idx').on(table.bucketId, table.path),
+	uniqueIndex('files_access_key_idx').on(table.accessKey),
 ]);
 
 export const targzFiles = sqliteTable('targz_files', {

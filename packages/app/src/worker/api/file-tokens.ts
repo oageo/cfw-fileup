@@ -156,7 +156,7 @@ app.post(
 
 		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token, expiresAt });
 
-		return c.json({ id, token, expiresAt }, 200);
+		return c.json({ id, token, expiresAt, accessKey: file.accessKey }, 200);
 	}, apiDef['/api/file-tokens/create-by-passphrase'].res),
 );
 

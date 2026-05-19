@@ -35,6 +35,7 @@ describe('POST /api/files/create/open', () => {
 		expect(res.status).toBe(200);
 		const body = await res.json() as Record<string, unknown>;
 		expect(typeof body.fileId).toBe('string');
+		expect(typeof body.accessKey).toBe('string');
 		expect(typeof body.uploadExpiry).toBe('number');
 	});
 
@@ -100,6 +101,33 @@ describe('POST /api/files/create/open', () => {
 			body: JSON.stringify({ path: 'hello.txt' }),
 		}, env);
 		expect(res.status).toBe(400);
+	});
+});
+
+describe('POST /api/files/ls', () => {
+	test('owner listing includes access key for files', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'hello.txt' }),
+		}, env);
+		const { fileId, accessKey } = await openRes.json() as { fileId: string; accessKey: string };
+		await env.R2.put(accessKey, 'Hello World');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, isPublic: true }),
+		}, env);
+
+		const res = await app.request('/api/files/ls', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', path: '' }),
+		}, env);
+		expect(res.status).toBe(200);
+		const body = await res.json() as { entries: Array<{ name: string; accessKey?: string }> };
+		expect(body.entries).toContainEqual(expect.objectContaining({ name: 'hello.txt', accessKey }));
 	});
 });
 
@@ -336,7 +364,7 @@ describe('POST /api/files/update', () => {
 		const body = await updateRes.json() as { error: string };
 		expect(body.error).toBe('Public files cannot be made private');
 
-		const metaRes = await app.request('/d/test_bucket/public.txt?meta', {}, env);
+		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=public.txt', {}, env);
 		expect(metaRes.status).toBe(200);
 		const meta = await metaRes.json() as { isPublic: boolean };
 		expect(meta.isPublic).toBe(true);
@@ -366,7 +394,8 @@ describe('POST /api/files/update', () => {
 		}, env);
 		expect(updateRes.status).toBe(200);
 
-		const downloadRes = await app.request('/d/test_bucket/private.txt', {}, env);
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+		const downloadRes = await app.request(`/d/${accessKey}`, {}, env);
 		expect(downloadRes.status).toBe(200);
 		expect(await downloadRes.text()).toBe('Private Content');
 	});

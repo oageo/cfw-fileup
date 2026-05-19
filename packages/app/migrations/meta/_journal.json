@@ -22,6 +22,13 @@
       "when": 1779168811060,
       "tag": "0002_nappy_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1779223644924,
+      "tag": "0003_classy_zeigeist",
+      "breakpoints": true
     }
   ]
 }

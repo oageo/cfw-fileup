@@ -36,14 +36,15 @@ async function setupPublicFile() {
 		body: JSON.stringify({ fileId, isPublic: true }),
 	}, env);
 
-	return { token, bucketId, fileId };
+	const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+	return { token, bucketId, fileId, accessKey };
 }
 
-describe('GET /d/:bucketName/*', () => {
+describe('GET /d/:accessKey', () => {
 	test('downloads a public file', async () => {
-		const { fileId } = await setupPublicFile();
+		const { fileId, accessKey } = await setupPublicFile();
 
-		const res = await app.request('/d/test_bucket/hello.txt', {}, env);
+		const res = await app.request(`/d/${accessKey}`, {}, env);
 		expect(res.status).toBe(200);
 		expect(res.headers.get('Cache-Control')).toBe('public, max-age=315360000, immutable');
 		expect(res.headers.get('Last-Modified')).toBe(parseEaidx(fileId).date.toUTCString());
@@ -52,16 +53,16 @@ describe('GET /d/:bucketName/*', () => {
 	});
 
 	test('serves a public file from Cache API after first download', async () => {
-		const { bucketId, fileId } = await setupPublicFile();
+		const { bucketId, fileId, accessKey } = await setupPublicFile();
 
-		const firstRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		const firstRes = await app.request(`/d/${accessKey}`, {}, env);
 		expect(firstRes.status).toBe(200);
 		expect(await firstRes.text()).toBe('Hello World');
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await env.R2.delete(`${bucketId}/hello.txt`);
 
-		const cachedRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		const cachedRes = await app.request(`/d/${accessKey}`, {}, env);
 		expect(cachedRes.status).toBe(200);
 		expect(cachedRes.headers.get('Cache-Control')).toBe('public, max-age=315360000, immutable');
 		expect(cachedRes.headers.get('Last-Modified')).toBe(parseEaidx(fileId).date.toUTCString());
@@ -69,33 +70,27 @@ describe('GET /d/:bucketName/*', () => {
 	});
 
 	test('deleted file does not return stale public download cache', async () => {
-		const { token } = await setupPublicFile();
+		const { token, bucketId, accessKey } = await setupPublicFile();
 
-		const firstRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		const firstRes = await app.request(`/d/${accessKey}`, {}, env);
 		expect(firstRes.status).toBe(200);
 		expect(await firstRes.text()).toBe('Hello World');
 
-		const deleteRes = await app.request('/d/test_bucket/hello.txt', {
-			method: 'DELETE',
+		const deleteRes = await app.request('/api/files/delete', {
+			method: 'POST',
 			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'hello.txt' }),
 		}, env);
 		expect(deleteRes.status).toBe(200);
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		const afterDeleteRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		const afterDeleteRes = await app.request(`/d/${accessKey}`, {}, env);
 		expect(afterDeleteRes.status).toBe(404);
 	});
 
-	test('nonexistent bucket returns 404', async () => {
-		const res = await app.request('/d/no_such_bucket/file.txt', {}, env);
-		expect(res.status).toBe(404);
-	});
-
-	test('nonexistent file in existing bucket returns 404', async () => {
-		await setupPublicFile();
-
-		const res = await app.request('/d/test_bucket/no-such-file.txt', {}, env);
+	test('nonexistent access key returns 404', async () => {
+		const res = await app.request('/d/nonexistent_access_key_xyz', {}, env);
 		expect(res.status).toBe(404);
 	});
 
@@ -124,7 +119,8 @@ describe('GET /d/:bucketName/*', () => {
 			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
 		}, env);
 
-		const res = await app.request('/d/secret_bucket/secret.txt', {}, env);
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+		const res = await app.request(`/d/${accessKey}`, {}, env);
 		expect(res.status).toBe(403);
 	});
 
@@ -159,9 +155,9 @@ describe('GET /d/:bucketName/*', () => {
 			body: JSON.stringify({ bucketName: 'secret_bucket', filePath: 'secret.txt', passphrase: 'mypassword' }),
 		}, env);
 		expect(tokenRes.status).toBe(200);
-		const { token: fileToken, expiresAt } = await tokenRes.json() as { token: string; expiresAt: number };
+		const { token: fileToken, expiresAt, accessKey } = await tokenRes.json() as { token: string; expiresAt: number; accessKey: string };
 
-		const res = await app.request(`/d/secret_bucket/secret.txt?token=${fileToken}`, {}, env);
+		const res = await app.request(`/d/${accessKey}?token=${fileToken}`, {}, env);
 		expect(res.status).toBe(200);
 		expect(res.headers.get('Expires')).toBe(new Date(expiresAt).toUTCString());
 		expect(res.headers.get('Cache-Control')).toBeNull();
@@ -201,9 +197,11 @@ describe('GET /d/:bucketName/*', () => {
 		expect(tokenRes.status).toBe(200);
 		const { token: fileToken, id: tokenId } = await tokenRes.json() as { token: string; id: string };
 
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+
 		await env.DB.prepare('UPDATE file_access_tokens SET expires_at = ? WHERE id = ?').bind(Date.now() - 1000, tokenId).run();
 
-		const expiredRes = await app.request(`/d/secret_bucket/secret.txt?token=${fileToken}`, {}, env);
+		const expiredRes = await app.request(`/d/${accessKey}?token=${fileToken}`, {}, env);
 		expect(expiredRes.status).toBe(403);
 		expect(expiredRes.headers.get('Cache-Control')).toBeNull();
 		expect(await expiredRes.text()).toBe('Forbidden');
@@ -211,7 +209,7 @@ describe('GET /d/:bucketName/*', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await env.DB.prepare('UPDATE file_access_tokens SET expires_at = ? WHERE id = ?').bind(Date.now() + 60_000, tokenId).run();
 
-		const cachedExpiredRes = await app.request(`/d/secret_bucket/secret.txt?token=${fileToken}`, {}, env);
+		const cachedExpiredRes = await app.request(`/d/${accessKey}?token=${fileToken}`, {}, env);
 		expect(cachedExpiredRes.status).toBe(403);
 		expect(cachedExpiredRes.headers.get('Cache-Control')).toBeNull();
 		expect(await cachedExpiredRes.text()).toBe('Forbidden');
@@ -242,12 +240,13 @@ describe('GET /d/:bucketName/*', () => {
 			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
 		}, env);
 
-		const res = await app.request('/d/secret_bucket/secret.txt?passphrase=mypassword', {}, env);
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+		const res = await app.request(`/d/${accessKey}?passphrase=mypassword`, {}, env);
 		expect(res.status).toBe(403);
 	});
 });
 
-describe('GET /d/:bucketName/:filePath?list (tar.gz index)', () => {
+describe('GET /d/:accessKey?list (tar.gz index)', () => {
 	test('returns list of files in tar.gz', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
@@ -305,8 +304,10 @@ describe('GET /d/:bucketName/:filePath?list (tar.gz index)', () => {
 			body: JSON.stringify({ fileId, isPublic: true }),
 		}, env);
 
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+
 		// List all files
-		const listRes = await app.request('/d/archive_bucket/archive.tar.gz?list', {}, env);
+		const listRes = await app.request(`/d/${accessKey}?list`, {}, env);
 		expect(listRes.status).toBe(200);
 		const entries = await listRes.json() as { path: string }[];
 		expect(entries).toHaveLength(2);
@@ -350,7 +351,9 @@ describe('GET /d/:bucketName/:filePath?list (tar.gz index)', () => {
 			body: JSON.stringify({ fileId, isPublic: true }),
 		}, env);
 
-		const listRes = await app.request('/d/archive_bucket/archive.tar.gz?list=dir/file1.txt', {}, env);
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+
+		const listRes = await app.request(`/d/${accessKey}?list=dir/file1.txt`, {}, env);
 		expect(listRes.status).toBe(200);
 		const entries = await listRes.json() as { path: string }[];
 		expect(entries).toHaveLength(1);
@@ -358,7 +361,7 @@ describe('GET /d/:bucketName/:filePath?list (tar.gz index)', () => {
 	});
 });
 
-describe('GET /d/:bucketName/:filePath?file= (tar individual file)', () => {
+describe('GET /d/:accessKey?file= (tar individual file)', () => {
 	test('?file= downloads the correct bytes from a plain tar', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
@@ -398,7 +401,9 @@ describe('GET /d/:bucketName/:filePath?file= (tar individual file)', () => {
 			body: JSON.stringify({ fileId, isPublic: true }),
 		}, env);
 
-		const res = await app.request('/d/tar_bucket/archive.tar?file=hello.txt', {}, env);
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+
+		const res = await app.request(`/d/${accessKey}?file=hello.txt`, {}, env);
 		expect(res.status).toBe(200);
 		const body = await res.arrayBuffer();
 		expect(new Uint8Array(body)).toEqual(fileContent);
@@ -439,34 +444,9 @@ describe('GET /d/:bucketName/:filePath?file= (tar individual file)', () => {
 			body: JSON.stringify({ fileId, isPublic: true }),
 		}, env);
 
-		const res = await app.request('/d/tar_bucket/archive.tar?file=nonexistent.txt', {}, env);
+		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
+
+		const res = await app.request(`/d/${accessKey}?file=nonexistent.txt`, {}, env);
 		expect(res.status).toBe(404);
-	});
-});
-
-describe('DELETE /d/:bucketName/*', () => {
-	test('owner can delete file via DELETE endpoint', async () => {
-		await setupPublicFile();
-
-		const { data } = await signup('firstuser');
-		const token = String(data.token);
-		void token;
-
-		// The download.ts DELETE checks Authorization header
-		const res = await app.request('/d/test_bucket/hello.txt', {
-			method: 'DELETE',
-			headers: authHeaders(String(token)),
-		}, env);
-		// The DELETE /d/ endpoint checks Bearer auth
-		expect([200, 401, 403, 404]).toContain(res.status);
-	});
-
-	test('DELETE without Authorization returns 401', async () => {
-		await setupPublicFile();
-
-		const res = await app.request('/d/test_bucket/hello.txt', {
-			method: 'DELETE',
-		}, env);
-		expect(res.status).toBe(401);
 	});
 });

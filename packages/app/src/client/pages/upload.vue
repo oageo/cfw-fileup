@@ -183,11 +183,9 @@ async function tusUpload(fileId: string, blob: Blob, filename: string, partSize:
 // ---- Core upload primitives ----
 
 async function deleteExistingFile(path: string): Promise<boolean> {
-	const res = await fetch(`/d/${selectedBucketName.value}/${path}`, {
-		method: 'DELETE',
-		headers: authHeaders(),
-	});
-	return res.ok;
+	if (!bucket.value) return false;
+	const result = await apiPost('/api/files/delete', { bucketId: bucket.value.id, path });
+	return result.ok;
 }
 
 interface OpenUploadResult {
@@ -493,8 +491,18 @@ async function startUpload(): Promise<void> {
 	if (paths.length > 0) {
 		const conflicts: string[] = [];
 		for (const path of paths) {
-			const res = await fetch(`/d/${selectedBucketName.value}/${path}?meta`);
-			if (res.ok) conflicts.push(path);
+			const lastSlash = path.lastIndexOf('/');
+			const parentPath = lastSlash === -1 ? '' : path.slice(0, lastSlash + 1);
+			const fileName = path.slice(lastSlash + 1);
+			const res = await fetch(`/api/files/ls?bucketName=${encodeURIComponent(selectedBucketName.value)}&path=${encodeURIComponent(parentPath)}`, {
+				headers: authHeaders(),
+			});
+			if (res.ok) {
+				const data = await res.json() as { entries: Array<{ type: string; name: string }> };
+				if (data.entries.some(e => e.type === 'file' && e.name === fileName)) {
+					conflicts.push(path);
+				}
+			}
 		}
 		if (conflicts.length > 0) {
 			const msg = `以下のパスにすでにファイルが存在します:\n${conflicts.join('\n')}\n\n上書きしますか？`;

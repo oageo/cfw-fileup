@@ -3,6 +3,7 @@ import app from '../../src/worker/index';
 import migration0000 from '../../migrations/0000_bizarre_thunderbolt_ross.sql?raw';
 import migration0001 from '../../migrations/0001_classy_lockheed.sql?raw';
 import migration0002 from '../../migrations/0002_nappy_black_queen.sql?raw';
+import migration0003 from '../../migrations/0003_classy_zeigeist.sql?raw';
 
 export { env, app };
 
@@ -10,6 +11,7 @@ const migrations = [
 	migration0000,
 	migration0001,
 	migration0002,
+	migration0003,
 ] as const;
 
 const tables = [

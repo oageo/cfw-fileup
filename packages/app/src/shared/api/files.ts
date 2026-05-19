@@ -18,6 +18,21 @@ const UploadingFileResponse = v.pipe(
 	v.metadata({ ref: 'UploadingFile' }),
 );
 
+const FileListEntry = v.pipe(
+	v.object({
+		type: v.union([v.literal('dir'), v.literal('file')]),
+		name: v.string(),
+		path: v.optional(v.string()),
+		accessKey: v.optional(v.string()),
+		size: v.optional(v.number()),
+		mimeType: v.optional(v.string()),
+		isTargz: v.optional(v.boolean()),
+		isTar: v.optional(v.boolean()),
+		isPublic: v.optional(v.boolean()),
+	}),
+	v.metadata({ ref: 'FileListEntry' }),
+);
+
 export const filesApiDef = {
 	'/api/files/create/open': {
 		summary: 'Open a new file upload',
@@ -28,7 +43,7 @@ export const filesApiDef = {
 			partSize: v.optional(v.number()),
 		}),
 		res: {
-			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ fileId: v.string(), uploadExpiry: v.number(), partSize: v.number() }) } } },
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ fileId: v.string(), accessKey: v.string(), uploadExpiry: v.number(), partSize: v.number() }) } } },
 			400: { description: 'Bad request (missing fields or invalid partSize)', content: { 'application/json': { vSchema: ErrorResponse } } },
 			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
 			409: { description: 'File already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
@@ -105,6 +120,21 @@ export const filesApiDef = {
 			404: { description: 'File not found', content: { 'application/json': { vSchema: ErrorResponse } } },
 		},
 	},
+	'/api/files/ls': {
+		summary: 'List files in a bucket path',
+		tags: ['files'],
+		req: v.object({
+			bucketName: v.string(),
+			path: v.optional(v.string()),
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
+				type: v.literal('directory'),
+				entries: v.array(FileListEntry),
+			}) } } },
+			404: { description: 'Bucket or directory not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+		},
+	},
 	'/api/files/update': {
 		summary: 'Update file visibility',
 		tags: ['files'],
@@ -139,6 +169,22 @@ export const filesApiDef = {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
 			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
 			404: { description: 'File or bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+		},
+	},
+	'/api/files/meta': {
+		summary: 'Get file metadata by bucket name and path',
+		tags: ['files'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
+				isPublic: v.boolean(),
+				isTargz: v.boolean(),
+				isTar: v.boolean(),
+				size: v.nullable(v.number()),
+				accessKey: v.optional(v.string()),
+				bucketId: v.optional(v.string()),
+			}) } } },
+			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

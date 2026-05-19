@@ -27,7 +27,8 @@ const isEntryDirectory = computed(() => entryPath.value !== null && entryPath.va
 const innerMeta = ref<{ mimeType: string; size?: number } | null>(null);
 
 const innerDownloadUrl = computed(() => {
-	const base = `/d/${props.bucketName}/${props.filePath}?file=${encodeURIComponent(entryPath.value ?? '')}`;
+	if (!fileAccessKey.value) return '';
+	const base = `/d/${fileAccessKey.value}?file=${encodeURIComponent(entryPath.value ?? '')}`;
 	return autoToken.value ? `${base}&token=${autoToken.value}` : base;
 });
 
@@ -95,6 +96,8 @@ function formatSize(bytes: number): string {
 const isTargz = ref(false);
 const isTar = ref(false);
 const fileSize = ref<number | null>(null);
+const fileAccessKey = ref<string | null>(null);
+const fileBucketId = ref<string | null>(null);
 const metaLoading = ref(false);
 const metaError = ref('');
 const fileIsPublic = ref(true);
@@ -127,9 +130,9 @@ const detailsLoading = computed(() =>
 );
 
 async function fetchInnerMeta(): Promise<void> {
-	if (!isEntryFile.value || !entryPath.value) return;
+	if (!isEntryFile.value || !entryPath.value || !fileAccessKey.value) return;
 	const tokenParam = autoToken.value ? `&token=${autoToken.value}` : '';
-	const url = `/d/${props.bucketName}/${props.filePath}?list=${encodeURIComponent(entryPath.value)}${tokenParam}`;
+	const url = `/d/${fileAccessKey.value}?list=${encodeURIComponent(entryPath.value)}${tokenParam}`;
 	try {
 		const res = await fetch(url, { headers: authHeaders() });
 		if (!res.ok) return;
@@ -147,17 +150,21 @@ async function fetchMeta(): Promise<void> {
 	metaLoading.value = true;
 	metaError.value = '';
 	innerMeta.value = null;
+	fileAccessKey.value = null;
+	fileBucketId.value = null;
 	try {
 		const [metaRes, apiMetaRes] = await Promise.all([
-			fetch(`/d/${props.bucketName}/${props.filePath}?meta`),
+			fetch(`/api/files/meta?bucketName=${encodeURIComponent(props.bucketName)}&path=${encodeURIComponent(props.filePath)}`, { headers: authHeaders() }),
 			fetch('/api/meta'),
 		]);
 		if (!metaRes.ok) { metaError.value = `取得失敗: ${metaRes.status}`; return; }
-		const data = await metaRes.json() as { isTargz?: boolean; isTar?: boolean; isPublic?: boolean; size?: number };
+		const data = await metaRes.json() as { isTargz?: boolean; isTar?: boolean; isPublic?: boolean; size?: number; accessKey?: string; bucketId?: string };
 		isTargz.value = data.isTargz ?? false;
 		isTar.value = data.isTar ?? false;
 		fileSize.value = data.size ?? null;
 		fileIsPublic.value = data.isPublic ?? true;
+		fileAccessKey.value = data.accessKey ?? null;
+		fileBucketId.value = data.bucketId ?? null;
 
 		if (apiMetaRes.ok) {
 			const apiMeta = await apiMetaRes.json() as { turnstileEnabled?: boolean; turnstileSiteKey?: string };
@@ -175,6 +182,7 @@ async function fetchMeta(): Promise<void> {
 					autoToken.value = cached.token;
 					passphraseTokenExpiresAt.value = cached.expiresAt;
 					scheduleTokenExpiry(cached.expiresAt);
+					if (cached.accessKey) fileAccessKey.value = cached.accessKey;
 				}
 			}
 		}
@@ -206,7 +214,8 @@ async function submitPassphrase({ valid }: { valid: boolean }): Promise<void> {
 		autoToken.value = result.data.token;
 		autoTokenId.value = result.data.id;
 		passphraseTokenExpiresAt.value = result.data.expiresAt;
-		saveCachedToken(result.data.token, result.data.expiresAt, result.data.id);
+		fileAccessKey.value = result.data.accessKey;
+		saveCachedToken(result.data.token, result.data.expiresAt, result.data.id, result.data.accessKey);
 		scheduleTokenExpiry(result.data.expiresAt);
 		passphraseInput.value = '';
 		turnstileToken.value = null;
@@ -245,20 +254,20 @@ function scheduleTokenExpiry(expiresAt: number | null): void {
 	tokenExpiryTimer = setTimeout(expireToken, delay);
 }
 
-function loadCachedToken(): { id: string | null; token: string; expiresAt: number | null } | null {
+function loadCachedToken(): { id: string | null; token: string; expiresAt: number | null; accessKey?: string } | null {
 	try {
 		const raw = sessionStorage.getItem(autoTokenCacheKey());
 		if (!raw) return null;
-		const cached = JSON.parse(raw) as { id?: string | null; token: string; expiresAt: number | null };
+		const cached = JSON.parse(raw) as { id?: string | null; token: string; expiresAt: number | null; accessKey?: string };
 		// 60秒バッファを持たせて期限チェック
 		if (cached.expiresAt !== null && cached.expiresAt < Date.now() + 60_000) return null;
-		return { id: cached.id ?? null, token: cached.token, expiresAt: cached.expiresAt };
+		return { id: cached.id ?? null, token: cached.token, expiresAt: cached.expiresAt, accessKey: cached.accessKey };
 	} catch { return null; }
 }
 
-function saveCachedToken(token: string, expiresAt: number | null, id: string | null): void {
+function saveCachedToken(token: string, expiresAt: number | null, id: string | null, accessKey?: string): void {
 	try {
-		sessionStorage.setItem(autoTokenCacheKey(), JSON.stringify({ id, token, expiresAt }));
+		sessionStorage.setItem(autoTokenCacheKey(), JSON.stringify({ id, token, expiresAt, accessKey }));
 	} catch { /* quota exceeded etc. */ }
 }
 
@@ -292,7 +301,7 @@ async function issueAutoToken(): Promise<void> {
 
 function infoTabClicked() {
 	activeTab.value = 'info';
-	issueAutoToken();
+	if (!fileIsPublic.value) issueAutoToken();
 }
 
 function filePublicStateChanged(v: boolean) {
@@ -315,6 +324,8 @@ watch(() => [props.bucketName, props.filePath], () => {
 	autoTokenLoading.value = false;
 	autoTokenPromise = null;
 	passphraseTokenExpiresAt.value = null;
+	fileAccessKey.value = null;
+	fileBucketId.value = null;
 	clearExpiryTimer();
 	fetchMeta();
 });
@@ -377,8 +388,8 @@ watch(() => entryPath.value, () => {
 
         <!-- 詳細タブ: ファイル表示 -->
         <template v-if="activeTab === 'info'">
-          <BrowseDirectory v-if="isTargz || isTar" :bucketName="bucketName" :filePath="filePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" />
-          <BrowseFile v-else :bucketName="bucketName" :filePath="filePath" :token="autoToken ?? undefined" />
+          <BrowseDirectory v-if="isTargz || isTar" :bucketName="bucketName" :filePath="filePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :accessKey="fileAccessKey ?? undefined" />
+          <BrowseFile v-else :bucketName="bucketName" :filePath="filePath" :token="autoToken ?? undefined" :accessKey="fileAccessKey ?? ''" :bucketId="fileBucketId" />
         </template>
 
         <!-- アクセストークンタブ: 公開設定 + トークン管理 -->
@@ -426,8 +437,8 @@ watch(() => entryPath.value, () => {
 
       <!-- ログインなし or ディレクトリ or (非公開 + トークンあり): タブなし -->
       <template v-else>
-        <BrowseDirectory v-if="isDirectory || isTargz || isTar" :bucketName="bucketName" :filePath="filePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" />
-        <BrowseFile v-else-if="!isDirectory" :bucketName="bucketName" :filePath="filePath" :token="autoToken ?? undefined" />
+        <BrowseDirectory v-if="isDirectory || isTargz || isTar" :bucketName="bucketName" :filePath="filePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :accessKey="fileAccessKey ?? undefined" />
+        <BrowseFile v-else-if="!isDirectory" :bucketName="bucketName" :filePath="filePath" :token="autoToken ?? undefined" :accessKey="fileAccessKey ?? ''" :bucketId="fileBucketId" />
       </template>
     </template>
   </div>

@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { Button } from '@vuetify/v0';
 import NirA from '@/components/nira.vue';
-import { authStore, authHeaders } from '@/store/auth';
+import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 
@@ -69,13 +69,9 @@ async function executeDelete(): Promise<void> {
 	deleteTarget.value = null;
 	delete deleteErrors.value[entry.id];
 
-	const res = await fetch(`/d/${entry.bucketName}/${entry.path}`, {
-		method: 'DELETE',
-		headers: authHeaders(),
-	});
-	if (!res.ok) {
-		const err = await res.json().catch(() => ({})) as { error?: string };
-		deleteErrors.value[entry.id] = err.error ?? '削除失敗';
+	const result = await apiPost('/api/files/delete', { bucketId: entry.bucketId, path: entry.path });
+	if (!result.ok) {
+		deleteErrors.value[entry.id] = result.data.error ?? '削除失敗';
 		return;
 	}
 	await load();
