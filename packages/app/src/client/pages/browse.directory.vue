@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
+import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Form } from '@vuetify/v0';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
@@ -28,7 +29,7 @@ interface DisplayEntry {
 	fullPath: string;
 	size?: number;
 	label: string;
-	isPublic?: boolean;
+	visibility?: FileVisibility;
 }
 
 const downloadUrl = computed(() => {
@@ -197,7 +198,7 @@ async function load(): Promise<void> {
 			const data = await res.json() as {
 				entries: Array<{
 					type: 'dir' | 'file'; name: string; path?: string;
-					size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; isPublic?: boolean;
+					size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
 				}>;
 			};
 			entries.value = data.entries.map(e => e.type === 'dir'
@@ -217,7 +218,7 @@ async function load(): Promise<void> {
 					fullPath: e.path ?? e.name,
 					size: e.size,
 					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : (e.mimeType ?? ''),
-					isPublic: e.isPublic,
+					visibility: e.visibility,
 				});
 		}
 	} catch (e) {
@@ -387,8 +388,8 @@ watch(() => props.entryPath, (newEntryPath) => {
                   <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
                 </td>
                 <td v-if="!isArchive && authStore.user" :class="$style.publicCell">
-                  <span v-if="!entry.isDir && entry.isPublic != null" :class="entry.isPublic ? 'badge badge-success' : 'badge badge-muted'">
-                    {{ entry.isPublic ? '公開' : '非公開' }}
+                  <span v-if="!entry.isDir && entry.visibility != null" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
+                    {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
                   </span>
                 </td>
                 <td v-if="!isArchive && authStore.user && bucketId" class="col-actions" :class="$style.actionsCell">

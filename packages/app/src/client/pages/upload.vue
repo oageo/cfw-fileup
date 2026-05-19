@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Progress } from '@vuetify/v0';
 import { authHeaders, authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
@@ -33,7 +34,7 @@ const uploadPrefix = ref('');
 const selectedDir = ref<FileSystemDirectoryHandle | null>(null);
 const selectedDirName = ref('');
 const archiveMode = ref<ArchiveMode>('individual');
-const isPublic = ref(true);
+const visibility = ref<FileVisibility>('public');
 const passphrase = ref('');
 interface UploadProgress {
 	filename: string;
@@ -202,7 +203,7 @@ async function openUpload(path: string): Promise<OpenUploadResult | null> {
 }
 
 async function closeUpload(fileId: string): Promise<boolean> {
-	const result = await apiPost('/api/files/create/close', { fileId, isPublic: isPublic.value, passphrase: passphrase.value || undefined });
+	const result = await apiPost('/api/files/create/close', { fileId, visibility: visibility.value, passphrase: passphrase.value || undefined });
 	if (!result.ok) {
 		uploadError.value = result.data.error;
 		return false;
@@ -681,21 +682,29 @@ onMounted(async () => {
       <div class="upload-section">
         <p class="upload-section-title">オプション</p>
         <div :class="$style.optionsList">
-          <label class="checkbox-label">
-            <input v-model="isPublic" type="checkbox" :class="$style.radioInput">
-            公開ファイル
+          <label class="radio-label">
+            <input v-model="visibility" type="radio" value="public" :class="$style.radioInput">
+            公開
           </label>
-          <div v-if="isPublic" class="form-hint">
+          <label class="radio-label">
+            <input v-model="visibility" type="radio" value="private" :class="$style.radioInput">
+            非公開
+          </label>
+          <label class="radio-label">
+            <input v-model="visibility" type="radio" value="passphrase" :class="$style.radioInput">
+            合言葉で保護
+          </label>
+          <div v-if="visibility === 'public'" class="form-hint">
             一度公開したファイルは非公開に戻せません。
           </div>
-          <div :class="[$style.passphraseGroup, 'form-group']">
-            <label class="form-label" for="upload-passphrase">合言葉 (任意)</label>
+          <div v-if="visibility === 'passphrase'" :class="[$style.passphraseGroup, 'form-group']">
+            <label class="form-label" for="upload-passphrase">合言葉</label>
             <input
               id="upload-passphrase"
               v-model="passphrase"
               class="form-input"
               type="text"
-              placeholder="非公開ファイルのパスワード"
+              placeholder="アクセス用の合言葉"
             >
           </div>
         </div>

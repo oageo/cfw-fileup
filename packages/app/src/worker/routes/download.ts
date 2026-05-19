@@ -65,7 +65,7 @@ app.get('/d/:fileId', async (c) => {
 			mimeType: file.mimeType,
 			isTargz: file.isTargz,
 			isTar: file.isTar,
-			isPublic: file.isPublic,
+			visibility: file.visibility,
 		});
 	}
 
@@ -121,7 +121,7 @@ app.get('/d/:fileId', async (c) => {
 		}
 	}
 
-	if (!file.isPublic) {
+	if (file.visibility !== 'public') {
 		const fileToken = c.req.query('token');
 		if (fileToken) {
 			const fileTokenRecord = await db

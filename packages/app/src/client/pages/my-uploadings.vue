@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import type { FileVisibility } from '../../shared/file-visibility';
 import { Button } from '@vuetify/v0';
 import NirA from '@/components/nira.vue';
 import { authStore } from '@/store/auth';
@@ -13,7 +14,7 @@ interface UploadEntry {
 	path: string;
 	size: number | null;
 	isClosed: boolean;
-	isPublic: boolean;
+	visibility: FileVisibility;
 	uploadExpiresAt: number;
 	isTargz: boolean;
 	isTar: boolean;
@@ -125,8 +126,8 @@ onMounted(load);
                 <td>
                   <span v-if="entry.isClosed" class="badge badge-success">完了</span>
                   <span v-else class="badge badge-warning">アップロード中</span>
-                  <span v-if="entry.isClosed" :class="[entry.isPublic ? 'badge badge-success' : 'badge badge-muted', $style.statusBadge]">
-                    {{ entry.isPublic ? '公開' : '非公開' }}
+                  <span v-if="entry.isClosed" :class="[entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted', $style.statusBadge]">
+                    {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
                   </span>
                 </td>
                 <td class="col-actions">

@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse } from '../api.schemas.js';
+import { fileVisibilitySchema } from '../file-visibility.js';
 
 const UploadingFileResponse = v.pipe(
 	v.object({
@@ -10,7 +11,7 @@ const UploadingFileResponse = v.pipe(
 		path: v.string(),
 		size: v.nullable(v.number()),
 		isClosed: v.boolean(),
-		isPublic: v.boolean(),
+		visibility: fileVisibilitySchema,
 		uploadExpiresAt: v.number(),
 		isTargz: v.boolean(),
 		isTar: v.boolean(),
@@ -28,7 +29,7 @@ const FileListEntry = v.pipe(
 		mimeType: v.optional(v.string()),
 		isTargz: v.optional(v.boolean()),
 		isTar: v.optional(v.boolean()),
-		isPublic: v.optional(v.boolean()),
+		visibility: v.optional(fileVisibilitySchema),
 	}),
 	v.metadata({ ref: 'FileListEntry' }),
 );
@@ -97,7 +98,7 @@ export const filesApiDef = {
 		tags: ['files'],
 		req: v.object({
 			fileId: v.string(),
-			isPublic: v.boolean(),
+			visibility: fileVisibilitySchema,
 			passphrase: v.optional(v.string()),
 		}),
 		res: {
@@ -141,7 +142,7 @@ export const filesApiDef = {
 		req: v.object({
 			bucketName: v.string(),
 			filePath: v.string(),
-			isPublic: v.boolean(),
+			visibility: fileVisibilitySchema,
 			passphrase: v.optional(v.string()),
 		}),
 		res: {
@@ -177,7 +178,7 @@ export const filesApiDef = {
 		req: v.object({}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
-				isPublic: v.boolean(),
+				visibility: fileVisibilitySchema,
 				isTargz: v.boolean(),
 				isTar: v.boolean(),
 				size: v.nullable(v.number()),

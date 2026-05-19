@@ -3,15 +3,16 @@ import { ref, onMounted } from 'vue';
 import { Button, Popover } from '@vuetify/v0';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { apiPost } from '@/utils/api';
+import type { FileVisibility } from '../../shared/file-visibility';
 
 const props = defineProps<{
 	bucketName: string;
 	filePath: string;
-	fileIsPublic: boolean;
+	fileVisibility: FileVisibility;
 	autoTokenId?: string | null;
 }>();
 const emit = defineEmits<{
-	(e: 'update:fileIsPublic', value: boolean): void;
+	(e: 'update:fileVisibility', value: FileVisibility): void;
 	(e: 'tokenDeleted', tokenId: string): void;
 }>();
 
@@ -39,7 +40,7 @@ const deleteDialogOpen = ref(false);
 const deletingId = ref('');
 const deleteError = ref('');
 
-const editIsPublic = ref(props.fileIsPublic);
+const editVisibility = ref<FileVisibility>(props.fileVisibility);
 const editPassphrase = ref('');
 const visibilitySaving = ref(false);
 const visibilityError = ref('');
@@ -152,14 +153,14 @@ async function saveVisibility(): Promise<void> {
 		const result = await apiPost('/api/files/update', {
 			bucketName: props.bucketName,
 			filePath: props.filePath,
-			isPublic: editIsPublic.value,
+			visibility: editVisibility.value,
 			passphrase: editPassphrase.value || undefined,
 		});
 		if (!result.ok) {
 			visibilityError.value = result.data.error;
 			return;
 		}
-		emit('update:fileIsPublic', editIsPublic.value);
+		emit('update:fileVisibility', editVisibility.value);
 	} catch (e) {
 		visibilityError.value = String(e);
 	} finally {
@@ -175,34 +176,40 @@ onMounted(loadTokens);
     <!-- 公開設定 -->
     <div :class="[$style.sectionCard, 'card', 'mb-3']">
       <div :class="[$style.sectionHeading, 'text-muted', 'mb-2']">公開設定</div>
-      <div :class="['text-muted', $style.smallText]">
-        一度公開したファイルは非公開に戻せません。
+      <div v-if="fileVisibility === 'public'" :class="['text-muted', $style.smallText]">
+        公開ファイルの設定は変更できません。
       </div>
-      <template v-if="!fileIsPublic">
+      <template v-else>
         <div class="flex items-center gap-3 mt-2 flex-wrap">
           <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
-            <input type="radio" v-model="editIsPublic" :value="true"> 公開
+            <input type="radio" v-model="editVisibility" value="public"> 公開
           </label>
           <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
-            <input type="radio" v-model="editIsPublic" :value="false"> 非公開
+            <input type="radio" v-model="editVisibility" value="private"> 非公開
+          </label>
+          <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
+            <input type="radio" v-model="editVisibility" value="passphrase"> 合言葉で保護
           </label>
           <input
-            v-if="!editIsPublic"
+            v-if="editVisibility === 'passphrase'"
             v-model="editPassphrase"
             :class="[$style.passphraseInput, 'form-input', 'form-input-mono']"
             type="text"
-            placeholder="パスフレーズ（任意）"
+            placeholder="合言葉"
           >
           <Button.Root class="btn btn-primary" :disabled="visibilitySaving" @click="saveVisibility">
             <Button.Content>保存</Button.Content>
           </Button.Root>
+        </div>
+        <div v-if="editVisibility === 'public'" :class="['text-muted', $style.smallText, 'mt-1']">
+          一度公開したファイルは非公開に戻せません。
         </div>
         <div v-if="visibilityError" :class="[$style.visibilityError, 'mt-1']">{{ visibilityError }}</div>
       </template>
     </div>
 
     <!-- 発行フォーム -->
-    <div v-if="fileIsPublic" :class="[$style.sectionCard, 'card', 'mb-3']">
+    <div v-if="fileVisibility === 'public'" :class="[$style.sectionCard, 'card', 'mb-3']">
       <div :class="['text-muted', $style.smallText]">公開ファイルにはアクセストークンは不要です。</div>
     </div>
     <div v-else :class="[$style.sectionCard, 'card', 'mb-3']">
@@ -260,7 +267,7 @@ onMounted(loadTokens);
     </div>
 
     <!-- トークン一覧 -->
-    <div v-if="!fileIsPublic" :class="[$style.sectionCard, 'card']">
+    <div v-if="fileVisibility !== 'public'" :class="[$style.sectionCard, 'card']">
       <div :class="[$style.sectionHeading, 'text-muted', 'mb-2']">発行済みトークン</div>
       <div v-if="loading" :class="['text-muted', $style.smallText]">読み込み中...</div>
       <div v-else-if="listError" :class="$style.listError">{{ listError }}</div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import type { FileVisibility } from '../../shared/file-visibility';
 import { Form, Input } from '@vuetify/v0';
 import BrowseDirectory from './browse.directory.vue';
 import BrowseFile from './browse.file.vue';
@@ -100,7 +101,7 @@ const fileId = ref<string | null>(null);
 const fileBucketId = ref<string | null>(null);
 const metaLoading = ref(false);
 const metaError = ref('');
-const fileIsPublic = ref(true);
+const fileVisibility = ref<FileVisibility>('public');
 
 const activeTab = ref<'info' | 'tokens'>('info');
 const autoToken = ref<string | null>(null);
@@ -123,10 +124,10 @@ const passphraseTokenExpiryStr = computed(() => {
 });
 
 const needsPassphrase = computed(() =>
-	!isDirectory.value && !authStore.user && !fileIsPublic.value && !autoToken.value && !metaLoading.value && !metaError.value,
+	!isDirectory.value && !authStore.user && fileVisibility.value === 'passphrase' && !autoToken.value && !metaLoading.value && !metaError.value,
 );
 const detailsLoading = computed(() =>
-	metaLoading.value || (activeTab.value === 'info' && authStore.user && !isDirectory.value && !fileIsPublic.value && autoTokenLoading.value),
+	metaLoading.value || (activeTab.value === 'info' && authStore.user && !isDirectory.value && fileVisibility.value !== 'public' && autoTokenLoading.value),
 );
 
 async function fetchInnerMeta(): Promise<void> {
@@ -158,11 +159,11 @@ async function fetchMeta(): Promise<void> {
 			fetch('/api/meta'),
 		]);
 		if (!metaRes.ok) { metaError.value = `取得失敗: ${metaRes.status}`; return; }
-		const data = await metaRes.json() as { isTargz?: boolean; isTar?: boolean; isPublic?: boolean; size?: number; fileId?: string; bucketId?: string };
+		const data = await metaRes.json() as { isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; size?: number; fileId?: string; bucketId?: string };
 		isTargz.value = data.isTargz ?? false;
 		isTar.value = data.isTar ?? false;
 		fileSize.value = data.size ?? null;
-		fileIsPublic.value = data.isPublic ?? true;
+		fileVisibility.value = data.visibility ?? 'public';
 		fileId.value = data.fileId ?? null;
 		fileBucketId.value = data.bucketId ?? null;
 
@@ -172,7 +173,7 @@ async function fetchMeta(): Promise<void> {
 			turnstileSiteKey.value = apiMeta.turnstileSiteKey ?? '';
 		}
 
-		if (!fileIsPublic.value) {
+		if (fileVisibility.value !== 'public') {
 			if (authStore.user) {
 				await issueAutoToken();
 			} else {
@@ -301,12 +302,12 @@ async function issueAutoToken(): Promise<void> {
 
 function infoTabClicked() {
 	activeTab.value = 'info';
-	if (!fileIsPublic.value) issueAutoToken();
+	if (fileVisibility.value !== 'public') issueAutoToken();
 }
 
-function filePublicStateChanged(v: boolean) {
-	fileIsPublic.value = v;
-	if (!v && authStore.user) issueAutoToken();
+function fileVisibilityChanged(v: FileVisibility) {
+	fileVisibility.value = v;
+	if (v !== 'public' && authStore.user) issueAutoToken();
 }
 
 function tokenDeleted(tokenId: string) {
@@ -348,9 +349,9 @@ watch(() => entryPath.value, () => {
       </nav>
       <span
         v-if="!isDirectory && !metaLoading && !metaError"
-        :class="fileIsPublic ? 'badge badge-success' : 'badge badge-muted'"
+        :class="fileVisibility === 'public' ? 'badge badge-success' : fileVisibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'"
       >
-        {{ fileIsPublic ? '公開' : '非公開' }}
+        {{ fileVisibility === 'public' ? '公開' : fileVisibility === 'passphrase' ? '合言葉' : '非公開' }}
       </span>
       <span
         v-if="!isDirectory && !metaLoading && !metaError && (isEntryFile ? innerMeta?.size != null : fileSize != null)"
@@ -397,9 +398,9 @@ watch(() => entryPath.value, () => {
           v-else-if="activeTab === 'tokens'"
           :bucketName="bucketName"
           :filePath="filePath"
-          :fileIsPublic="fileIsPublic"
+          :fileVisibility="fileVisibility"
           :autoTokenId="autoTokenId"
-          @update:fileIsPublic="filePublicStateChanged"
+          @update:fileVisibility="fileVisibilityChanged"
           @tokenDeleted="tokenDeleted"
         />
       </template>

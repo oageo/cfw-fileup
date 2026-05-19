@@ -42,7 +42,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		if (!dirExists) {
 			const hasFileCondition = isOwnerOrAdmin
 				? and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true))
-				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.isPublic, true));
+				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'));
 			const hasFile = await db.select({ path: files.path }).from(files).where(hasFileCondition).get();
 			if (!hasFile) throw new HTTPException(404, { message: 'Directory not found' });
 		}
@@ -50,7 +50,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 
 	const fileCondition = isOwnerOrAdmin
 		? and(eq(files.bucketId, bucket.id), eq(files.isClosed, true))
-		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.isPublic, true));
+		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.visibility, 'public'));
 	const allFiles = await db
 		.select({
 			id: files.id,
@@ -59,13 +59,13 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			mimeType: files.mimeType,
 			isTargz: files.isTargz,
 			isTar: files.isTar,
-			isPublic: files.isPublic,
+			visibility: files.visibility,
 		})
 		.from(files)
 		.where(fileCondition);
 	const allDirs = await db.select({ path: directories.path }).from(directories).where(eq(directories.bucketId, bucket.id));
 
-	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; isPublic?: boolean }> = [];
+	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase' }> = [];
 	const seenDirs = new Set<string>();
 	for (const d of allDirs) {
 		if (!d.path.startsWith(normalizedPath)) continue;
@@ -84,7 +84,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const rest = f.path.slice(normalizedPath.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
-			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, isPublic: f.isPublic });
+			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility });
 		} else {
 			const dirName = rest.slice(0, slashIdx);
 			if (!seenDirs.has(dirName)) {
@@ -134,8 +134,8 @@ app.get('/meta', async (c) => {
 		.get();
 	if (!file) throw new HTTPException(404, { message: 'File not found' });
 
-	const base = { isPublic: file.isPublic, isTargz: file.isTargz, isTar: file.isTar, size: file.size };
-	if (file.isPublic || isOwnerOrAdmin) {
+	const base = { visibility: file.visibility, isTargz: file.isTargz, isTar: file.isTar, size: file.size };
+	if (file.visibility === 'public' || isOwnerOrAdmin) {
 		return c.json({ ...base, fileId: file.id, bucketId: bucket.id });
 	}
 	return c.json(base);
@@ -440,8 +440,8 @@ app.post(
 			.update(files)
 			.set({
 				isClosed: true,
-				isPublic: body.isPublic,
-				passphrase: body.passphrase,
+				visibility: body.visibility,
+				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
 				size: fileSize,
 				mimeType,
 			})
@@ -513,15 +513,15 @@ app.post(
 			.get();
 		if (!file) throw new HTTPException(404, { message: 'File not found' });
 		if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
-		if (file.isPublic && !body.isPublic) {
-			throw new HTTPException(400, { message: 'Public files cannot be made private' });
+		if (file.visibility === 'public' && body.visibility !== 'public') {
+			throw new HTTPException(400, { message: 'Public files cannot change visibility' });
 		}
 
 		await db
 			.update(files)
 			.set({
-				isPublic: body.isPublic,
-				passphrase: body.isPublic ? null : (body.passphrase ?? null),
+				visibility: body.visibility,
+				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
 			})
 			.where(eq(files.id, file.id));
 
@@ -545,7 +545,7 @@ app.post(
 				path: files.path,
 				size: files.size,
 				isClosed: files.isClosed,
-				isPublic: files.isPublic,
+				visibility: files.visibility,
 				uploadExpiresAt: files.uploadExpiresAt,
 				isTargz: files.isTargz,
 				isTar: files.isTar,
