@@ -40,8 +40,8 @@ Gitの競合マーカー（<<<<<<<, =======, >>>>>>>）が含まれるファイ�
 4. **検証とテスト:**
    - 修正したファイルの構文チェック（Linter）を実行する。
    - 関連するユニットテストを実行し、デグレ（先祖返り）が起きていないか確認する。
-   - 1ファイルだけ型チェック: `npx tsc packages/app/src/<path>.ts --noResolve --ignoreConfig`  
-   Cannot find module や implicitly has an 'any' type などは無視。
+   - 1ファイルだけ型チェック: `npx tsc packages/path/to/file.ts --noResolve --ignoreConfig`  
+   `Cannot find module` や `implicitly has an 'any' type` などは無視。
 
 # Git commands
 
