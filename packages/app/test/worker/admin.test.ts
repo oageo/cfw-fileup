@@ -174,7 +174,7 @@ describe('POST /api/admin/delete-file', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(userToken),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const deleteRes = await app.request('/api/admin/delete-file', {

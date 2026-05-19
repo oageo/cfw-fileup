@@ -78,7 +78,7 @@ describe('POST /api/files/create/open', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		// Try to create the same path again
@@ -116,7 +116,7 @@ describe('POST /api/files/ls', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const res = await app.request('/api/files/ls', {
@@ -198,7 +198,7 @@ describe('POST /api/files/create/close', () => {
 		const closeRes = await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 		expect(closeRes.status).toBe(200);
 		const body = await closeRes.json() as Record<string, unknown>;
@@ -218,7 +218,7 @@ describe('POST /api/files/create/close', () => {
 		const closeRes = await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 		expect(closeRes.status).toBe(400);
 	});
@@ -238,7 +238,7 @@ describe('POST /api/files/create/close', () => {
 		const closeRes = await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassphrase' }),
+			body: JSON.stringify({ fileId, visibility: 'passphrase', passphrase: 'mypassphrase' }),
 		}, env);
 		expect(closeRes.status).toBe(200);
 	});
@@ -351,22 +351,22 @@ describe('POST /api/files/update', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const updateRes = await app.request('/api/files/update', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'public.txt', isPublic: false, passphrase: 'secret' }),
+			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'public.txt', visibility: 'passphrase', passphrase: 'secret' }),
 		}, env);
 		expect(updateRes.status).toBe(400);
 		const body = await updateRes.json() as { error: string };
-		expect(body.error).toBe('Public files cannot be made private');
+		expect(body.error).toBe('Public files cannot change visibility');
 
 		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=public.txt', {}, env);
 		expect(metaRes.status).toBe(200);
-		const meta = await metaRes.json() as { isPublic: boolean };
-		expect(meta.isPublic).toBe(true);
+		const meta = await metaRes.json() as { visibility: string };
+		expect(meta.visibility).toBe('public');
 	});
 
 	test('can make a private file public', async () => {
@@ -383,13 +383,13 @@ describe('POST /api/files/update', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'secret' }),
+			body: JSON.stringify({ fileId, visibility: 'passphrase', passphrase: 'secret' }),
 		}, env);
 
 		const updateRes = await app.request('/api/files/update', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'private.txt', isPublic: true }),
+			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'private.txt', visibility: 'public' }),
 		}, env);
 		expect(updateRes.status).toBe(200);
 
@@ -415,7 +415,7 @@ describe('POST /api/files/delete', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId: _, isPublic: true }),
+			body: JSON.stringify({ fileId: _, visibility: 'public' }),
 		}, env);
 
 		const deleteRes = await app.request('/api/files/delete', {
@@ -443,7 +443,7 @@ describe('POST /api/files/delete', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const deleteRes = await app.request('/api/files/delete', {

@@ -33,7 +33,7 @@ async function setupPublicFile() {
 	await app.request('/api/files/create/close', {
 		method: 'POST',
 		headers: authHeaders(token),
-		body: JSON.stringify({ fileId, isPublic: true }),
+		body: JSON.stringify({ fileId, visibility: 'public' }),
 	}, env);
 
 	return { token, bucketId, fileId };
@@ -115,7 +115,7 @@ describe('GET /d/:fileId', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
+			body: JSON.stringify({ fileId, visibility: 'passphrase', passphrase: 'mypassword' }),
 		}, env);
 
 		const res = await app.request(`/d/${fileId}`, {}, env);
@@ -144,7 +144,7 @@ describe('GET /d/:fileId', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
+			body: JSON.stringify({ fileId, visibility: 'passphrase', passphrase: 'mypassword' }),
 		}, env);
 
 		const tokenRes = await app.request('/api/file-tokens/create-by-passphrase', {
@@ -184,7 +184,7 @@ describe('GET /d/:fileId', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
+			body: JSON.stringify({ fileId, visibility: 'passphrase', passphrase: 'mypassword' }),
 		}, env);
 
 		const tokenRes = await app.request('/api/file-tokens/create', {
@@ -233,7 +233,7 @@ describe('GET /d/:fileId', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
+			body: JSON.stringify({ fileId, visibility: 'passphrase', passphrase: 'mypassword' }),
 		}, env);
 
 		const res = await app.request(`/d/${fileId}?passphrase=mypassword`, {}, env);
@@ -296,7 +296,7 @@ describe('GET /d/:fileId?list (tar.gz index)', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		// List all files
@@ -341,7 +341,7 @@ describe('GET /d/:fileId?list (tar.gz index)', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const listRes = await app.request(`/d/${fileId}?list=dir/file1.txt`, {}, env);
@@ -389,7 +389,7 @@ describe('GET /d/:fileId?file= (tar individual file)', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const res = await app.request(`/d/${fileId}?file=hello.txt`, {}, env);
@@ -430,7 +430,7 @@ describe('GET /d/:fileId?file= (tar individual file)', () => {
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: true }),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 
 		const res = await app.request(`/d/${fileId}?file=nonexistent.txt`, {}, env);
