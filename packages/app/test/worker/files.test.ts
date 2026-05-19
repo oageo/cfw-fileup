@@ -35,7 +35,6 @@ describe('POST /api/files/create/open', () => {
 		expect(res.status).toBe(200);
 		const body = await res.json() as Record<string, unknown>;
 		expect(typeof body.fileId).toBe('string');
-		expect(typeof body.accessKey).toBe('string');
 		expect(typeof body.uploadExpiry).toBe('number');
 	});
 
@@ -112,8 +111,8 @@ describe('POST /api/files/ls', () => {
 			headers: authHeaders(token),
 			body: JSON.stringify({ bucketId, path: 'hello.txt' }),
 		}, env);
-		const { fileId, accessKey } = await openRes.json() as { fileId: string; accessKey: string };
-		await env.R2.put(accessKey, 'Hello World');
+		const { fileId } = await openRes.json() as { fileId: string };
+		await env.R2.put(fileId, 'Hello World');
 		await app.request('/api/files/create/close', {
 			method: 'POST',
 			headers: authHeaders(token),
@@ -126,8 +125,8 @@ describe('POST /api/files/ls', () => {
 			body: JSON.stringify({ bucketName: 'test_bucket', path: '' }),
 		}, env);
 		expect(res.status).toBe(200);
-		const body = await res.json() as { entries: Array<{ name: string; accessKey?: string }> };
-		expect(body.entries).toContainEqual(expect.objectContaining({ name: 'hello.txt', accessKey }));
+		const body = await res.json() as { entries: Array<{ name: string; fileId?: string }> };
+		expect(body.entries).toContainEqual(expect.objectContaining({ name: 'hello.txt', fileId }));
 	});
 });
 
@@ -394,8 +393,7 @@ describe('POST /api/files/update', () => {
 		}, env);
 		expect(updateRes.status).toBe(200);
 
-		const accessKey = String((await env.DB.prepare('SELECT access_key FROM files WHERE id = ?').bind(fileId).first<{ access_key: string }>())?.access_key);
-		const downloadRes = await app.request(`/d/${accessKey}`, {}, env);
+		const downloadRes = await app.request(`/d/${fileId}`, {}, env);
 		expect(downloadRes.status).toBe(200);
 		expect(await downloadRes.text()).toBe('Private Content');
 	});

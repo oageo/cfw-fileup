@@ -47,10 +47,10 @@ async function decompressGzipChunk(data: Uint8Array): Promise<Uint8Array> {
 	return result;
 }
 
-app.get('/d/:accessKey', async (c) => {
+app.get('/d/:fileId', async (c) => {
 	const db = getDb(c.env);
-	const accessKey = c.req.param('accessKey');
-	const file = await db.select().from(files).where(eq(files.accessKey, accessKey)).get();
+	const fileId = c.req.param('fileId');
+	const file = await db.select().from(files).where(eq(files.id, fileId)).get();
 	if (!file) throw new HTTPException(404, { message: 'File not found' });
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 	if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });

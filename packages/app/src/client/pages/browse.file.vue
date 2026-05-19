@@ -9,15 +9,15 @@ import ConfirmDialog from '@/components/confirm-dialog.vue';
 const props = defineProps<{
 	bucketName: string;
 	filePath: string;
-	accessKey: string;
+	fileId: string;
 	bucketId: string | null;
 	token?: string;
 }>();
 
 
 const downloadUrl = computed(() => {
-	if (!props.accessKey) return '';
-	const base = `/d/${props.accessKey}`;
+	if (!props.fileId) return '';
+	const base = `/d/${props.fileId}`;
 	return props.token ? `${base}?token=${props.token}` : base;
 });
 const isGz = computed(() => {
@@ -25,8 +25,8 @@ const isGz = computed(() => {
 	return lower.endsWith('.gz') && !lower.endsWith('.tar.gz');
 });
 const decompressUrl = computed(() => {
-	if (!props.accessKey) return '';
-	const base = `/d/${props.accessKey}?decompress`;
+	if (!props.fileId) return '';
+	const base = `/d/${props.fileId}?decompress`;
 	return props.token ? `${base}&token=${props.token}` : base;
 });
 const isImage = computed(() => {

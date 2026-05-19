@@ -14,7 +14,7 @@ const props = defineProps<{
 	isTargz: boolean;
 	isTar: boolean;
 	entryPath?: string;
-	accessKey?: string;
+	fileId?: string;
 	token?: string;
 }>();
 
@@ -32,13 +32,13 @@ interface DisplayEntry {
 }
 
 const downloadUrl = computed(() => {
-	if (!props.accessKey) return '';
-	const base = `/d/${props.accessKey}`;
+	if (!props.fileId) return '';
+	const base = `/d/${props.fileId}`;
 	return props.token ? `${base}?token=${props.token}` : base;
 });
 const decompressUrl = computed(() => {
-	if (!props.accessKey) return '';
-	const base = `/d/${props.accessKey}?decompress`;
+	if (!props.fileId) return '';
+	const base = `/d/${props.fileId}?decompress`;
 	return props.token ? `${base}&token=${props.token}` : base;
 });
 

@@ -39,8 +39,7 @@ const deleteDialogOpen = ref(false);
 const deletingId = ref('');
 const deleteError = ref('');
 
-const visibilityEditing = ref(false);
-const editIsPublic = ref(true);
+const editIsPublic = ref(props.fileIsPublic);
 const editPassphrase = ref('');
 const visibilitySaving = ref(false);
 const visibilityError = ref('');
@@ -146,13 +145,6 @@ function isExpired(expiresAt: number | null): boolean {
 	return expiresAt < Date.now();
 }
 
-function startEditVisibility(): void {
-	editIsPublic.value = props.fileIsPublic;
-	editPassphrase.value = '';
-	visibilityError.value = '';
-	visibilityEditing.value = true;
-}
-
 async function saveVisibility(): Promise<void> {
 	visibilitySaving.value = true;
 	visibilityError.value = '';
@@ -168,7 +160,6 @@ async function saveVisibility(): Promise<void> {
 			return;
 		}
 		emit('update:fileIsPublic', editIsPublic.value);
-		visibilityEditing.value = false;
 	} catch (e) {
 		visibilityError.value = String(e);
 	} finally {
@@ -183,24 +174,16 @@ onMounted(loadTokens);
   <div>
     <!-- 公開設定 -->
     <div :class="[$style.sectionCard, 'card', 'mb-3']">
-      <div class="flex items-center gap-3 flex-wrap">
-        <span :class="['text-muted', $style.smallText]">公開設定</span>
-        <span :class="fileIsPublic ? 'badge badge-success' : 'badge badge-muted'">
-          {{ fileIsPublic ? '公開' : '非公開' }}
-        </span>
-        <Button.Root v-if="!fileIsPublic && !visibilityEditing" class="btn btn-secondary" @click="startEditVisibility">
-          <Button.Content>変更</Button.Content>
-        </Button.Root>
-      </div>
-      <div v-if="fileIsPublic" :class="['text-muted', $style.smallText, 'mt-1']">
+      <div :class="[$style.sectionHeading, 'text-muted', 'mb-2']">公開設定</div>
+      <div :class="['text-muted', $style.smallText]">
         一度公開したファイルは非公開に戻せません。
       </div>
-      <template v-if="visibilityEditing">
+      <template v-if="!fileIsPublic">
         <div class="flex items-center gap-3 mt-2 flex-wrap">
           <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
             <input type="radio" v-model="editIsPublic" :value="true"> 公開
           </label>
-          <label v-if="!fileIsPublic" :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
+          <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
             <input type="radio" v-model="editIsPublic" :value="false"> 非公開
           </label>
           <input
@@ -212,9 +195,6 @@ onMounted(loadTokens);
           >
           <Button.Root class="btn btn-primary" :disabled="visibilitySaving" @click="saveVisibility">
             <Button.Content>保存</Button.Content>
-          </Button.Root>
-          <Button.Root class="btn btn-secondary" :disabled="visibilitySaving" @click="visibilityEditing = false">
-            <Button.Content>キャンセル</Button.Content>
           </Button.Root>
         </div>
         <div v-if="visibilityError" :class="[$style.visibilityError, 'mt-1']">{{ visibilityError }}</div>

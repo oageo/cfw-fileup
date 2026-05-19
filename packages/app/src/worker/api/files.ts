@@ -10,7 +10,6 @@ import { authMiddleware } from '../middleware/auth';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
-import { generateToken } from '../utils/crypto';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -54,8 +53,8 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.isPublic, true));
 	const allFiles = await db
 		.select({
+			id: files.id,
 			path: files.path,
-			accessKey: files.accessKey,
 			size: files.size,
 			mimeType: files.mimeType,
 			isTargz: files.isTargz,
@@ -66,7 +65,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		.where(fileCondition);
 	const allDirs = await db.select({ path: directories.path }).from(directories).where(eq(directories.bucketId, bucket.id));
 
-	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; accessKey?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; isPublic?: boolean }> = [];
+	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; isPublic?: boolean }> = [];
 	const seenDirs = new Set<string>();
 	for (const d of allDirs) {
 		if (!d.path.startsWith(normalizedPath)) continue;
@@ -85,7 +84,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const rest = f.path.slice(normalizedPath.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
-			entries.push({ type: 'file', name: rest, path: f.path, accessKey: f.accessKey, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, isPublic: f.isPublic });
+			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, isPublic: f.isPublic });
 		} else {
 			const dirName = rest.slice(0, slashIdx);
 			if (!seenDirs.has(dirName)) {
@@ -137,7 +136,7 @@ app.get('/meta', async (c) => {
 
 	const base = { isPublic: file.isPublic, isTargz: file.isTargz, isTar: file.isTar, size: file.size };
 	if (file.isPublic || isOwnerOrAdmin) {
-		return c.json({ ...base, accessKey: file.accessKey, bucketId: bucket.id });
+		return c.json({ ...base, fileId: file.id, bucketId: bucket.id });
 	}
 	return c.json(base);
 });
@@ -225,8 +224,7 @@ app.post(
 		}
 
 		const fileId = genEaidx(Date.now());
-		const accessKey = generateToken();
-		const r2Key = accessKey;
+		const r2Key = fileId;
 		const uploadExpiry = Date.now() + 24 * 60 * 60 * 1000;
 
 		await db.insert(files).values({
@@ -234,13 +232,12 @@ app.post(
 			bucketId: bucket.id,
 			userId: user.id,
 			path: body.path,
-			accessKey,
 			r2Key,
 			uploadExpiresAt: uploadExpiry,
 			partSize,
 		});
 
-		return c.json({ fileId, accessKey, uploadExpiry, partSize }, 200);
+		return c.json({ fileId, uploadExpiry, partSize }, 200);
 	}, getResponseDefWithAuth('/api/files/create/open')),
 );
 
