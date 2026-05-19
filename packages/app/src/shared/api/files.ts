@@ -116,7 +116,7 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fields or file not closed)', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: { description: 'Bad request (missing fields, file not closed, or public file cannot be made private)', content: { 'application/json': { vSchema: ErrorResponse } } },
 			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
 		},
 	},

@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
+import { parseEaidx } from '../../src/shared/eaid-x';
 import { env, app, setupDb, clearDb, signup, authHeaders } from './helpers';
 
 beforeAll(async () => {
@@ -40,12 +41,50 @@ async function setupPublicFile() {
 
 describe('GET /d/:bucketName/*', () => {
 	test('downloads a public file', async () => {
-		await setupPublicFile();
+		const { fileId } = await setupPublicFile();
 
 		const res = await app.request('/d/test_bucket/hello.txt', {}, env);
 		expect(res.status).toBe(200);
+		expect(res.headers.get('Cache-Control')).toBe('public, max-age=315360000, immutable');
+		expect(res.headers.get('Last-Modified')).toBe(parseEaidx(fileId).date.toUTCString());
 		const text = await res.text();
 		expect(text).toBe('Hello World');
+	});
+
+	test('serves a public file from Cache API after first download', async () => {
+		const { bucketId, fileId } = await setupPublicFile();
+
+		const firstRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		expect(firstRes.status).toBe(200);
+		expect(await firstRes.text()).toBe('Hello World');
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await env.R2.delete(`${bucketId}/hello.txt`);
+
+		const cachedRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		expect(cachedRes.status).toBe(200);
+		expect(cachedRes.headers.get('Cache-Control')).toBe('public, max-age=315360000, immutable');
+		expect(cachedRes.headers.get('Last-Modified')).toBe(parseEaidx(fileId).date.toUTCString());
+		expect(await cachedRes.text()).toBe('Hello World');
+	});
+
+	test('deleted file does not return stale public download cache', async () => {
+		const { token } = await setupPublicFile();
+
+		const firstRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		expect(firstRes.status).toBe(200);
+		expect(await firstRes.text()).toBe('Hello World');
+
+		const deleteRes = await app.request('/d/test_bucket/hello.txt', {
+			method: 'DELETE',
+			headers: authHeaders(token),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		const afterDeleteRes = await app.request('/d/test_bucket/hello.txt', {}, env);
+		expect(afterDeleteRes.status).toBe(404);
 	});
 
 	test('nonexistent bucket returns 404', async () => {
@@ -60,7 +99,7 @@ describe('GET /d/:bucketName/*', () => {
 		expect(res.status).toBe(404);
 	});
 
-	test('private file without passphrase returns 403', async () => {
+	test('private file without token returns 403', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
 
@@ -89,7 +128,96 @@ describe('GET /d/:bucketName/*', () => {
 		expect(res.status).toBe(403);
 	});
 
-	test('private file with correct passphrase returns content', async () => {
+	test('private file with file access token returns content', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'secret_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'secret.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(`${bucketId}/secret.txt`, 'Secret Content');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
+		}, env);
+
+		const tokenRes = await app.request('/api/file-tokens/create-by-passphrase', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ bucketName: 'secret_bucket', filePath: 'secret.txt', passphrase: 'mypassword' }),
+		}, env);
+		expect(tokenRes.status).toBe(200);
+		const { token: fileToken, expiresAt } = await tokenRes.json() as { token: string; expiresAt: number };
+
+		const res = await app.request(`/d/secret_bucket/secret.txt?token=${fileToken}`, {}, env);
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Expires')).toBe(new Date(expiresAt).toUTCString());
+		expect(res.headers.get('Cache-Control')).toBeNull();
+		expect(await res.text()).toBe('Secret Content');
+	});
+
+	test('expired file access token response is cached permanently for that token', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'secret_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'secret.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(`${bucketId}/secret.txt`, 'Secret Content');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
+		}, env);
+
+		const tokenRes = await app.request('/api/file-tokens/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'secret_bucket', filePath: 'secret.txt', expiresIn: null }),
+		}, env);
+		expect(tokenRes.status).toBe(200);
+		const { token: fileToken, id: tokenId } = await tokenRes.json() as { token: string; id: string };
+
+		await env.DB.prepare('UPDATE file_access_tokens SET expires_at = ? WHERE id = ?').bind(Date.now() - 1000, tokenId).run();
+
+		const expiredRes = await app.request(`/d/secret_bucket/secret.txt?token=${fileToken}`, {}, env);
+		expect(expiredRes.status).toBe(403);
+		expect(expiredRes.headers.get('Cache-Control')).toBeNull();
+		expect(await expiredRes.text()).toBe('Forbidden');
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await env.DB.prepare('UPDATE file_access_tokens SET expires_at = ? WHERE id = ?').bind(Date.now() + 60_000, tokenId).run();
+
+		const cachedExpiredRes = await app.request(`/d/secret_bucket/secret.txt?token=${fileToken}`, {}, env);
+		expect(cachedExpiredRes.status).toBe(403);
+		expect(cachedExpiredRes.headers.get('Cache-Control')).toBeNull();
+		expect(await cachedExpiredRes.text()).toBe('Forbidden');
+	});
+
+	test('private file with passphrase query returns 403', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
 
@@ -115,36 +243,6 @@ describe('GET /d/:bucketName/*', () => {
 		}, env);
 
 		const res = await app.request('/d/secret_bucket/secret.txt?passphrase=mypassword', {}, env);
-		expect(res.status).toBe(200);
-		expect(await res.text()).toBe('Secret Content');
-	});
-
-	test('private file with wrong passphrase returns 403', async () => {
-		const { data } = await signup('user1');
-		const token = String(data.token);
-
-		const bucketRes = await app.request('/api/buckets/create', {
-			method: 'POST',
-			headers: authHeaders(token),
-			body: JSON.stringify({ bucketName: 'secret_bucket' }),
-		}, env);
-		const { bucketId } = await bucketRes.json() as { bucketId: string };
-
-		const openRes = await app.request('/api/files/create/open', {
-			method: 'POST',
-			headers: authHeaders(token),
-			body: JSON.stringify({ bucketId, path: 'secret.txt' }),
-		}, env);
-		const { fileId } = await openRes.json() as { fileId: string };
-
-		await env.R2.put(`${bucketId}/secret.txt`, 'Secret Content');
-		await app.request('/api/files/create/close', {
-			method: 'POST',
-			headers: authHeaders(token),
-			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'mypassword' }),
-		}, env);
-
-		const res = await app.request('/d/secret_bucket/secret.txt?passphrase=wrongpassword', {}, env);
 		expect(res.status).toBe(403);
 	});
 });

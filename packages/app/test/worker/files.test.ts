@@ -309,6 +309,69 @@ describe('POST /api/files/create/status', () => {
 	});
 });
 
+describe('POST /api/files/update', () => {
+	test('cannot make a public file private', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'public.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(`${bucketId}/public.txt`, 'Public Content');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, isPublic: true }),
+		}, env);
+
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'public.txt', isPublic: false, passphrase: 'secret' }),
+		}, env);
+		expect(updateRes.status).toBe(400);
+		const body = await updateRes.json() as { error: string };
+		expect(body.error).toBe('Public files cannot be made private');
+
+		const metaRes = await app.request('/d/test_bucket/public.txt?meta', {}, env);
+		expect(metaRes.status).toBe(200);
+		const meta = await metaRes.json() as { isPublic: boolean };
+		expect(meta.isPublic).toBe(true);
+	});
+
+	test('can make a private file public', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'private.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(`${bucketId}/private.txt`, 'Private Content');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, isPublic: false, passphrase: 'secret' }),
+		}, env);
+
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'private.txt', isPublic: true }),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const downloadRes = await app.request('/d/test_bucket/private.txt', {}, env);
+		expect(downloadRes.status).toBe(200);
+		expect(await downloadRes.text()).toBe('Private Content');
+	});
+});
+
 describe('POST /api/files/delete', () => {
 	test('owner can delete own file', async () => {
 		const { token, bucketId } = await setupUserAndBucket();

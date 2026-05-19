@@ -6,17 +6,10 @@ import { buckets, files, targzFiles, tarFiles, directories, tokens, users, fileA
 import { getDb } from '../utils/db';
 import { abortUpload } from '../utils/abort-upload';
 import { authMiddleware } from '../middleware/auth';
+import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 
 const app = new Hono<{ Bindings: Env }>();
-
-function getContentDisposition(filename: string, acceptsGzip: boolean): string {
-	const displayName = acceptsGzip ? filename : `${filename}.gz`;
-	return `attachment; filename="${displayName}"`;
-}
-
-function getETag(baseETag: string, acceptsGzip: boolean): string {
-	return acceptsGzip ? baseETag : `${baseETag}-gz`;
-}
+const downloadCacheName = 'download';
 
 async function decompressGzipChunk(data: Uint8Array): Promise<Uint8Array> {
 	const decompressor = new DecompressionStream('gzip');
@@ -60,8 +53,62 @@ app.get('/d/:bucketName/*', async (c) => {
 	const db = getDb(c.env);
 	const bucketName = c.req.param('bucketName');
 	const filePath = c.req.path.replace(`/d/${bucketName}/`, '');
-	const acceptEncoding = c.req.header('Accept-Encoding') ?? '';
-	const acceptsGzip = acceptEncoding.includes('gzip');
+
+	async function matchDownloadCache(
+		download: DownloadContext,
+		mode: Parameters<DownloadContext['getCacheRequest']>[0],
+		entryPath?: string,
+	): Promise<Response | null> {
+		const cacheRequest = download.getCacheRequest(mode, entryPath);
+		if (cacheRequest === null) return null;
+		const cache = await caches.open(downloadCacheName);
+		const cached = await cache.match(cacheRequest);
+		if (cached === undefined) return null;
+
+		const expires = cached.headers.get('Expires');
+		if (expires !== null) {
+			const expiresAt = Date.parse(expires);
+			if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
+				await cache.delete(cacheRequest);
+				return null;
+			}
+		}
+
+		return download.stripInternalCacheHeaders(cached);
+	}
+
+	function putDownloadCache(
+		download: DownloadContext,
+		response: Response,
+		mode: Parameters<DownloadContext['getCacheRequest']>[0],
+		entryPath?: string,
+	): void {
+		const cacheRequest = download.getCacheRequest(mode, entryPath);
+		if (cacheRequest === null) return;
+		const putPromise = (async () => {
+			const cache = await caches.open(downloadCacheName);
+			const cacheResponse = response.clone();
+			const headers = new Headers(cacheResponse.headers);
+			// Workers Cache API only returns fresh entries. Add Cache-Control to the stored
+			// clone, then strip it again on cache hits so token URLs do not advertise caching.
+			headers.set('Cache-Control', download.getInternalCacheControl());
+			headers.set(downloadCacheInternalHeaders.status, String(cacheResponse.status));
+			headers.set(downloadCacheInternalHeaders.statusText, cacheResponse.statusText);
+			await cache.put(cacheRequest, new Response(cacheResponse.body, {
+				status: 200,
+				statusText: 'OK',
+				headers,
+			}));
+		})();
+
+		try {
+			c.executionCtx.waitUntil(putPromise);
+		} catch {
+			void putPromise.catch((error: unknown) => {
+				console.error('Failed to put download response into cache:', error);
+			});
+		}
+	}
 
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
 
@@ -184,7 +231,9 @@ app.get('/d/:bucketName/*', async (c) => {
 		throw new HTTPException(404, { message: 'File not found' });
 	}
 
-	if (c.req.query('meta') !== undefined) {
+	const download = new DownloadContext(file, c.req.raw);
+
+	if (download.isMetaMode) {
 		return c.json({
 			type: 'file',
 			path: file.path,
@@ -197,20 +246,30 @@ app.get('/d/:bucketName/*', async (c) => {
 	}
 
 	if (!file.isPublic) {
-		const passphrase = c.req.query('passphrase');
 		const fileToken = c.req.query('token');
 
-		if (passphrase && passphrase === file.passphrase) {
-			// passphrase OK
-		} else if (fileToken) {
+		if (fileToken) {
 			const fileTokenRecord = await db
 				.select()
 				.from(fileAccessTokens)
 				.where(and(eq(fileAccessTokens.token, fileToken), eq(fileAccessTokens.fileId, file.id)))
 				.get();
-			if (!fileTokenRecord || (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now())) {
+			if (!fileTokenRecord) {
 				throw new HTTPException(403, { message: 'Forbidden' });
 			}
+			if (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now()) {
+				download.useExpiredFileToken(fileTokenRecord);
+				const cacheTarget = download.cacheTarget;
+				if (cacheTarget !== null) {
+					const cached = await matchDownloadCache(download, cacheTarget.mode, cacheTarget.entryPath);
+					if (cached !== null) return cached;
+				}
+
+				const response = new Response('Forbidden', { status: 403 });
+				if (cacheTarget !== null) putDownloadCache(download, response, cacheTarget.mode, cacheTarget.entryPath);
+				return response;
+			}
+			download.useFileToken(fileTokenRecord);
 		} else {
 			const authorization = c.req.header('Authorization');
 			if (!authorization?.startsWith('Bearer ')) {
@@ -229,7 +288,13 @@ app.get('/d/:bucketName/*', async (c) => {
 		}
 	}
 
-	if ((file.isTargz || file.isTar) && c.req.query('list') !== undefined) {
+	const cacheTarget = download.cacheTarget;
+	if (cacheTarget !== null) {
+		const cached = await matchDownloadCache(download, cacheTarget.mode, cacheTarget.entryPath);
+		if (cached !== null) return cached;
+	}
+
+	if ((file.isTargz || file.isTar) && download.isListMode) {
 		const listPath = c.req.query('list');
 		if (file.isTargz) {
 			const index = await db.select().from(targzFiles).where(
@@ -248,8 +313,8 @@ app.get('/d/:bucketName/*', async (c) => {
 		}
 	}
 
-	const fileQuery = c.req.query('file');
-	if (file.isTar && fileQuery && typeof fileQuery === 'string') {
+	const fileQuery = download.fileQuery;
+	if (download.isTarFileEntry && fileQuery !== null) {
 		const indexEntry = await db
 			.select()
 			.from(tarFiles)
@@ -267,16 +332,18 @@ app.get('/d/:bucketName/*', async (c) => {
 			throw new HTTPException(500, { message: 'Failed to retrieve file' });
 		}
 
-		return new Response(rangeData.body, {
-			headers: {
+		const response = new Response(rangeData.body, {
+			headers: download.withDownloadHeaders({
 				'Content-Type': indexEntry.mimeType,
 				'Content-Disposition': `attachment; filename="${indexEntry.path.split('/').pop()}"`,
 				'Content-Length': String(indexEntry.size),
-			},
+			}),
 		});
+		putDownloadCache(download, response, 'tar-entry', fileQuery);
+		return response;
 	}
 
-	if (file.isTargz && fileQuery && typeof fileQuery === 'string') {
+	if (download.isTargzFileEntry && fileQuery !== null) {
 		const indexEntry = await db
 			.select()
 			.from(targzFiles)
@@ -358,14 +425,16 @@ app.get('/d/:bucketName/*', async (c) => {
 				},
 			});
 
-			return new Response(combinedStream, {
-				headers: {
+			const response = new Response(combinedStream, {
+				headers: download.withDownloadHeaders({
 					'Content-Type': indexEntry.mimeType,
 					'Content-Encoding': 'gzip',
-					'Content-Disposition': getContentDisposition(indexEntry.path, acceptsGzip),
-					'ETag': getETag(`"${file.id}-${indexEntry.path}"`, acceptsGzip),
-				},
+					'Content-Disposition': download.getContentDisposition(indexEntry.path),
+					'ETag': download.getETag(indexEntry.path),
+				}),
 			});
+			putDownloadCache(download, response, 'targz-entry', fileQuery);
+			return response;
 		} catch (error) {
 			console.error('Failed to fetch from R2:', error);
 			throw new HTTPException(500, { message: 'Internal server error' });
@@ -378,12 +447,14 @@ app.get('/d/:bucketName/*', async (c) => {
 		throw new HTTPException(404, { message: 'File not found in storage' });
 	}
 
-	return new Response(r2Object.body, {
-		headers: {
+	const response = new Response(r2Object.body, {
+		headers: download.withDownloadHeaders({
 			'Content-Type': file.mimeType ?? 'application/octet-stream',
 			'Content-Length': String(file.size ?? 0),
-		},
+		}),
 	});
+	putDownloadCache(download, response, 'plain');
+	return response;
 });
 
 app.delete('/d/:bucketName/*', authMiddleware, async (c) => {

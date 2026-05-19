@@ -677,6 +677,9 @@ onMounted(async () => {
             <input v-model="isPublic" type="checkbox" :class="$style.radioInput">
             公開ファイル
           </label>
+          <div v-if="isPublic" class="form-hint">
+            一度公開したファイルは非公開に戻せません。
+          </div>
           <div :class="[$style.passphraseGroup, 'form-group']">
             <label class="form-label" for="upload-passphrase">合言葉 (任意)</label>
             <input

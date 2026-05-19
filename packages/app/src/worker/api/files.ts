@@ -362,6 +362,9 @@ app.post(
 			.get();
 		if (!file) throw new HTTPException(404, { message: 'File not found' });
 		if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
+		if (file.isPublic && !body.isPublic) {
+			throw new HTTPException(400, { message: 'Public files cannot be made private' });
+		}
 
 		await db
 			.update(files)

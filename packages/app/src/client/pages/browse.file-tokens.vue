@@ -188,16 +188,19 @@ onMounted(loadTokens);
         <span :class="fileIsPublic ? 'badge badge-success' : 'badge badge-muted'">
           {{ fileIsPublic ? '公開' : '非公開' }}
         </span>
-        <Button.Root v-if="!visibilityEditing" class="btn btn-secondary" @click="startEditVisibility">
+        <Button.Root v-if="!fileIsPublic && !visibilityEditing" class="btn btn-secondary" @click="startEditVisibility">
           <Button.Content>変更</Button.Content>
         </Button.Root>
+      </div>
+      <div v-if="fileIsPublic" :class="['text-muted', $style.smallText, 'mt-1']">
+        一度公開したファイルは非公開に戻せません。
       </div>
       <template v-if="visibilityEditing">
         <div class="flex items-center gap-3 mt-2 flex-wrap">
           <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
             <input type="radio" v-model="editIsPublic" :value="true"> 公開
           </label>
-          <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
+          <label v-if="!fileIsPublic" :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
             <input type="radio" v-model="editIsPublic" :value="false"> 非公開
           </label>
           <input
