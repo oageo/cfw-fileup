@@ -407,7 +407,7 @@ async function executeUpload(id: string, request: UploadJobRequest): Promise<str
 		for (let i = 0; i < files.length; i++) {
 			const entry = files[i];
 			const path = request.mode === 'gz' ? `${request.prefix}${entry.path}.gz` : `${request.prefix}${entry.path}`;
-			updateJob(id, { filename: entry.path, fileIndex: i + 1, totalFiles: files.length, uploadedBytes: cumulativeBytes });
+			updateJob(id, { filename: entry.path, fileIndex: i, totalFiles: files.length, uploadedBytes: cumulativeBytes });
 			if (request.mode === 'gz') {
 				await uploadStream(entry.file.stream().pipeThrough(new CompressionStream('gzip')), path, request, (n) => {
 					updateJob(id, { uploadedBytes: cumulativeBytes + n });
@@ -419,7 +419,7 @@ async function executeUpload(id: string, request: UploadJobRequest): Promise<str
 			}
 			cumulativeBytes += entry.file.size;
 			completedPath = path;
-			updateJob(id, { uploadedBytes: cumulativeBytes });
+			updateJob(id, { fileIndex: i + 1, uploadedBytes: cumulativeBytes });
 		}
 		return completedPath;
 	}
@@ -428,7 +428,7 @@ async function executeUpload(id: string, request: UploadJobRequest): Promise<str
 	if (request.mode === 'tar') {
 		const archivePath = `${request.prefix}${request.archiveBaseName}.tar`;
 		const archiver = await TarArchiver.createFromEntries(files, (p: ArchiveProgress) => {
-			updateJob(id, { filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles });
+			updateJob(id, { filename: p.currentFile, fileIndex: p.processedFiles, totalFiles: p.totalFiles });
 		});
 		await uploadArchiveStream(archiver.stream, archiver.index, archivePath, '/api/files/create/tar-index', request, (n) => {
 			updateJob(id, { uploadedBytes: n });
@@ -438,7 +438,7 @@ async function executeUpload(id: string, request: UploadJobRequest): Promise<str
 
 	const archivePath = `${request.prefix}${request.archiveBaseName}.tar.gz`;
 	const archiver = await BgzfTarArchiver.createFromEntries(files, (p: ArchiveProgress) => {
-		updateJob(id, { filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles });
+		updateJob(id, { filename: p.currentFile, fileIndex: p.processedFiles, totalFiles: p.totalFiles });
 	});
 	await uploadArchiveStream(archiver.stream, archiver.index, archivePath, '/api/files/create/targz-index', request, (n) => {
 		updateJob(id, { uploadedBytes: n });

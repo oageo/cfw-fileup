@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
+import { EllipsisVertical, File, Folder, FolderOpen, Pencil } from '@lucide/vue';
 import { authHeaders, authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
@@ -816,7 +817,7 @@ onMounted(async () => {
           </template>
           <template v-else>
             <Button.Root class="btn btn-primary" @click="destinationDialogOpen = true">
-              <Button.Content>アップロード先を選択</Button.Content>
+              <Button.Content><FolderOpen :size="16" :stroke-width="2" />アップロード先を選択</Button.Content>
             </Button.Root>
           </template>
         </div>
@@ -930,12 +931,12 @@ onMounted(async () => {
                   :class="$style.fileSelectButton"
                   @click="selectEntry(item.entry)"
                 >
-                  <span :class="$style.fileIcon">[F]</span>
+                  <File :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
                   <span :class="$style.fileName">{{ item.entry.name }}</span>
                   <span :class="$style.fileSize">{{ formatBytes(item.entry.size) }}</span>
                 </button>
                 <template v-else>
-                  <span :class="$style.fileIcon">[D]</span>
+                  <Folder :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
                   <span :class="$style.fileName">{{ item.name }}</span>
                 </template>
                 <Popover.Root v-if="item.type === 'file'">
@@ -943,9 +944,9 @@ onMounted(async () => {
                     :class="['btn', 'btn-ghost', 'btn-icon', $style.fileMenuButton]"
                     aria-label="ファイル操作メニュー"
                     @click.stop
-                  >
-                    …
-                  </Popover.Activator>
+	                  >
+	                    <EllipsisVertical :size="16" :stroke-width="2" />
+	                  </Popover.Activator>
                   <Popover.Content class="action-menu">
                     <div class="action-menu-inner">
                       <Button.Root class="btn btn-ghost-danger w-full" @click="removeSelectedEntry(item.entry.path)">
@@ -1267,7 +1268,7 @@ onMounted(async () => {
 
 .fileIcon {
   color: var(--color-text-muted);
-  font-size: 0.75rem;
+  flex: 0 0 auto;
 }
 
 .fileName {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { Dialog } from '@vuetify/v0';
+import { ArrowLeft, ArrowRight, Check, Folder, FolderPlus, X } from '@lucide/vue';
 import { apiPost } from '../utils/api';
 
 const props = defineProps<{
@@ -176,7 +177,9 @@ watch(() => props.open, async (val) => {
       <div :class="$style.inner">
         <div :class="$style.header">
           <Dialog.Title :class="$style.title">アップロード先を選択</Dialog.Title>
-          <Dialog.Close class="btn btn-ghost" @click="close">✕</Dialog.Close>
+          <Dialog.Close class="btn btn-ghost btn-icon" aria-label="閉じる" @click="close">
+            <X :size="16" :stroke-width="2" />
+          </Dialog.Close>
         </div>
 
         <!-- Step 1: バケット選択 -->
@@ -220,7 +223,7 @@ watch(() => props.open, async (val) => {
               :disabled="!selectedBucketId"
               @click="goToDirectory"
             >
-              次へ →
+              次へ <ArrowRight :size="16" :stroke-width="2" />
             </button>
           </div>
         </template>
@@ -236,7 +239,7 @@ watch(() => props.open, async (val) => {
               :class="[$style.directoryItem, $style.upItem]"
               @click="goUp"
             >
-              ← 上へ
+              <ArrowLeft :size="16" :stroke-width="2" />上へ
             </button>
             <button
               v-for="entry in dirEntries"
@@ -244,7 +247,7 @@ watch(() => props.open, async (val) => {
               :class="$style.directoryItem"
               @click="enterDir(entry.name)"
             >
-              📁 {{ entry.name }}
+              <Folder :size="16" :stroke-width="2" />{{ entry.name }}
             </button>
             <div v-if="dirEntries.length === 0 && currentPath === ''" :class="$style.empty">
               ディレクトリがありません
@@ -258,7 +261,7 @@ watch(() => props.open, async (val) => {
               class="btn btn-secondary btn-sm"
               @click="showNewDirInput = true"
             >
-              + 新規フォルダ作成
+              <FolderPlus :size="16" :stroke-width="2" />新規フォルダ作成
             </button>
             <div v-else :class="$style.mkdirRow">
               <input
@@ -273,7 +276,7 @@ watch(() => props.open, async (val) => {
                 :disabled="!newDirName.trim()"
                 @click="createDirectory"
               >
-                作成
+                <Check :size="16" :stroke-width="2" />作成
               </button>
               <button class="btn btn-ghost btn-sm" @click="showNewDirInput = false; newDirName = ''">
                 キャンセル
@@ -291,8 +294,8 @@ watch(() => props.open, async (val) => {
           </p>
 
           <div :class="$style.actions">
-            <button class="btn btn-secondary" @click="step = 'bucket'">← バケット選択へ</button>
-            <button class="btn btn-primary" @click="confirmSelect">ここを選択</button>
+            <button class="btn btn-secondary" @click="step = 'bucket'"><ArrowLeft :size="16" :stroke-width="2" />バケット選択へ</button>
+            <button class="btn btn-primary" @click="confirmSelect"><Check :size="16" :stroke-width="2" />ここを選択</button>
           </div>
         </template>
       </div>

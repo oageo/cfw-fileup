@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, defineComponent, h, watch } from 'vue';
 import { Button, Popover, useTheme } from '@vuetify/v0';
-import { CircleFadingArrowUp, Upload } from '@lucide/vue';
+import { CircleFadingArrowUp, Moon, Sun, Upload } from '@lucide/vue';
 import { mainRouter } from './router';
 import { fetchCurrentUser, authStore, clearAuth } from './store/auth';
 import { navigateFn } from './navigate';
@@ -92,7 +92,10 @@ function toggleTheme(): void {
         <div class="app-nav-spacer" />
 
         <Button.Root class="btn btn-ghost btn-icon" :aria-label="isDark ? 'ライトモードに切替' : 'ダークモードに切替'" @click="toggleTheme">
-          <Button.Content>{{ isDark ? '☀️' : '🌙' }}</Button.Content>
+          <Button.Content>
+            <Sun v-if="isDark" :size="16" :stroke-width="2" />
+            <Moon v-else :size="16" :stroke-width="2" />
+          </Button.Content>
         </Button.Root>
 
         <div class="app-nav-user">

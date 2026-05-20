@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { Button, Popover } from '@vuetify/v0';
+import { EllipsisVertical } from '@lucide/vue';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { apiPost } from '@/utils/api';
 import type { FileVisibility } from '../../shared/file-visibility';
@@ -303,7 +304,7 @@ onMounted(loadTokens);
               <td>
                 <Popover.Root>
                   <Popover.Activator class="btn btn-ghost btn-icon" aria-label="操作メニュー">
-                    …
+                    <EllipsisVertical :size="16" :stroke-width="2" />
                   </Popover.Activator>
                   <Popover.Content class="action-menu">
                     <Button.Root class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="openDeleteDialog(t.id)">

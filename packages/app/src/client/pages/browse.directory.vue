@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, watch } from 'vue';
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
+import { Folder } from '@lucide/vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -633,11 +634,11 @@ watch([isPartiallySelected, isAllSelected], async () => {
                 </td>
                 <td :class="$style.nameCell">
                   <button v-if="isArchive && entry.isDir" :class="$style.archiveDirButton" @click="navigateArchiveDir(entry.fullPath)">
-                    <span :class="$style.folderIcon">📁</span>{{ entry.name }}
+                    <Folder :class="$style.folderIcon" :size="16" :stroke-width="2" aria-hidden="true" />{{ entry.name }}
                   </button>
                   <NirA v-else-if="isArchive && !entry.isDir" :to="entry.link" :class="$style.entryLink">{{ entry.name }}</NirA>
                   <NirA v-else :to="entry.link" :class="$style.entryLink">
-                    <span v-if="entry.isDir" :class="$style.folderIcon">📁</span>{{ entry.name }}
+                    <Folder v-if="entry.isDir" :class="$style.folderIcon" :size="16" :stroke-width="2" aria-hidden="true" />{{ entry.name }}
                   </NirA>
                 </td>
                 <td :class="[$style.sizeCell, 'col-right', 'col-muted']">
@@ -804,6 +805,8 @@ watch([isPartiallySelected, isAllSelected], async () => {
 }
 
 .archiveDirButton {
+  display: inline-flex;
+  align-items: center;
   background: none;
   border: none;
   cursor: pointer;
@@ -815,9 +818,13 @@ watch([isPartiallySelected, isAllSelected], async () => {
 
 .folderIcon {
   margin-right: 4px;
+  color: var(--color-text-muted);
+  vertical-align: -3px;
 }
 
 .entryLink {
+  display: inline-flex;
+  align-items: center;
   font-weight: 500;
 }
 

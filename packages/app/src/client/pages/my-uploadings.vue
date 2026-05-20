@@ -125,6 +125,7 @@ onMounted(() => {
                   <th>状態</th>
                   <th>バケット</th>
                   <th>対象</th>
+                  <th class="col-right">ファイル数</th>
                   <th class="col-usage">進捗</th>
                   <th class="col-right">転送量</th>
                   <th>更新日時</th>
@@ -143,8 +144,10 @@ onMounted(() => {
                       {{ job.completedPath }}
                     </NirA>
                     <span v-else class="font-mono">{{ job.filename || job.prefix || '-' }}</span>
-                    <span v-if="job.totalFiles > 0" class="badge badge-muted" :class="$style.statusBadge">{{ job.fileIndex }}/{{ job.totalFiles }}</span>
                     <div v-if="job.error" class="text-danger">{{ job.error }}</div>
+                  </td>
+                  <td class="col-right col-muted">
+                    <template v-if="job.totalFiles > 0">{{ job.fileIndex }}/{{ job.totalFiles }}</template>
                   </td>
                   <td>
                     <div class="bucket-usage">
@@ -155,7 +158,12 @@ onMounted(() => {
                     </div>
                   </td>
                   <td class="col-right col-muted">
-                    {{ formatBytes(job.uploadedBytes) }} / {{ formatBytes(job.totalBytes) }}
+                    <template v-if="progressPercent(job.uploadedBytes, job.totalBytes) >= 100">
+                      {{ formatBytes(job.totalBytes) }}
+                    </template>
+                    <template v-else>
+                      {{ formatBytes(job.uploadedBytes) }} / {{ formatBytes(job.totalBytes) }}
+                    </template>
                   </td>
                   <td class="col-muted">{{ formatDate(job.updatedAt) }}</td>
                 </tr>

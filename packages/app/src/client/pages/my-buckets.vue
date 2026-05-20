@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { Button, Form, Popover } from '@vuetify/v0';
+import { EllipsisVertical } from '@lucide/vue';
 import { authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
@@ -189,7 +190,7 @@ onMounted(loadBuckets);
                   <div class="flex gap-2 items-center">
                     <Popover.Root>
                       <Popover.Activator class="btn btn-ghost btn-icon" aria-label="操作メニュー">
-                        …
+                        <EllipsisVertical :size="16" :stroke-width="2" />
                       </Popover.Activator>
                       <Popover.Content class="action-menu">
                         <div class="action-menu-inner">
