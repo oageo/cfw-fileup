@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, defineComponent, h } from 'vue';
+import { ref, computed, defineComponent, h, watch } from 'vue';
 import { Button, Popover, useTheme } from '@vuetify/v0';
+import { CircleFadingArrowUp, Upload } from '@lucide/vue';
 import { mainRouter } from './router';
 import { fetchCurrentUser, authStore, clearAuth } from './store/auth';
 import { navigateFn } from './navigate';
 import NirA from './components/nira.vue';
+import { connectUploadWorker, latestActiveUploadJob, latestUploadJob } from './store/upload-worker';
 
 navigateFn.value = (path) => mainRouter.pushByPath(path);
 
@@ -18,11 +20,35 @@ function closeAppNav() {
 };
 
 const isReady = ref(false);
+const navUploadPercent = computed(() => {
+	const job = latestUploadJob.value;
+	if (job?.status === 'done') return 100;
+	if (!job || job.totalBytes <= 0) return 0;
+	return Math.min(100, Math.round(job.uploadedBytes / job.totalBytes * 100));
+});
+const navUploadLink = computed(() => {
+	const job = latestUploadJob.value;
+	if (!job) return '/my/uploadings?tab=browser';
+	if (job.status === 'done' && job.completedPath) return `/v/${job.bucketName}/${job.completedPath}`;
+	return '/my/uploadings?tab=browser';
+});
+const navUploadText = computed(() => {
+	const job = latestUploadJob.value;
+	if (!job) return '';
+	if (job.status === 'done') return `完了: ${job.completedPath ?? job.filename}`;
+	if (job.status === 'error') return `エラー: ${job.filename || job.prefix || 'アップロード'}`;
+	return job.filename || 'アップロード準備中';
+});
 
 (async () => {
 	await fetchCurrentUser();
+	if (authStore.user) connectUploadWorker();
 	isReady.value = true;
 })();
+
+watch(() => authStore.user, (user) => {
+	if (user) connectUploadWorker();
+});
 
 const CurrentPage = computed(() => {
 	const resolved = mainRouter.currentRef.value;
@@ -94,6 +120,26 @@ function toggleTheme(): void {
             <NirA to="/signin" class="btn btn-primary">サインイン</NirA>
           </template>
         </div>
+      </div>
+      <div v-if="authStore.user" class="app-upload-strip">
+        <NirA to="/uploader" class="app-upload-button" aria-label="ファイルアップロード">
+          <span class="app-upload-icon" aria-hidden="true">
+            <Upload :size="16" :stroke-width="2" />
+          </span>
+          <span>アップロード</span>
+        </NirA>
+        <NirA v-if="latestUploadJob" :to="navUploadLink" class="app-upload-status">
+          <span class="app-upload-text">
+            {{ navUploadText }}
+          </span>
+          <span class="app-upload-percent">{{ navUploadPercent }}%</span>
+        </NirA>
+        <NirA to="/my/uploadings?tab=browser" class="app-upload-history-button" aria-label="アップロード履歴">
+          <CircleFadingArrowUp :size="16" :stroke-width="2" />
+        </NirA>
+        <span v-if="latestUploadJob" class="app-upload-progress" aria-hidden="true">
+          <span class="app-upload-progress-fill" :style="{ width: `${navUploadPercent}%` }" />
+        </span>
       </div>
     </header>
 

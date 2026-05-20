@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import type { FileVisibility } from '../../shared/file-visibility';
-import { Button, Popover, Progress } from '@vuetify/v0';
+import { Button, Popover } from '@vuetify/v0';
 import { authHeaders, authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
@@ -11,6 +11,7 @@ import UploadDestinationDialog from '@/components/upload-destination-dialog.vue'
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
+import { enqueueUploadJob } from '@/store/upload-worker';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
 
@@ -47,15 +48,6 @@ const previewUrl = ref('');
 const previewText = ref('');
 const previewLoading = ref(false);
 const fileRowElements = ref(new Map<string, HTMLButtonElement>());
-interface UploadProgress {
-	filename: string;
-	fileIndex: number;
-	totalFiles: number;
-	uploadedBytes: number;
-	totalBytes: number;
-}
-
-const uploadProgress = ref<UploadProgress | null>(null);
 const uploadError = ref('');
 const uploadDone = ref(false);
 const quotaWarningOpen = ref(false);
@@ -198,7 +190,6 @@ function clearSelectedTree(): void {
 	selectionError.value = '';
 	uploadError.value = '';
 	uploadDone.value = false;
-	uploadProgress.value = null;
 }
 
 async function removeSelectedEntry(path: string): Promise<void> {
@@ -742,7 +733,6 @@ async function confirmQuotaWarning(): Promise<void> {
 async function executeUpload(): Promise<void> {
 	uploadError.value = '';
 	uploadDone.value = false;
-	uploadProgress.value = null;
 	if (!bucket.value) return;
 
 	// Pre-upload existence check
@@ -776,50 +766,20 @@ async function executeUpload(): Promise<void> {
 		}
 	}
 
-	if (selectedTree.value && selectedTree.value.entries.length > 0) {
-		const fileArr = selectedTree.value.entries;
-		const totalFiles = fileArr.length;
-		const isGz = archiveMode.value === 'gz';
-		const totalBytes = isGz ? 0 : fileArr.reduce((s, entry) => s + entry.size, 0);
-		let cumulativeBytes = 0;
-
-		if (archiveMode.value === 'individual' || archiveMode.value === 'gz') {
-			for (let i = 0; i < fileArr.length; i++) {
-				const entry = fileArr[i];
-				const file = entry.file;
-				uploadProgress.value = { filename: entry.path, fileIndex: i + 1, totalFiles, uploadedBytes: cumulativeBytes, totalBytes };
-				if (isGz) {
-					const stream = file.stream().pipeThrough(new CompressionStream('gzip'));
-					if (!(await uploadStream(stream, `${uploadPrefix.value}${entry.path}.gz`, (n) => {
-						if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: cumulativeBytes + n };
-					}))) return;
-					cumulativeBytes += file.size;
-				} else {
-					if (!(await uploadBlob(file, `${uploadPrefix.value}${entry.path}`, (n) => {
-						if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: cumulativeBytes + n };
-					}))) return;
-					cumulativeBytes += file.size;
-				}
-			}
-		} else if (archiveMode.value === 'tar') {
-			uploadProgress.value = { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: selectedTree.value.totalSize };
-			const archiver = await TarArchiver.createFromEntries(selectedTree.value.toFileEntries(), (p: ArchiveProgress) => {
-				if (!uploadProgress.value) return;
-				uploadProgress.value = { ...uploadProgress.value, filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles };
-			});
-			if (!(await uploadTarStream(archiver.stream, archiver.index, `${uploadPrefix.value}${archiveUploadBaseName.value}.tar`, (n) => {
-				if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: n };
-			}))) return;
-		} else {
-			uploadProgress.value = { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: selectedTree.value.totalSize };
-			const archiver = await BgzfTarArchiver.createFromEntries(selectedTree.value.toFileEntries(), (p: ArchiveProgress) => {
-				if (!uploadProgress.value) return;
-				uploadProgress.value = { ...uploadProgress.value, filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles };
-			});
-			if (!(await uploadBgzfStream(archiver.stream, archiver.index, `${uploadPrefix.value}${archiveUploadBaseName.value}.tar.gz`, (n) => {
-				if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: n };
-			}))) return;
-		}
+	const tree = selectedTree.value;
+	if (tree && tree.entries.length > 0) {
+		enqueueUploadJob({
+			bucketId: bucket.value.id,
+			bucketName: selectedBucketName.value,
+			prefix: uploadPrefix.value,
+			mode: archiveMode.value,
+			archiveBaseName: archiveUploadBaseName.value,
+			visibility: visibility.value,
+			passphrase: passphrase.value || undefined,
+			files: tree.toFileEntries(),
+			totalBytes: tree.totalSize,
+			authToken: authStore.token,
+		});
 		uploadDone.value = true;
 	}
 }
@@ -1073,44 +1033,17 @@ onMounted(async () => {
         <Button.Root
           class="btn btn-primary btn-lg w-full"
           :class="$style.fullButton"
-          :disabled="!selectedTree || selectedTree.entries.length === 0 || !!uploadProgress && !uploadDone && !uploadError"
+          :disabled="!selectedTree || selectedTree.entries.length === 0 || uploadDone && !uploadError"
           @click="startUpload"
         >
           <Button.Content>アップロード開始</Button.Content>
         </Button.Root>
       </div>
 
-      <!-- 進捗 -->
-      <div v-if="uploadProgress" :class="[$style.uploadProgressBox, 'mt-4']">
-        <p :class="$style.uploadProgressFilename">
-          <template v-if="uploadProgress.totalFiles > 0">
-            <span class="badge badge-info" :class="$style.progressBadge">{{ uploadProgress.fileIndex }}/{{ uploadProgress.totalFiles }}</span>
-          </template>
-          {{ uploadProgress.filename || 'アーカイブ作成中...' }}
-        </p>
-        <Progress.Root
-          class="progress-root"
-          :model-value="uploadProgress.totalBytes > 0 ? Math.round(uploadProgress.uploadedBytes / uploadProgress.totalBytes * 100) : 0"
-          :max="100"
-        >
-          <Progress.Track class="progress-track">
-            <Progress.Fill class="progress-fill" />
-          </Progress.Track>
-        </Progress.Root>
-        <p :class="$style.uploadProgressMeta">
-          {{ formatBytes(uploadProgress.uploadedBytes) }}
-          <template v-if="uploadProgress.totalBytes > 0">
-            / {{ formatBytes(uploadProgress.totalBytes) }}
-            ({{ Math.round(uploadProgress.uploadedBytes / uploadProgress.totalBytes * 100) }}%)
-          </template>
-          <template v-else>転送済み</template>
-        </p>
-      </div>
-
       <div v-if="uploadError" class="alert alert-error mt-3">{{ uploadError }}</div>
       <div v-if="uploadDone" class="alert alert-success mt-3">
-        アップロード完了！
-        <NirA :to="`/v/${selectedBucketName}/`" :class="$style.doneLink">ファイル一覧を見る →</NirA>
+        アップロードジョブを開始しました。
+        <NirA to="/my/uploadings?tab=browser" :class="$style.doneLink">進捗を見る →</NirA>
       </div>
 
       <ConfirmDialog
@@ -1150,28 +1083,6 @@ onMounted(async () => {
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
   margin-bottom: 14px;
-}
-
-.uploadProgressBox {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-}
-
-.uploadProgressFilename {
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin-bottom: 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.uploadProgressMeta {
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-  margin-top: 6px;
 }
 
 .fileLabel {
@@ -1412,10 +1323,6 @@ onMounted(async () => {
 
 .passphraseGroup {
   max-width: 320px;
-}
-
-.progressBadge {
-  margin-right: 6px;
 }
 
 .doneLink {

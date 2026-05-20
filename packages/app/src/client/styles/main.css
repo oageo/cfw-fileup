@@ -58,7 +58,7 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
   position: sticky;
   top: 0;
   z-index: 100;
-  height: var(--nav-height);
+  min-height: var(--nav-height);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
@@ -70,7 +70,90 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
   height: 100%;
   max-width: 1200px;
   margin: 0 auto;
+  padding: 0;
+}
+.app-upload-strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  max-width: 1200px;
+  margin: 0 auto;
   padding: 0 20px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted) !important;
+  font-size: 0.8125rem;
+}
+.app-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--color-text-muted) !important;
+  font-weight: 500;
+  text-decoration: none !important;
+}
+.app-upload-button:hover { background: var(--color-bg); color: var(--color-text) !important; }
+.app-upload-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  color: var(--color-text-muted) !important;
+  text-decoration: none !important;
+}
+.app-upload-status:hover { color: var(--color-text) !important; }
+.app-upload-history-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: var(--radius);
+  color: var(--color-text-muted) !important;
+  text-decoration: none !important;
+}
+.app-upload-history-button:hover { background: var(--color-bg); color: var(--color-text) !important; }
+.app-upload-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+.app-upload-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-upload-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+.app-upload-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.2s ease;
+}
+.app-upload-percent {
+  margin-left: auto;
+  width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .app-nav-brand {
   font-size: 1rem;
@@ -79,6 +162,7 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
   text-decoration: none !important;
   letter-spacing: -0.3px;
   margin-right: 8px;
+  padding-left: 20px;
 }
 .app-nav-brand:hover { opacity: 0.85; }
 .app-nav-links { display: flex; align-items: center; gap: 2px; }
@@ -122,7 +206,7 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
   .app-nav-inner {
     flex-wrap: wrap;
     height: auto;
-    padding: 6px 12px 0;
+    padding: 6px 0 0;
     gap: 2px;
   }
   .app-nav-brand { flex: 1; margin-right: 0; }
@@ -130,13 +214,15 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
   .app-nav-links {
     order: 3;
     width: 100%;
-    padding: 2px 0 6px;
+    padding: 0 12px;
     border-top: 1px solid var(--color-border);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
   .app-nav-link { padding: 4px 8px; font-size: 0.8125rem; white-space: nowrap; }
   .app-nav-username { display: none; }
+  .app-upload-strip { padding: 0 12px; }
+  .app-upload-progress { left: 0; right: 0; }
 }
 
 .app-main {
