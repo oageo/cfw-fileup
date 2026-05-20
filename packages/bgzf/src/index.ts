@@ -322,10 +322,10 @@ class TarArchiverBase<TIdx> {
 	}
 
 	/** Walk a directory and detect MIME types for all files in parallel. */
-	protected static async prepareEntries(dir: FileSystemDirectoryHandle): Promise<PreparedEntry[]> {
+	protected static async prepareEntries(entries: Iterable<FileEntry> | AsyncIterable<FileEntry>): Promise<PreparedEntry[]> {
 		const now = Date.now();
 		const walked: FileEntry[] = [];
-		for await (const entry of TarArchiverBase.walkDirectory(dir)) walked.push(entry);
+		for await (const entry of entries) walked.push(entry);
 		const { filetypemime } = await import('magic-bytes.js');
 		return Promise.all(
 			walked.map(async ({ path, file }) => {
@@ -334,7 +334,7 @@ class TarArchiverBase<TIdx> {
 				return {
 					path,
 					file,
-					mimeType: mimes[0] ?? file.type,
+					mimeType: mimes[0] ?? (file.type || 'application/octet-stream'),
 					mtime: file.lastModified || now,
 				};
 			}),
@@ -346,7 +346,12 @@ class TarArchiverBase<TIdx> {
 export class TarArchiver extends TarArchiverBase<TarIndex> {
 	/** Create an uncompressed tar archiver for the given directory. */
 	static async create(dir: FileSystemDirectoryHandle, onProgress?: (p: ArchiveProgress) => void): Promise<TarArchiver> {
-		const entries = await TarArchiverBase.prepareEntries(dir);
+		return TarArchiver.createFromEntries(TarArchiver.walkDirectory(dir), onProgress);
+	}
+
+	/** Create an uncompressed tar archiver for the given file entries. */
+	static async createFromEntries(fileEntries: Iterable<FileEntry> | AsyncIterable<FileEntry>, onProgress?: (p: ArchiveProgress) => void): Promise<TarArchiver> {
+		const entries = await TarArchiverBase.prepareEntries(fileEntries);
 		const totalFiles = entries.length;
 		const totalBytes = entries.reduce((s, e) => s + e.file.size, 0);
 
@@ -398,7 +403,12 @@ export class TarArchiver extends TarArchiverBase<TarIndex> {
 export class BgzfTarArchiver extends TarArchiverBase<TarGzIndex> {
 	/** Create a BGZF-compressed tar archiver for the given directory. */
 	static async create(dir: FileSystemDirectoryHandle, onProgress?: (p: ArchiveProgress) => void): Promise<BgzfTarArchiver> {
-		const entries = await TarArchiverBase.prepareEntries(dir);
+		return BgzfTarArchiver.createFromEntries(BgzfTarArchiver.walkDirectory(dir), onProgress);
+	}
+
+	/** Create a BGZF-compressed tar archiver for the given file entries. */
+	static async createFromEntries(fileEntries: Iterable<FileEntry> | AsyncIterable<FileEntry>, onProgress?: (p: ArchiveProgress) => void): Promise<BgzfTarArchiver> {
+		const entries = await TarArchiverBase.prepareEntries(fileEntries);
 		const totalFiles = entries.length;
 		const totalBytes = entries.reduce((s, e) => s + e.file.size, 0);
 

@@ -244,6 +244,21 @@ describe('TarArchiver', () => {
 		expect(entries[0].data).toEqual(content);
 	});
 
+	test('createFromEntries() produces a valid tar stream', async () => {
+		const content = enc.encode('entry api');
+		const archiver = await TarArchiver.createFromEntries([
+			{ path: 'folder/entry.txt', file: new File([content], 'entry.txt') },
+		]);
+		const buf = await streamToBuffer(archiver.stream);
+		const index = await archiver.index;
+
+		const entries = parseTar(buf);
+		expect(entries).toHaveLength(1);
+		expect(entries[0].path).toBe('folder/entry.txt');
+		expect(entries[0].data).toEqual(content);
+		expect(index[0].path).toBe('folder/entry.txt');
+	});
+
 	test('create() index has correct offset and size', async () => {
 		const content = enc.encode('hello world');
 		const dir = mockDir([
@@ -337,6 +352,21 @@ describe('BgzfTarArchiver', () => {
 			expect(entries[i].path).toBe(f.name);
 			expect(entries[i].data).toEqual(f.content);
 		}
+	});
+
+	test('createFromEntries() emits a BGZF tar stream', async () => {
+		const content = enc.encode('entry bgzf');
+		const archiver = await BgzfTarArchiver.createFromEntries([
+			{ path: 'folder/entry.txt', file: new File([content], 'entry.txt') },
+		]);
+		const buf = await streamToBuffer(archiver.stream);
+		const index = await archiver.index;
+		const entries = parseTar(await decompressBgzf(buf));
+
+		expect(entries).toHaveLength(1);
+		expect(entries[0].path).toBe('folder/entry.txt');
+		expect(entries[0].data).toEqual(content);
+		expect(index[0].path).toBe('folder/entry.txt');
 	});
 
 	test('index is resolved after stream consumption and has one entry per file', async () => {

@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import type { FileVisibility } from '../../shared/file-visibility';
-import { Button, Progress } from '@vuetify/v0';
+import { Button, Popover, Progress } from '@vuetify/v0';
 import { authHeaders, authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
 import { TarArchiver, BgzfTarArchiver, type TarIndex, type TarGzIndex, type ArchiveProgress } from 'bgzf';
 import { takePendingUpload } from '@/store/pending-upload';
 import UploadDestinationDialog from '@/components/upload-destination-dialog.vue';
+import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
+import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
 
 interface Bucket {
 	id: string;
 	name: string;
+	usedBytes: number;
 }
 
 /** デフォルトのチャンクサイズ: 32MiB
@@ -28,15 +31,22 @@ const buckets = ref<Bucket[]>([]);
 const selectedBucketName = ref('');
 const destinationDialogOpen = ref(false);
 const bucket = computed(() => buckets.value.find(b => b.name === selectedBucketName.value) ?? null);
+const maxBucketSizeBytes = ref<number | null>(null);
 const loadError = ref('');
 
-const selectedFiles = ref<File[]>([]);
+const selectedTree = ref<UploadTree | null>(null);
+const selectedEntry = ref<UploadEntry | null>(null);
 const uploadPrefix = ref('');
-const selectedDir = ref<FileSystemDirectoryHandle | null>(null);
-const selectedDirName = ref('');
 const archiveMode = ref<ArchiveMode>('individual');
+const libraryName = ref('');
 const visibility = ref<FileVisibility>('public');
 const passphrase = ref('');
+const isDragOver = ref(false);
+const selectionError = ref('');
+const previewUrl = ref('');
+const previewText = ref('');
+const previewLoading = ref(false);
+const fileRowElements = ref(new Map<string, HTMLButtonElement>());
 interface UploadProgress {
 	filename: string;
 	fileIndex: number;
@@ -48,35 +58,74 @@ interface UploadProgress {
 const uploadProgress = ref<UploadProgress | null>(null);
 const uploadError = ref('');
 const uploadDone = ref(false);
+const quotaWarningOpen = ref(false);
+const quotaWarningConfirmed = ref(false);
 
 function formatBytes(n: number): string {
 	if (n < 1024) return `${n} B`;
 	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	return `${(n / 1024 / 1024).toFixed(1)} MB`;
+	if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+	return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function getUploadPaths(): string[] {
-	if (selectedDir.value) {
-		if (archiveMode.value === 'tar') return [`${selectedDirName.value}.tar`];
-		if (archiveMode.value === 'targz') return [`${selectedDirName.value}.tar.gz`];
-		return [];
-	}
-	if (!selectedFiles.value.length) return [];
-	return selectedFiles.value.map(f =>
+	if (!selectedTree.value) return [];
+	if (archiveMode.value === 'tar') return [`${uploadPrefix.value}${archiveUploadBaseName.value}.tar`];
+	if (archiveMode.value === 'targz') return [`${uploadPrefix.value}${archiveUploadBaseName.value}.tar.gz`];
+	return selectedTree.value.entries.map(entry =>
 		archiveMode.value === 'gz'
-			? `${uploadPrefix.value}${f.name}.gz`
-			: `${uploadPrefix.value}${f.name}`,
+			? `${uploadPrefix.value}${entry.path}.gz`
+			: `${uploadPrefix.value}${entry.path}`,
 	);
 }
 
 function validateUploadPaths(paths: string[]): boolean {
+	if ((archiveMode.value === 'tar' || archiveMode.value === 'targz') && /[\\/]/.test(archiveUploadBaseName.value)) {
+		uploadError.value = 'ライブラリ名に / または \\ は使えません。';
+		return false;
+	}
 	const tooLongPath = paths.find(path => path.length > MAX_FILE_PATH_LENGTH);
 	if (!tooLongPath) return true;
 	uploadError.value = `パスは${MAX_FILE_PATH_LENGTH}文字以内で入力してください: ${tooLongPath}`;
 	return false;
 }
 
-const supportsFileAccessAPI = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+const hasSelection = computed(() => selectedTree.value != null && selectedTree.value.entries.length > 0);
+const archiveBaseName = computed(() => {
+	if (!selectedTree.value) return 'archive';
+	if (selectedTree.value.hasDirectories && selectedTree.value.rootName) return selectedTree.value.rootName;
+	return selectedTree.value.entries[0]?.name.replace(/\.[^.]*$/, '') || 'archive';
+});
+const archiveUploadBaseName = computed(() => libraryName.value.trim() || archiveBaseName.value);
+const flatDisplayEntries = computed(() => selectedTree.value ? flattenDirectory(selectedTree.value.root) : []);
+const selectedUploadBytes = computed(() => selectedTree.value?.totalSize ?? 0);
+const quotaRemainingBytes = computed(() => {
+	if (!bucket.value || maxBucketSizeBytes.value === null) return null;
+	return Math.max(0, maxBucketSizeBytes.value - bucket.value.usedBytes);
+});
+const isQuotaWarningNeeded = computed(() => (
+	bucket.value != null
+	&& maxBucketSizeBytes.value !== null
+	&& selectedUploadBytes.value > quotaRemainingBytes.value!
+));
+const quotaWarningMessage = computed(() => {
+	if (!bucket.value || maxBucketSizeBytes.value === null || quotaRemainingBytes.value === null) return '';
+	return [
+		`選択中のファイルは約 ${formatBytes(selectedUploadBytes.value)} です。`,
+		`アップロード先バケットの残り容量は ${formatBytes(quotaRemainingBytes.value)} です。`,
+		'圧縮後サイズによっては成功する場合もありますが、クォータ超過で失敗する可能性があります。',
+	].join('\n');
+});
+const previewKind = computed(() => {
+	const entry = selectedEntry.value;
+	if (!entry) return 'empty';
+	if (entry.type.startsWith('image/')) return 'image';
+	if (entry.type.startsWith('video/')) return 'video';
+	if (entry.type.startsWith('audio/')) return 'audio';
+	if (entry.type === 'application/pdf') return 'pdf';
+	if (isTextLike(entry)) return 'text';
+	return 'meta';
+});
 
 async function loadBucket(): Promise<void> {
 	const result = await apiPost('/api/buckets/list');
@@ -85,25 +134,208 @@ async function loadBucket(): Promise<void> {
 		return;
 	}
 	buckets.value = result.data.buckets;
+	maxBucketSizeBytes.value = result.data.maxBucketSizeBytes;
 	if (!selectedBucketName.value && buckets.value.length > 0) {
 		selectedBucketName.value = buckets.value[0].name;
 	}
 }
 
-async function pickDirectory(): Promise<void> {
-	if (!('showDirectoryPicker' in window)) {
-    alert('folder picker is not supported!');
-    return;
-  }
+async function handleFileInputChange(event: Event): Promise<void> {
+	const input = event.target as HTMLInputElement;
+	await selectFiles(input.files);
+	input.value = '';
+}
+
+async function selectFiles(files: FileList | null): Promise<void> {
+	if (!files || files.length === 0) return;
 	try {
-		const handle = await (window as unknown as any).showDirectoryPicker();
-		selectedDir.value = handle;
-		selectedDirName.value = handle.name;
-		selectedFiles.value = [];
-	} catch (e) {
-		console.error('showDirectoryPicker failed', e)
+		await addSelectedTree(await UploadTree.from(files));
+	} catch (err) {
+		selectionError.value = err instanceof Error ? err.message : String(err);
 	}
 }
+
+async function handleDrop(event: DragEvent): Promise<void> {
+	isDragOver.value = false;
+	const data = event.dataTransfer;
+	if (!data) return;
+	try {
+		await addSelectedTree(await UploadTree.from(data));
+	} catch (err) {
+		selectionError.value = err instanceof Error ? err.message : String(err);
+	}
+}
+
+async function setSelectedTree(tree: UploadTree, entryToSelect: UploadEntry | null = tree.entries[0] ?? null): Promise<void> {
+	selectionError.value = '';
+	uploadError.value = '';
+	uploadDone.value = false;
+	selectedTree.value = tree;
+	selectEntry(entryToSelect);
+	if (archiveMode.value === 'gz' && tree.hasDirectories) archiveMode.value = 'individual';
+}
+
+async function addSelectedTree(tree: UploadTree): Promise<void> {
+	if (!selectedTree.value) {
+		await setSelectedTree(tree);
+		return;
+	}
+
+	const entriesByPath = new Map<string, UploadEntry>();
+	for (const entry of selectedTree.value.entries) entriesByPath.set(entry.path, entry);
+	for (const entry of tree.entries) entriesByPath.set(entry.path, entry);
+	const entries = Array.from(entriesByPath.values());
+	const mergedTree = await UploadTree.from({
+		entries,
+		rootName: inferUploadRootName(entries.map(entry => entry.path)),
+	});
+	await setSelectedTree(mergedTree, tree.entries[0] ?? selectedEntry.value);
+}
+
+function clearSelectedTree(): void {
+	selectedTree.value = null;
+	selectEntry(null);
+	selectionError.value = '';
+	uploadError.value = '';
+	uploadDone.value = false;
+	uploadProgress.value = null;
+}
+
+async function removeSelectedEntry(path: string): Promise<void> {
+	if (!selectedTree.value) return;
+	const currentEntries = selectedTree.value.entries;
+	const removeIndex = currentEntries.findIndex(entry => entry.path === path);
+	if (removeIndex === -1) return;
+
+	const entries = currentEntries.filter(entry => entry.path !== path);
+	if (entries.length === 0) {
+		clearSelectedTree();
+		return;
+	}
+
+	const nextEntry = selectedEntry.value?.path === path
+		? entries[Math.min(removeIndex, entries.length - 1)]
+		: selectedEntry.value;
+	const nextTree = await UploadTree.from({
+		entries,
+		rootName: inferUploadRootName(entries.map(entry => entry.path)),
+	});
+	await setSelectedTree(nextTree, nextEntry);
+}
+
+function inferUploadRootName(paths: readonly string[]): string {
+	if (paths.length === 0) return '';
+	const first = paths[0].split('/')[0] ?? '';
+	return paths.every(path => path.split('/')[0] === first) ? first : '';
+}
+
+interface FlatDisplayDirectory {
+	type: 'dir';
+	key: string;
+	name: string;
+	path: string;
+	depth: number;
+}
+
+interface FlatDisplayFile {
+	type: 'file';
+	key: string;
+	entry: UploadEntry;
+	depth: number;
+}
+
+type FlatDisplayEntry = FlatDisplayDirectory | FlatDisplayFile;
+
+function flattenDirectory(dir: UploadDirectory, depth = -1): FlatDisplayEntry[] {
+	const result: FlatDisplayEntry[] = [];
+	for (const child of dir.directories) {
+		result.push({ type: 'dir', key: `dir:${child.path}`, name: child.name, path: child.path, depth: depth + 1 });
+		result.push(...flattenDirectory(child, depth + 1));
+	}
+	for (const entry of dir.files) {
+		result.push({ type: 'file', key: `file:${entry.path}`, entry, depth: depth + 1 });
+	}
+	return result;
+}
+
+function isTextLike(entry: UploadEntry): boolean {
+	return entry.type.startsWith('text/')
+		|| /(?:^|\/)(?:json|xml|javascript|typescript|csv|yaml|x-yaml)$/.test(entry.type)
+		|| /\.(?:txt|md|json|csv|ts|js|vue|css|scss|html|xml|ya?ml)$/i.test(entry.name);
+}
+
+function revokePreviewUrl(): void {
+	if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+	previewUrl.value = '';
+}
+
+function setFileRowElement(path: string, element: unknown): void {
+	if (element instanceof HTMLButtonElement) {
+		fileRowElements.value.set(path, element);
+	} else {
+		fileRowElements.value.delete(path);
+	}
+}
+
+function selectEntry(entry: UploadEntry | null, focus = false): void {
+	selectedEntry.value = entry;
+	if (!entry || !focus) return;
+	requestAnimationFrame(() => {
+		const element = fileRowElements.value.get(entry.path);
+		element?.focus();
+		element?.scrollIntoView({ block: 'nearest' });
+	});
+}
+
+function moveSelectedEntry(direction: 1 | -1): void {
+	const entries = selectedTree.value?.entries ?? [];
+	if (entries.length === 0) return;
+	const currentIndex = selectedEntry.value
+		? entries.findIndex(entry => entry.path === selectedEntry.value?.path)
+		: -1;
+	const nextIndex = currentIndex === -1
+		? direction === 1 ? 0 : entries.length - 1
+		: Math.min(entries.length - 1, Math.max(0, currentIndex + direction));
+	selectEntry(entries[nextIndex], true);
+}
+
+function onFileListKeydown(event: KeyboardEvent): void {
+	if (event.key === 'ArrowDown') {
+		event.preventDefault();
+		moveSelectedEntry(1);
+	} else if (event.key === 'ArrowUp') {
+		event.preventDefault();
+		moveSelectedEntry(-1);
+	}
+}
+
+watch(selectedEntry, async (entry) => {
+	revokePreviewUrl();
+	previewText.value = '';
+	previewLoading.value = false;
+	if (!entry) return;
+	if (
+		entry.type.startsWith('image/')
+		|| entry.type.startsWith('video/')
+		|| entry.type.startsWith('audio/')
+		|| entry.type === 'application/pdf'
+	) {
+		previewUrl.value = URL.createObjectURL(entry.file);
+		return;
+	}
+	if (isTextLike(entry)) {
+		previewLoading.value = true;
+		try {
+			previewText.value = await entry.file.slice(0, 64 * 1024).text();
+		} finally {
+			previewLoading.value = false;
+		}
+	}
+}, { immediate: true });
+
+onUnmounted(() => {
+	revokePreviewUrl();
+});
 
 // ---- OPFS helpers ----
 
@@ -493,6 +725,21 @@ async function uploadBgzfStream(
 // ---- startUpload ----
 
 async function startUpload(): Promise<void> {
+	if (isQuotaWarningNeeded.value && !quotaWarningConfirmed.value) {
+		quotaWarningOpen.value = true;
+		return;
+	}
+	quotaWarningConfirmed.value = false;
+	await executeUpload();
+}
+
+async function confirmQuotaWarning(): Promise<void> {
+	quotaWarningOpen.value = false;
+	quotaWarningConfirmed.value = true;
+	await startUpload();
+}
+
+async function executeUpload(): Promise<void> {
 	uploadError.value = '';
 	uploadDone.value = false;
 	uploadProgress.value = null;
@@ -529,72 +776,49 @@ async function startUpload(): Promise<void> {
 		}
 	}
 
-	// Directory (File System Access API)
-	if (selectedDir.value) {
-		if (archiveMode.value === 'individual') {
-			const allEntries: Array<{ path: string; file: File }> = [];
-			for await (const entry of TarArchiver.walkDirectory(selectedDir.value)) allEntries.push(entry);
-			if (!validateUploadPaths(allEntries.map(entry => entry.path))) return;
-			const totalFiles = allEntries.length;
-			const totalBytes = allEntries.reduce((s, e) => s + e.file.size, 0);
-			let cumulativeBytes = 0;
-			for (let i = 0; i < allEntries.length; i++) {
-				const { path, file } = allEntries[i];
-				uploadProgress.value = { filename: path, fileIndex: i + 1, totalFiles, uploadedBytes: cumulativeBytes, totalBytes };
-				if (!(await uploadBlob(file, path, (n) => {
-					uploadProgress.value = { filename: path, fileIndex: i + 1, totalFiles, uploadedBytes: cumulativeBytes + n, totalBytes };
-				}))) return;
-				cumulativeBytes += file.size;
-			}
-		} else if (archiveMode.value === 'tar') {
-			uploadProgress.value = { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: 0 };
-			const archiver = await TarArchiver.create(selectedDir.value, (p: ArchiveProgress) => {
-				if (!uploadProgress.value) return;
-        console.info('tar create', p);
-				uploadProgress.value = { ...uploadProgress.value, filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles };
-			});
-			if (!(await uploadTarStream(archiver.stream, archiver.index, `${selectedDirName.value}.tar`, (n) => {
-				if (uploadProgress.value) {
-          uploadProgress.value = { ...uploadProgress.value, uploadedBytes: n };
-        }
-			}))) return;
-		} else {
-			uploadProgress.value = { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: 0 };
-			const archiver = await BgzfTarArchiver.create(selectedDir.value, (p: ArchiveProgress) => {
-				if (!uploadProgress.value) return;
-				uploadProgress.value = { ...uploadProgress.value, filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles };
-			});
-			if (!(await uploadBgzfStream(archiver.stream, archiver.index, `${selectedDirName.value}.tar.gz`, (n) => {
-				if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: n };
-			}))) return;
-		}
-		uploadDone.value = true;
-		return;
-	}
-
-	// Regular file(s) — tar/bgzf modes are directory-only
-	if (selectedFiles.value && selectedFiles.value.length > 0) {
-		const fileArr = Array.from(selectedFiles.value);
+	if (selectedTree.value && selectedTree.value.entries.length > 0) {
+		const fileArr = selectedTree.value.entries;
 		const totalFiles = fileArr.length;
 		const isGz = archiveMode.value === 'gz';
-		const totalBytes = isGz ? 0 : fileArr.reduce((s, f) => s + f.size, 0);
+		const totalBytes = isGz ? 0 : fileArr.reduce((s, entry) => s + entry.size, 0);
 		let cumulativeBytes = 0;
 
-		for (let i = 0; i < fileArr.length; i++) {
-			const file = fileArr[i];
-			uploadProgress.value = { filename: file.name, fileIndex: i + 1, totalFiles, uploadedBytes: cumulativeBytes, totalBytes };
-			if (isGz) {
-				const stream = file.stream().pipeThrough(new CompressionStream('gzip'));
-				if (!(await uploadStream(stream, `${uploadPrefix.value}${file.name}.gz`, (n) => {
-					if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: cumulativeBytes + n };
-				}))) return;
-				cumulativeBytes += file.size;
-			} else {
-				if (!(await uploadBlob(file, `${uploadPrefix.value}${file.name}`, (n) => {
-					if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: cumulativeBytes + n };
-				}))) return;
-				cumulativeBytes += file.size;
+		if (archiveMode.value === 'individual' || archiveMode.value === 'gz') {
+			for (let i = 0; i < fileArr.length; i++) {
+				const entry = fileArr[i];
+				const file = entry.file;
+				uploadProgress.value = { filename: entry.path, fileIndex: i + 1, totalFiles, uploadedBytes: cumulativeBytes, totalBytes };
+				if (isGz) {
+					const stream = file.stream().pipeThrough(new CompressionStream('gzip'));
+					if (!(await uploadStream(stream, `${uploadPrefix.value}${entry.path}.gz`, (n) => {
+						if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: cumulativeBytes + n };
+					}))) return;
+					cumulativeBytes += file.size;
+				} else {
+					if (!(await uploadBlob(file, `${uploadPrefix.value}${entry.path}`, (n) => {
+						if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: cumulativeBytes + n };
+					}))) return;
+					cumulativeBytes += file.size;
+				}
 			}
+		} else if (archiveMode.value === 'tar') {
+			uploadProgress.value = { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: selectedTree.value.totalSize };
+			const archiver = await TarArchiver.createFromEntries(selectedTree.value.toFileEntries(), (p: ArchiveProgress) => {
+				if (!uploadProgress.value) return;
+				uploadProgress.value = { ...uploadProgress.value, filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles };
+			});
+			if (!(await uploadTarStream(archiver.stream, archiver.index, `${uploadPrefix.value}${archiveUploadBaseName.value}.tar`, (n) => {
+				if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: n };
+			}))) return;
+		} else {
+			uploadProgress.value = { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: selectedTree.value.totalSize };
+			const archiver = await BgzfTarArchiver.createFromEntries(selectedTree.value.toFileEntries(), (p: ArchiveProgress) => {
+				if (!uploadProgress.value) return;
+				uploadProgress.value = { ...uploadProgress.value, filename: p.currentFile, fileIndex: p.processedFiles + 1, totalFiles: p.totalFiles };
+			});
+			if (!(await uploadBgzfStream(archiver.stream, archiver.index, `${uploadPrefix.value}${archiveUploadBaseName.value}.tar.gz`, (n) => {
+				if (uploadProgress.value) uploadProgress.value = { ...uploadProgress.value, uploadedBytes: n };
+			}))) return;
 		}
 		uploadDone.value = true;
 	}
@@ -605,7 +829,7 @@ onMounted(async () => {
 	const pending = takePendingUpload();
 	if (pending) {
 		if (pending.bucketName) selectedBucketName.value = pending.bucketName;
-		selectedFiles.value = pending.files;
+		if (pending.files.length > 0) await setSelectedTree(await UploadTree.from(pending.files));
 		uploadPrefix.value = pending.prefix;
 	}
 });
@@ -621,8 +845,8 @@ onMounted(async () => {
     <div v-else-if="loadError" class="alert alert-error">{{ loadError }}</div>
     <template v-else>
       <!-- アップロード先選択 -->
-      <div class="upload-section">
-        <p class="upload-section-title">アップロード先</p>
+      <div :class="['card']">
+        <p :class="$style.cardTitle">アップロード先</p>
         <div :class="$style.destinationRow">
           <template v-if="selectedBucketName">
             <span :class="[$style.destinationDisplay, 'font-mono']">{{ selectedBucketName }}/{{ uploadPrefix }}</span>
@@ -638,62 +862,183 @@ onMounted(async () => {
         </div>
         <UploadDestinationDialog
           v-model:open="destinationDialogOpen"
+          :initial-bucket-name="selectedBucketName"
+          :initial-prefix="uploadPrefix"
           @select="({ bucketName, prefix }) => { selectedBucketName = bucketName; uploadPrefix = prefix; }"
         />
       </div>
 
       <!-- ファイル選択 -->
-      <div class="upload-section">
-        <p class="upload-section-title">ファイル選択</p>
+      <div
+        :class="['card', $style.dropSection, { [$style.dropSectionActive]: isDragOver }]"
+        @dragenter.prevent="isDragOver = true"
+        @dragover.prevent="isDragOver = true"
+        @dragleave.prevent="isDragOver = false"
+        @drop.prevent="handleDrop"
+      >
+        <p :class="[$style.cardTitle, $style.fileSelectCardTitle]">
+          ファイル選択
+          <span v-if="selectedTree" class="badge badge-info">
+            {{ selectedTree.entries.length }} ファイル / {{ formatBytes(selectedTree.totalSize) }}
+          </span>
+        </p>
+        <p :class="[$style.dropHint]">ここにファイルやフォルダをドラッグ＆ドロップで追加</p>
 
-        <div class="flex items-center gap-2 flex-wrap">
-          <label :class="[$style.fileLabel, 'btn', 'btn-secondary']">
+        <div class="flex items-center gap-2 flex-wrap mt-2">
+          <label :class="[$style.fileLabel, 'btn', 'btn-primary']">
             ファイルを選択
             <input
               type="file"
               multiple
               :class="$style.hiddenInput"
-              @change="e => { selectedFiles = Array.from((e.target as HTMLInputElement).files ?? []); selectedDir = null; selectedDirName = ''; }"
+              @change="handleFileInputChange"
             >
           </label>
-          <span v-if="selectedFiles.length > 0" class="badge badge-info">
-            {{ selectedFiles.length }} ファイル選択済み
-          </span>
 
-          <template v-if="supportsFileAccessAPI">
-            <Button.Root class="btn btn-secondary" @click="pickDirectory">
-              <Button.Content>フォルダを選択</Button.Content>
-            </Button.Root>
-            <span v-if="selectedDirName" class="badge badge-info">{{ selectedDirName }}</span>
-          </template>
+          <label :class="[$style.fileLabel, 'btn', 'btn-primary']">
+            フォルダを選択
+            <input
+              type="file"
+              webkitdirectory
+              multiple
+              :class="$style.hiddenInput"
+              @change="handleFileInputChange"
+            >
+          </label>
+
+          <Button.Root
+            v-if="selectedTree"
+            class="btn btn-secondary"
+            @click="clearSelectedTree"
+          >
+            <Button.Content>初期化</Button.Content>
+          </Button.Root>
+
         </div>
+        <div v-if="selectionError" class="alert alert-error mt-3">{{ selectionError }}</div>
 
-        <div v-if="selectedDir || (selectedFiles && selectedFiles.length > 0)" class="mt-3">
+        <div v-if="hasSelection" class="mt-3">
+          <div :class="$style.fileBrowser">
+            <div :class="$style.previewPane">
+              <template v-if="!selectedEntry">
+                <p :class="$style.previewEmpty">ファイルを選択</p>
+              </template>
+              <template v-else-if="previewKind === 'image'">
+                <img :src="previewUrl" :alt="selectedEntry.name" :class="$style.previewImage">
+              </template>
+              <template v-else-if="previewKind === 'video'">
+                <video :src="previewUrl" :class="$style.previewVideo" controls preload="metadata" />
+              </template>
+              <template v-else-if="previewKind === 'audio'">
+                <div :class="$style.previewAudioWrap">
+                  <span :class="$style.previewName">{{ selectedEntry.name }}</span>
+                  <audio :src="previewUrl" :class="$style.previewAudio" controls preload="metadata" />
+                </div>
+              </template>
+              <template v-else-if="previewKind === 'pdf'">
+                <object :data="previewUrl" type="application/pdf" :class="$style.previewObject">
+                  <p :class="$style.previewEmpty">{{ selectedEntry.name }}</p>
+                </object>
+              </template>
+              <template v-else-if="previewKind === 'text'">
+                <pre :class="$style.previewText">{{ previewLoading ? '読み込み中...' : previewText }}</pre>
+              </template>
+              <template v-else>
+                <div :class="$style.previewMeta">
+                  <span :class="$style.previewName">{{ selectedEntry.name }}</span><br>
+                  <span>{{ selectedEntry.path }}</span><br>
+                  <span>{{ selectedEntry.type || 'application/octet-stream' }}</span><br>
+                  <span>{{ formatBytes(selectedEntry.size) }}</span>
+                </div>
+              </template>
+            </div>
+            <div :class="$style.fileListPane" @keydown="onFileListKeydown">
+              <div
+                v-for="item in flatDisplayEntries"
+                :key="item.key"
+                :class="[
+                  $style.fileRow,
+                  item.type === 'dir' ? $style.dirRow : $style.fileItemRow,
+                  item.type === 'file' && selectedEntry?.path === item.entry.path ? $style.fileRowSelected : '',
+                ]"
+                :style="{ paddingLeft: `${12 + item.depth * 18}px` }"
+              >
+                <button
+                  v-if="item.type === 'file'"
+                  :ref="element => setFileRowElement(item.entry.path, element)"
+                  type="button"
+                  :class="$style.fileSelectButton"
+                  @click="selectEntry(item.entry)"
+                >
+                  <span :class="$style.fileIcon">[F]</span>
+                  <span :class="$style.fileName">{{ item.entry.name }}</span>
+                  <span :class="$style.fileSize">{{ formatBytes(item.entry.size) }}</span>
+                </button>
+                <template v-else>
+                  <span :class="$style.fileIcon">[D]</span>
+                  <span :class="$style.fileName">{{ item.name }}</span>
+                </template>
+                <Popover.Root v-if="item.type === 'file'">
+                  <Popover.Activator
+                    :class="['btn', 'btn-ghost', 'btn-icon', $style.fileMenuButton]"
+                    aria-label="ファイル操作メニュー"
+                    @click.stop
+                  >
+                    …
+                  </Popover.Activator>
+                  <Popover.Content class="action-menu">
+                    <div class="action-menu-inner">
+                      <Button.Root class="btn btn-ghost-danger w-full" @click="removeSelectedEntry(item.entry.path)">
+                        <Button.Content>削除</Button.Content>
+                      </Button.Root>
+                    </div>
+                  </Popover.Content>
+                </Popover.Root>
+              </div>
+            </div>
+          </div>
+
           <p class="form-label" :class="$style.archiveModeLabel">アップロード形式</p>
           <div :class="$style.archiveModeList">
-            <label class="checkbox-label">
+            <label :class="['checkbox-label', $style.archiveModeOption]">
               <input v-model="archiveMode" type="radio" value="individual" :class="$style.radioInput">
-              個別ファイルとしてアップロード
+              <span :class="$style.archiveModeText">個別ファイルとしてアップロード</span>
             </label>
-            <label v-if="!selectedDir" class="checkbox-label">
+            <label :class="['checkbox-label', $style.archiveModeOption]">
               <input v-model="archiveMode" type="radio" value="gz" :class="$style.radioInput">
-              gzip 圧縮してアップロード <span class="badge badge-muted" :class="$style.badgeMargin">.gz</span>
+              <span :class="$style.archiveModeText">gzip 圧縮してアップロード</span>
+              <span class="badge badge-muted">.gz</span>
             </label>
-            <label v-if="selectedDir" class="checkbox-label">
+            <label :class="['checkbox-label', $style.archiveModeOption]">
               <input v-model="archiveMode" type="radio" value="tar" :class="$style.radioInput">
-              tar にまとめてアップロード <span class="badge badge-muted" :class="$style.badgeMargin">無圧縮</span>
+              <span :class="$style.archiveModeText">tar にまとめてアップロード</span>
+              <span class="badge badge-muted">無圧縮</span>
             </label>
-            <label v-if="selectedDir" class="checkbox-label">
+            <label :class="['checkbox-label', $style.archiveModeOption]">
               <input v-model="archiveMode" type="radio" value="targz" :class="$style.radioInput">
-              tar.gz にまとめてアップロード <span class="badge badge-info" :class="$style.badgeMargin">BGZF・ランダムアクセス対応</span>
+              <span :class="$style.archiveModeText">tar.gz にまとめてアップロード</span>
+              <span class="badge badge-info">BGZF・ランダムアクセス対応</span>
             </label>
+          </div>
+          <div v-if="archiveMode === 'tar' || archiveMode === 'targz'" :class="[$style.libraryNameGroup, 'form-group']">
+            <label class="form-label" for="upload-library-name">ライブラリ名</label>
+            <input
+              id="upload-library-name"
+              v-model="libraryName"
+              class="form-input form-input-mono"
+              type="text"
+              :placeholder="archiveBaseName"
+            >
+            <div class="form-hint">
+              {{ archiveUploadBaseName }}{{ archiveMode === 'tar' ? '.tar' : '.tar.gz' }}
+            </div>
           </div>
         </div>
       </div>
 
       <!-- オプション -->
-      <div class="upload-section">
-        <p class="upload-section-title">オプション</p>
+      <div class="card">
+        <p :class="$style.cardTitle">オプション</p>
         <div :class="$style.optionsList">
           <label class="radio-label">
             <input v-model="visibility" type="radio" value="public" :class="$style.radioInput">
@@ -726,8 +1071,9 @@ onMounted(async () => {
       <!-- 開始ボタン -->
       <div class="mt-4">
         <Button.Root
-          class="btn btn-primary btn-lg"
-          :disabled="!!uploadProgress && !uploadDone && !uploadError"
+          class="btn btn-primary btn-lg w-full"
+          :class="$style.fullButton"
+          :disabled="!selectedTree || selectedTree.entries.length === 0 || !!uploadProgress && !uploadDone && !uploadError"
           @click="startUpload"
         >
           <Button.Content>アップロード開始</Button.Content>
@@ -735,8 +1081,8 @@ onMounted(async () => {
       </div>
 
       <!-- 進捗 -->
-      <div v-if="uploadProgress" class="upload-progress-box mt-4">
-        <p class="upload-progress-filename">
+      <div v-if="uploadProgress" :class="[$style.uploadProgressBox, 'mt-4']">
+        <p :class="$style.uploadProgressFilename">
           <template v-if="uploadProgress.totalFiles > 0">
             <span class="badge badge-info" :class="$style.progressBadge">{{ uploadProgress.fileIndex }}/{{ uploadProgress.totalFiles }}</span>
           </template>
@@ -751,7 +1097,7 @@ onMounted(async () => {
             <Progress.Fill class="progress-fill" />
           </Progress.Track>
         </Progress.Root>
-        <p class="upload-progress-meta">
+        <p :class="$style.uploadProgressMeta">
           {{ formatBytes(uploadProgress.uploadedBytes) }}
           <template v-if="uploadProgress.totalBytes > 0">
             / {{ formatBytes(uploadProgress.totalBytes) }}
@@ -766,6 +1112,17 @@ onMounted(async () => {
         アップロード完了！
         <NirA :to="`/v/${selectedBucketName}/`" :class="$style.doneLink">ファイル一覧を見る →</NirA>
       </div>
+
+      <ConfirmDialog
+        v-model:open="quotaWarningOpen"
+        title="クォータを超える可能性があります"
+        :message="quotaWarningMessage"
+        confirm-label="続行"
+        cancel-label="キャンセル"
+        danger
+        @confirm="confirmQuotaWarning"
+        @cancel="quotaWarningOpen = false"
+      />
     </template>
   </div>
 </template>
@@ -786,12 +1143,231 @@ onMounted(async () => {
   word-break: break-all;
 }
 
+.cardTitle {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 14px;
+}
+
+.uploadProgressBox {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.uploadProgressFilename {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploadProgressMeta {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
 .fileLabel {
   cursor: pointer;
 }
 
 .hiddenInput {
   display: none;
+}
+
+.dropSection {
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.dropSectionActive {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+.filePickerBar {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--color-bg);
+}
+
+.fileSelectCardTitle {
+  margin-bottom: 4px;
+}
+
+.dropHint {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.fileBrowser {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.previewPane,
+.fileListPane {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  min-height: 260px;
+  overflow: auto;
+}
+
+.previewPane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  height: 360px;
+}
+
+.fileListPane {
+  min-height: 100px;
+  max-height: 360px
+}
+
+.previewImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.previewVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.previewAudioWrap {
+  width: min(100%, 420px);
+  padding: 16px;
+  text-align: center;
+}
+
+.previewAudio {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.previewObject {
+  width: 100%;
+  height: 380px;
+  border: 0;
+}
+
+.previewText {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.previewEmpty,
+.previewMeta {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  padding: 16px;
+  text-align: center;
+}
+
+.previewMeta {
+  width: 100%;
+  word-break: break-all;
+}
+
+.previewName {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.fileListPane {
+  padding: 0;
+}
+
+.fileRow {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  font: inherit;
+  padding: 7px 12px;
+}
+
+.fileItemRow {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.fileItemRow:hover {
+  background: var(--color-surface);
+}
+
+.fileRowSelected {
+  background: var(--color-primary-surface, color-mix(in srgb, var(--color-primary) 12%, transparent));
+  border-left: 3px solid var(--color-primary);
+  padding-left: 9px;
+}
+
+.fileRowSelected .fileSelectButton {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.dirRow {
+  grid-template-columns: auto minmax(0, 1fr);
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.fileSelectButton {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+.fileMenuButton {
+  align-self: center;
+}
+
+.fileIcon {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileSize {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
 }
 
 .archiveModeLabel {
@@ -804,12 +1380,28 @@ onMounted(async () => {
   gap: 6px;
 }
 
-.radioInput {
-  accent-color: var(--color-primary);
+.archiveModeOption {
+  display: grid;
+  grid-template-columns: 16px minmax(0, max-content) auto;
+  justify-content: start;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  width: fit-content;
+  max-width: 100%;
 }
 
-.badgeMargin {
-  margin-left: 4px;
+.archiveModeText {
+  min-width: 0;
+}
+
+.libraryNameGroup {
+  margin-top: 14px;
+  max-width: 360px;
+}
+
+.radioInput {
+  accent-color: var(--color-primary);
 }
 
 .optionsList {
@@ -829,5 +1421,25 @@ onMounted(async () => {
 .doneLink {
   margin-left: 8px;
   font-weight: 600;
+}
+
+.fullButton {
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .fileBrowser {
+    grid-template-columns: 1fr;
+  }
+
+  .archiveModeOption {
+    grid-template-columns: 16px minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .archiveModeOption :global(.badge) {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 </style>
