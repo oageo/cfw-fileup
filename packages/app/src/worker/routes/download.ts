@@ -6,6 +6,7 @@ import { aidxRegExp, parseEaidx } from '../../shared/eaid-x';
 import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
+import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 
 const app = new Hono<{ Bindings: Env }>();
 const downloadCacheName = 'download';
@@ -135,6 +136,7 @@ async function decompressGzipChunk(data: Uint8Array): Promise<Uint8Array> {
 app.get('/d/:fileId', async (c) => {
 	const db = getDb(c.env);
 	const fileId = c.req.param('fileId');
+	if (fileId.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `fileId must be at most ${MAX_ID_LENGTH} characters` });
 	if (!aidxRegExp.test(fileId)) throw new HTTPException(400, { message: 'Invalid file ID' });
 	const cachedMissingFile = await matchMissingFileCache(fileId);
 	if (cachedMissingFile !== null) return cachedMissingFile;
@@ -149,6 +151,9 @@ app.get('/d/:fileId', async (c) => {
 	if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
 
 	const download = new DownloadContext(file, c.req.raw);
+	if (download.fileQuery !== null && download.fileQuery.length > MAX_FILE_PATH_LENGTH) {
+		throw new HTTPException(400, { message: `file must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+	}
 
 	if (download.isMetaMode) {
 		return c.json({
@@ -217,6 +222,7 @@ app.get('/d/:fileId', async (c) => {
 	if (file.visibility !== 'public') {
 		const fileToken = c.req.query('token');
 		if (fileToken) {
+			if (fileToken.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `token must be at most ${MAX_ID_LENGTH} characters` });
 			const fileTokenRecord = await db
 				.select()
 				.from(fileAccessTokens)
@@ -259,6 +265,9 @@ app.get('/d/:fileId', async (c) => {
 
 	if ((file.isTargz || file.isTar) && download.isListMode) {
 		const listPath = c.req.query('list');
+		if (listPath && listPath.length > MAX_FILE_PATH_LENGTH) {
+			throw new HTTPException(400, { message: `list must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+		}
 		if (file.isTargz) {
 			const index = await db.select().from(targzFiles).where(
 				listPath

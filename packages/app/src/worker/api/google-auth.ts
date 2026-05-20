@@ -7,6 +7,7 @@ import { generateToken } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
+import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -49,6 +50,12 @@ app.get('/', async (c) => {
 	const db = getDb(c.env);
 	const passphrase = c.req.query('passphrase');
 	const signupUsername = c.req.query('username');
+	if (passphrase && passphrase.length > MAX_PASSPHRASE_LENGTH) {
+		throw new HTTPException(400, { message: `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters` });
+	}
+	if (signupUsername && signupUsername.length > MAX_USERNAME_LENGTH) {
+		throw new HTTPException(400, { message: `username must be at most ${MAX_USERNAME_LENGTH} characters` });
+	}
 
 	// Clean up expired states
 	await db.delete(oauthStates).where(lt(oauthStates.expiresAt, Date.now()));
@@ -87,6 +94,9 @@ app.get('/callback', async (c) => {
 
 	if (!code || !state) {
 		return c.redirect(googleErrorLocation('missing_params'), 302);
+	}
+	if (state.length > MAX_ID_LENGTH) {
+		return c.redirect(googleErrorLocation('invalid_state'), 302);
 	}
 
 	// Validate state (CSRF protection)

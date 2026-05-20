@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { MAX_APP_SETTING_TEXT_LENGTH } from './const.js';
 
 /** 禁止ユーザー名のデフォルト値（カンマ区切り） */
 export const DEFAULT_FORBIDDEN_USERNAMES =
@@ -18,9 +19,9 @@ export type RegistrationMode = v.InferOutput<typeof registrationModeSchema>;
 export const KNOWN_SETTINGS = {
 	registration_mode: v.optional(registrationModeSchema, 'passphrase' satisfies RegistrationMode),
 	google_required: v.optional(v.picklist(['true', 'false']), 'false'),
-	indieauth_blocked_servers: v.optional(v.string(), ''),
-	forbidden_usernames: v.optional(v.string(), DEFAULT_FORBIDDEN_USERNAMES),
-	forbidden_bucket_names: v.optional(v.string(), DEFAULT_FORBIDDEN_BUCKET_NAMES),
+	indieauth_blocked_servers: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
+	forbidden_usernames: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_USERNAMES),
+	forbidden_bucket_names: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_BUCKET_NAMES),
 } as const;
 
 export type KnownSettingKey = keyof typeof KNOWN_SETTINGS;

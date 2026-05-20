@@ -10,6 +10,7 @@ import { setPendingUpload } from '@/store/pending-upload';
 import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import InputDialog from '@/components/input-dialog.vue';
+import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
 
 const props = defineProps<{
 	bucketName: string;
@@ -71,7 +72,7 @@ const directoryNameSchema = v.pipe(
 	v.string(),
 	v.trim(),
 	v.minLength(1, 'フォルダ名を入力してください'),
-	v.maxLength(255, 'フォルダ名は255文字以内で入力してください'),
+	v.maxLength(MAX_DIRECTORY_NAME_LENGTH, `フォルダ名は${MAX_DIRECTORY_NAME_LENGTH}文字以内で入力してください`),
 	v.regex(/^[^/\\]+$/, 'フォルダ名に / や \\ は使えません'),
 );
 
@@ -229,6 +230,10 @@ async function createDirectory(name: string): Promise<void> {
 	if (!bucketId.value) return;
 	mkdirError.value = '';
 	const path = `${props.filePath}${name}/`;
+	if (path.length > MAX_FILE_PATH_LENGTH) {
+		mkdirError.value = `パスは${MAX_FILE_PATH_LENGTH}文字以内で入力してください`;
+		return;
+	}
 	const dirResult = await apiPost('/api/directories/create', { bucketId: bucketId.value!, path });
 	if (!dirResult.ok) {
 		mkdirError.value = dirResult.data.error;

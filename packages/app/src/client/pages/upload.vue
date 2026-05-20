@@ -8,6 +8,7 @@ import NirA from '@/components/nira.vue';
 import { TarArchiver, BgzfTarArchiver, type TarIndex, type TarGzIndex, type ArchiveProgress } from 'bgzf';
 import { takePendingUpload } from '@/store/pending-upload';
 import UploadDestinationDialog from '@/components/upload-destination-dialog.vue';
+import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
 
@@ -66,6 +67,13 @@ function getUploadPaths(): string[] {
 			? `${uploadPrefix.value}${f.name}.gz`
 			: `${uploadPrefix.value}${f.name}`,
 	);
+}
+
+function validateUploadPaths(paths: string[]): boolean {
+	const tooLongPath = paths.find(path => path.length > MAX_FILE_PATH_LENGTH);
+	if (!tooLongPath) return true;
+	uploadError.value = `パスは${MAX_FILE_PATH_LENGTH}文字以内で入力してください: ${tooLongPath}`;
+	return false;
 }
 
 const supportsFileAccessAPI = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
@@ -492,6 +500,7 @@ async function startUpload(): Promise<void> {
 
 	// Pre-upload existence check
 	const paths = getUploadPaths();
+	if (!validateUploadPaths(paths)) return;
 	if (paths.length > 0) {
 		const conflicts: string[] = [];
 		for (const path of paths) {
@@ -525,6 +534,7 @@ async function startUpload(): Promise<void> {
 		if (archiveMode.value === 'individual') {
 			const allEntries: Array<{ path: string; file: File }> = [];
 			for await (const entry of TarArchiver.walkDirectory(selectedDir.value)) allEntries.push(entry);
+			if (!validateUploadPaths(allEntries.map(entry => entry.path))) return;
 			const totalFiles = allEntries.length;
 			const totalBytes = allEntries.reduce((s, e) => s + e.file.size, 0);
 			let cumulativeBytes = 0;

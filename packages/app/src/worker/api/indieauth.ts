@@ -7,6 +7,7 @@ import { generateToken } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
+import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MISSKEY_OAUTH_SCOPE = 'read:account';
@@ -287,6 +288,12 @@ app.get('/begin', async (c) => {
 	if (!profileUrlRaw) {
 		throw new HTTPException(400, { message: 'profile_url is required' });
 	}
+	if (passphrase && passphrase.length > MAX_PASSPHRASE_LENGTH) {
+		throw new HTTPException(400, { message: `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters` });
+	}
+	if (signupUsername && signupUsername.length > MAX_USERNAME_LENGTH) {
+		throw new HTTPException(400, { message: `username must be at most ${MAX_USERNAME_LENGTH} characters` });
+	}
 
 	const profileUrl = normalizeProfileUrl(profileUrlRaw);
 	if (!profileUrl) {
@@ -349,6 +356,9 @@ app.get('/callback', async (c) => {
 
 	if (!code || !state) {
 		return c.redirect('/signin?indieauth_error=missing_params', 302);
+	}
+	if (state.length > MAX_ID_LENGTH) {
+		return c.redirect('/signin?indieauth_error=invalid_state', 302);
 	}
 
 	// Validate state (CSRF protection)

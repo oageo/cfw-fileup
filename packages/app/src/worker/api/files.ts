@@ -11,6 +11,7 @@ import { shortGetCache } from '../middleware/short-get-cache';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
+import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -103,13 +104,18 @@ app.use('/ls', shortGetCache({ maxAgeSeconds: 10 }));
 app.get('/ls', async (c) => {
 	const bucketName = c.req.query('bucketName');
 	if (!bucketName) throw new HTTPException(400, { message: 'bucketName is required' });
-	return c.json(await listFiles(c, bucketName, c.req.query('path') ?? '', false, false), 200);
+	const path = c.req.query('path') ?? '';
+	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw new HTTPException(400, { message: `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters` });
+	if (path.length > MAX_FILE_PATH_LENGTH) throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+	return c.json(await listFiles(c, bucketName, path, false, false), 200);
 });
 
 app.get('/meta', async (c) => {
 	const bucketName = c.req.query('bucketName');
 	const path = c.req.query('path');
 	if (!bucketName || path == null) throw new HTTPException(400, { message: 'bucketName and path are required' });
+	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw new HTTPException(400, { message: `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters` });
+	if (path.length > MAX_FILE_PATH_LENGTH) throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
 
 	const db = getDb(c.env);
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
