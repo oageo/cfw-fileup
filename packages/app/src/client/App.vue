@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, defineComponent, h, watch } from 'vue';
 import { Button, Popover, useTheme } from '@vuetify/v0';
-import { CircleFadingArrowUp, Moon, Sun, Upload } from '@lucide/vue';
+import { CircleFadingArrowUp, Moon, Sun, Upload, User } from '@lucide/vue';
 import { mainRouter } from './router';
 import { fetchCurrentUser, authStore, clearAuth } from './store/auth';
 import { navigateFn } from './navigate';
@@ -102,7 +102,7 @@ function toggleTheme(): void {
           <template v-if="authStore.user">
             <Popover.Root v-model="appNavOpen">
               <Popover.Activator class="btn btn-ghost app-nav-username" aria-haspopup="true">
-                {{ authStore.user.username }}
+                <User :size="16" :stroke-width="2" />{{ authStore.user.username }}
               </Popover.Activator>
               <Popover.Content class="app-nav-user-menu">
                 <div class="app-nav-user-menu-inner">
