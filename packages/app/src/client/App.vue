@@ -135,7 +135,7 @@ function toggleTheme(): void {
             </Popover.Root>
           </template>
           <template v-else>
-            <NirA to="/signin" class="btn btn-primary">サインイン</NirA>
+            <NirA to="/signin" class="btn btn-primary me-2">サインイン</NirA>
           </template>
         </div>
       </div>

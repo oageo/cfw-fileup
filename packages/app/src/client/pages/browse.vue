@@ -428,7 +428,7 @@ watch(() => [entryPath.value, queryToken.value], () => {
             <div class="flex gap-2">
               <div :class="$style.passphraseInputWrapper">
                 <label class="form-label">合言葉</label>
-                <Input.Root v-model="passphraseInput" type="password" required validate-on="submit">
+                <Input.Root v-model="passphraseInput" type="input" required validate-on="submit">
                   <Input.Control placeholder="合言葉" class="form-input" autocomplete="current-password" />
                   <Input.Error v-slot="{ errors }">
                     <span v-for="e in errors" :key="e" class="form-error">{{ e }}</span>
