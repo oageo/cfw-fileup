@@ -129,15 +129,15 @@ function toggleTheme(): void {
           <span :class="$style.uploadIcon" aria-hidden="true">
             <Upload :size="16" :stroke-width="2" />
           </span>
-          <span>アップロード</span>
+          <span v-if="!latestUploadJob">アップロード</span>
         </NirA>
-        <NirA v-if="latestUploadJob" :to="navUploadLink" :class="$style.uploadStatus">
+        <NirA v-if="latestUploadJob" :to="navUploadLink" :class="[$style.uploadStatus, 'ms-auto']">
           <span :class="$style.uploadText">
             {{ navUploadText }}
           </span>
           <span :class="$style.uploadPercent">{{ navUploadPercent }}%</span>
         </NirA>
-        <NirA to="/my/uploadings?tab=browser" :class="$style.uploadHistoryButton" aria-label="アップロード履歴">
+        <NirA to="/my/uploadings?tab=browser" :class="[$style.uploadHistoryButton, ...(!latestUploadJob ? ['ms-auto'] : [])]" aria-label="アップロード履歴">
           <CircleFadingArrowUp :size="16" :stroke-width="2" />
         </NirA>
         <span v-if="latestUploadJob" :class="$style.uploadProgress" aria-hidden="true">

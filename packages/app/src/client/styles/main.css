@@ -493,28 +493,21 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 .mt-2 { margin-top: var(--space-2); }
 .mt-3 { margin-top: var(--space-3); }
 .mt-4 { margin-top: var(--space-4); }
+.mt-auto { margin-top: auto; }
 .mb-3 { margin-bottom: var(--space-3); }
 .mb-4 { margin-bottom: var(--space-4); }
+.mb-auto { margin-bottom: auto; }
 .ms-1 { margin-inline-start: var(--space-1); }
 .ms-2 { margin-inline-start: var(--space-2); }
 .ms-3 { margin-inline-start: var(--space-3); }
 .ms-4 { margin-inline-start: var(--space-4); }
+.ms-auto { margin-inline-start: auto; }
 .me-1 { margin-inline-end: var(--space-1); }
 .me-2 { margin-inline-end: var(--space-2); }
 .me-3 { margin-inline-end: var(--space-3); }
 .me-4 { margin-inline-end: var(--space-4); }
-.mx-n1 { margin-inline: calc(var(--space-1) * -1); }
-.mx-n2 { margin-inline: calc(var(--space-2) * -1); }
-.mx-n3 { margin-inline: calc(var(--space-3) * -1); }
-.mx-n4 { margin-inline: calc(var(--space-4) * -1); }
-.ms-n1 { margin-inline-start: calc(var(--space-1) * -1); }
-.ms-n2 { margin-inline-start: calc(var(--space-2) * -1); }
-.ms-n3 { margin-inline-start: calc(var(--space-3) * -1); }
-.ms-n4 { margin-inline-start: calc(var(--space-4) * -1); }
-.me-n1 { margin-inline-end: calc(var(--space-1) * -1); }
-.me-n2 { margin-inline-end: calc(var(--space-2) * -1); }
-.me-n3 { margin-inline-end: calc(var(--space-3) * -1); }
-.me-n4 { margin-inline-end: calc(var(--space-4) * -1); }
+.me-auto { margin-inline-end: auto; }
+.m-auto { margin: auto; }
 .text-muted { color: var(--color-text-muted); }
 .text-danger { color: var(--color-danger); }
 .text-success { color: var(--color-success); }
