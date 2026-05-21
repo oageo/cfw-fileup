@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { Folder } from '@lucide/vue';
+import { FileIcon, Folder, LayoutGrid, List } from '@lucide/vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -18,6 +18,7 @@ import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest } f
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
 import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
+import type { DistributiveOmit } from '../../shared/type-hack';
 
 const props = defineProps<{
 	bucketName: string;
@@ -41,6 +42,7 @@ interface DisplayEntry {
 	fileId?: string;
 	label: string;
 	visibility?: FileVisibility;
+	previewUrl?: string;
 }
 
 const downloadUrl = computed(() => {
@@ -82,6 +84,19 @@ const directoryNameSchema = v.pipe(
 const deleteDialog = ref(false);
 const deleteTarget = ref<DisplayEntry | null>(null);
 const archiveDeleteDialog = ref(false);
+
+type ViewMode = 'list' | 'grid';
+const VIEW_MODE_KEY = 'cfw-fileup:dir-view-mode';
+const viewMode = ref<ViewMode>((localStorage.getItem(VIEW_MODE_KEY) as ViewMode | null) ?? 'list');
+
+function setViewMode(mode: ViewMode): void {
+	viewMode.value = mode;
+	localStorage.setItem(VIEW_MODE_KEY, mode);
+}
+
+function isImageMime(mime: string): boolean {
+	return mime.startsWith('image/');
+}
 
 // 一括選択・削除用の状態
 const selectedPaths = ref<Set<string>>(new Set());
@@ -238,7 +253,7 @@ function getArchiveDownloadWorker(): Worker {
 	return archiveDownloadWorker;
 }
 
-function runArchiveDownloadWorker(request: Omit<ArchiveDownloadWorkerRequest, 'id'>): Promise<{ opfsName: string; filename: string; mimeType: string }> {
+function runArchiveDownloadWorker(request: DistributiveOmit<ArchiveDownloadWorkerRequest, 'id'>): Promise<{ opfsName: string; filename: string; mimeType: string }> {
 	const id = String(++archiveDownloadRequestId);
 	return new Promise((resolve, reject) => {
 		archiveDownloadRequests.set(id, { resolve, reject });
@@ -544,10 +559,12 @@ function buildArchiveEntries(): void {
 		const rest = e.path.slice(archivePath.value.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
+			//const previewUrl = isImageMime(e.mimeType) ? `/d/${props.fileId}?file=${encodeURIComponent(e.path)}` : undefined;
 			result.push({
 				key: e.id,
 				name: rest,
 				link: `/v/${props.bucketName}/${props.filePath}?file=${encodeURIComponent(e.path)}`,
+				//previewUrl,
 				isDir: false,
 				fullPath: e.path,
 				size: e.size,
@@ -622,16 +639,20 @@ async function load(): Promise<void> {
 				})()
 				: await fetchPublicDirectoryEntries();
 			if (data === null) return;
-			entries.value = data.entries.map(e => e.type === 'dir'
-				? {
+			entries.value = data.entries.map(e => {
+				if (e.type === 'dir') {
+					return {
 					key: `dir:${e.name}`,
 					name: e.name,
 					link: `/v/${props.bucketName}/${props.filePath}${e.name}/`,
 					isDir: true,
 					fullPath: `${props.filePath}${e.name}/`,
 					label: 'フォルダ',
+					};
 				}
-				: {
+				const mime = e.isTargz ? 'application/gzip' : e.isTar ? 'application/x-tar' : (e.mimeType ?? '');
+				const previewUrl = isImageMime(mime) && e.visibility === 'public' && e.fileId ? `/d/${e.fileId}` : undefined;
+				return {
 					key: `file:${e.name}`,
 					name: e.name,
 					link: `/v/${props.bucketName}/${e.path}`,
@@ -639,9 +660,11 @@ async function load(): Promise<void> {
 					fullPath: e.path ?? e.name,
 					size: e.size,
 					fileId: e.fileId,
-					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : (e.mimeType ?? ''),
+					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : mime,
 					visibility: e.visibility,
-				});
+					previewUrl,
+				};
+			});
 		}
 	} catch (e) {
 		error.value = String(e);
@@ -831,6 +854,34 @@ watch([isPartiallySelected, isAllSelected], async () => {
       </template>
     </div>
 
+    <div :class="$style.viewToggle" aria-label="表示形式">
+      <div v-if="isArchive && archivePath !== ''" class="mb-2">
+        <button :class="$style.upButton" type="button" @click="navigateArchiveUp">..</button>
+      </div>
+      <div v-else-if="parentPath()" class="mb-2">
+        <NirA :to="parentPath()!" :class="$style.upLink">..</NirA>
+      </div>
+
+      <button
+        :class="['ms-auto', $style.viewToggleButton, $style.viewListButton, viewMode === 'list' && $style.viewToggleButtonActive]"
+        type="button"
+        title="リストビュー"
+        @click="setViewMode('list')"
+      >
+        <List class="inline-icon" :size="16" :stroke-width="2" />
+        <span>リスト</span>
+      </button>
+      <button
+        :class="[$style.viewToggleButton, $style.viewGridButton, viewMode === 'grid' && $style.viewToggleButtonActive]"
+        type="button"
+        title="グリッドビュー"
+        @click="setViewMode('grid')"
+      >
+        <LayoutGrid class="inline-icon" :size="16" :stroke-width="2" />
+        <span>グリッド</span>
+      </button>
+    </div>
+
     <div v-if="loading" class="page-loading">
       <span class="spinner" />読み込み中...
     </div>
@@ -848,7 +899,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
       >
         <div v-if="isDragOver" class="drop-zone-overlay">ここにドロップしてアップロード</div>
 
-        <div :class="[$style.tableCard, 'card']">
+        <div v-if="viewMode === 'list'" :class="[$style.tableCard, 'card']">
           <div class="table-responsive">
           <table class="data-table">
             <thead>
@@ -872,16 +923,6 @@ watch([isPartiallySelected, isAllSelected], async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="isArchive && archivePath !== ''">
-                <td :colspan="3">
-                  <button :class="[$style.upButton, 'text-muted', 'font-mono']" @click="navigateArchiveUp">..</button>
-                </td>
-              </tr>
-              <tr v-else-if="parentPath()">
-                <td :colspan="tableColspan">
-                  <NirA :to="parentPath()!" :class="[$style.upLink, 'text-muted', 'font-mono']">..</NirA>
-                </td>
-              </tr>
               <tr v-for="entry in entries" :key="entry.key">
                 <!-- チェックボックスセル -->
                 <td v-if="!isArchive" :class="$style.checkboxCell">
@@ -930,6 +971,75 @@ watch([isPartiallySelected, isAllSelected], async () => {
           </table>
           </div>
         </div>
+        <template v-else>
+          <div v-if="entries.length === 0" class="empty-state card">
+            <p>エントリがありません。</p>
+          </div>
+          <div v-else :class="$style.gridView">
+            <div
+              v-for="entry in entries"
+              :key="entry.key"
+              :class="[$style.gridCard, isEntrySelected(entry) && $style.gridCardSelected]"
+            >
+              <button
+                v-if="isArchive && entry.isDir"
+                :class="$style.gridCardLink"
+                type="button"
+                :aria-label="entry.name"
+                @click="navigateArchiveDir(entry.fullPath)"
+              />
+              <NirA
+                v-else
+                :to="entry.link"
+                :class="$style.gridCardLink"
+                :aria-label="entry.name"
+              />
+              <div v-if="!isArchive" :class="$style.gridCheckboxCell">
+                <input
+                  type="checkbox"
+                  :class="$style.checkbox"
+                  :checked="isEntrySelected(entry)"
+                  :disabled="!canSelectEntries"
+                  @change="toggleSelect(entry.fullPath)"
+                >
+              </div>
+              <div
+                :class="[$style.gridCardPreview, isArchive && entry.isDir ? $style.gridCardPreviewButton : '']"
+                type="button"
+              >
+                <img
+                  v-if="entry.previewUrl"
+                  :src="entry.previewUrl"
+                  :alt="entry.name"
+                  :class="$style.gridCardImage"
+                  width="300"
+                  height="300"
+                  loading="lazy"
+                  decoding="async"
+                >
+                <div v-else :class="$style.gridCardIcon">
+                  <Folder v-if="entry.isDir" :size="42" :stroke-width="1.8" aria-hidden="true" />
+                  <FileIcon v-else :size="34" :stroke-width="1.8" aria-hidden="true" />
+                </div>
+              </div>
+              <div :class="$style.gridCardInfo">
+                <div :class="$style.gridCardName" :title="entry.name">{{ entry.name }}</div>
+                <div :class="$style.gridCardMeta">
+                  <span v-if="entry.size != null" :class="$style.gridCardSize">{{ formatSize(entry.size) }}</span>
+                  <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
+                  <span v-if="!entry.isDir && entry.visibility != null && !isArchive" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
+                    {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
+                  </span>
+                </div>
+                <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
+                  <Button.Root :class="['btn', 'btn-ghost-danger', $style.gridCardDeleteButton]" @click="requestDeleteEntry(entry)">
+                    <Button.Content>削除</Button.Content>
+                  </Button.Root>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </template>
 
@@ -1026,6 +1136,48 @@ watch([isPartiallySelected, isAllSelected], async () => {
   overflow: hidden;
 }
 
+.viewToggle {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.viewToggleButton {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 72px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d5dbe3);
+}
+
+.viewListButton {
+  border-radius: 6px 0 0 6px;
+}
+
+.viewGridButton {
+  margin-left: -1px;
+  border-radius: 0 6px 6px 0;
+}
+
+.viewToggleButton:hover {
+  background: var(--color-bg);
+}
+
+.viewToggleButtonActive,
+.viewToggleButtonActive:hover {
+  z-index: 1;
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 .checkboxCell {
   width: 1em;
   padding-right: 6px !important;
@@ -1045,15 +1197,41 @@ watch([isPartiallySelected, isAllSelected], async () => {
 }
 
 .upButton {
-  font-size: 0.875rem;
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  min-width: 42px;
+  padding: 4px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d5dbe3);
+  border-radius: 6px;
   cursor: pointer;
-  padding: 0;
+  text-decoration: none;
 }
 
 .upLink {
-  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  min-width: 42px;
+  padding: 4px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #d5dbe3);
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.upButton:hover,
+.upLink:hover {
+  color: #fff;
+  background: var(--color-primary);
+  text-decoration: none;
 }
 
 .nameCell {
@@ -1103,5 +1281,141 @@ watch([isPartiallySelected, isAllSelected], async () => {
 
 .actionsCell {
   white-space: nowrap;
+}
+
+.gridView {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.gridCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e0e0e0);
+  border-radius: 8px;
+}
+
+.gridCardSelected {
+  border-color: var(--color-border, #e0e0e0);
+}
+
+.gridCardSelected::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: "";
+  border: 2px solid var(--color-primary);
+  border-radius: 7px;
+}
+
+.gridCardLink {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+
+.gridCheckboxCell {
+  position: absolute;
+  z-index: 3;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  padding: 3px;
+  background: var(--color-surface, #fff);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 14%);
+}
+
+.gridCardPreview {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 150px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  background: var(--color-bg);
+}
+
+.gridCardPreviewButton {
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+.gridCardImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--color-bg);
+}
+
+.gridCardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--color-text-muted);
+}
+
+.gridCardInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  height: 100%;
+  padding: 8px;
+}
+
+.gridCardName {
+  overflow: hidden;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gridCardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+}
+
+.gridCardSize {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.gridCardActions {
+  position: relative;
+  z-index: 3;
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+.gridCardDeleteButton {
+  width: 100%;
+  justify-content: center;
+  padding-block: 4px;
+  font-size: 0.75rem;
 }
 </style>
