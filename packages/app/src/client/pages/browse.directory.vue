@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, watch } from 'vue';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
@@ -13,6 +13,7 @@ import ConfirmDialog from '@/components/confirm-dialog.vue';
 import InputDialog from '@/components/input-dialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { UploadTree } from '@/utils/upload-tree';
+import type { ArchiveDownloadWorkerMessage, ArchiveDownloadWorkerRequest, ArchiveDownloadProgress } from '@/workers/archive-download.worker';
 
 const props = defineProps<{
 	bucketName: string;
@@ -33,6 +34,7 @@ interface DisplayEntry {
 	isDir: boolean;
 	fullPath: string;
 	size?: number;
+	fileId?: string;
 	label: string;
 	visibility?: FileVisibility;
 }
@@ -89,6 +91,17 @@ const excludedPaths = ref<Set<string>>(new Set());
 const selectAllMode = ref(false);
 const selectionPopoverOpen = ref(false);
 const headerCheckbox = ref<HTMLInputElement | null>(null);
+const archiveDownloadError = ref('');
+const archiveDownloadProgress = ref<ArchiveDownloadProgress | null>(null);
+let archiveDownloadWorker: Worker | null = null;
+let archiveDownloadRequestId = 0;
+const archiveDownloadRequests = new Map<string, {
+	resolve: (value: { opfsName: string; fileHandle: FileSystemFileHandle; filename: string; mimeType: string }) => void;
+	reject: (error: Error & { opfsName?: string }) => void;
+}>();
+const archiveCleanupRequests = new Map<string, () => void>();
+const archiveTempOpfsNames = new Set<string>();
+const archiveObjectUrls = new Set<string>();
 
 /** 選択可能なエントリ */
 const selectableEntries = computed(() => entries.value);
@@ -115,6 +128,18 @@ const tableColspan = computed(() => {
 	if (authStore.user && bucketId.value) return 6;
 	if (authStore.user) return 5;
 	return 4;
+});
+
+const archiveProgressLabel = computed(() => {
+	const progress = archiveDownloadProgress.value;
+	if (!progress) return '';
+	const phase = progress.phase === 'resolving' ? '対象解決中'
+		: progress.phase === 'reading' ? '読み込み中'
+			: progress.phase === 'writing' ? '書き込み中'
+				: '完了';
+	const total = progress.totalFiles > 0 ? ` / ${progress.totalFiles}` : '';
+	const current = progress.currentFile ? `: ${progress.currentFile}` : '';
+	return `${phase} ${progress.processedFiles}${total}${current}`;
 });
 
 /** 全選択チェックボックスの状態 */
@@ -186,6 +211,146 @@ function requestBulkDelete(): void {
 	if (!canDeleteSelectedEntries.value) return;
 	selectionPopoverOpen.value = false;
 	bulkDeleteDialog.value = true;
+}
+
+function getArchiveDownloadWorker(): Worker {
+	if (archiveDownloadWorker) return archiveDownloadWorker;
+	archiveDownloadWorker = new Worker(new URL('../workers/archive-download.worker.ts', import.meta.url), { type: 'module' });
+	archiveDownloadWorker.onmessage = (event: MessageEvent<ArchiveDownloadWorkerMessage>) => {
+		const message = event.data;
+		if (message.type === 'progress') {
+			archiveDownloadProgress.value = message.progress;
+			return;
+		}
+		if (message.type === 'cleanup-done') {
+			archiveCleanupRequests.get(message.id)?.();
+			archiveCleanupRequests.delete(message.id);
+			return;
+		}
+		const pending = archiveDownloadRequests.get(message.id);
+		if (!pending) return;
+		archiveDownloadRequests.delete(message.id);
+		if (message.type === 'done') {
+			pending.resolve({ opfsName: message.opfsName, fileHandle: message.fileHandle, filename: message.filename, mimeType: message.mimeType });
+		} else {
+			const error = new Error(message.error) as Error & { opfsName?: string };
+			error.opfsName = message.opfsName;
+			pending.reject(error);
+		}
+	};
+	return archiveDownloadWorker;
+}
+
+function runArchiveDownloadWorker(request: Omit<ArchiveDownloadWorkerRequest, 'id'>): Promise<{ opfsName: string; fileHandle: FileSystemFileHandle; filename: string; mimeType: string }> {
+	const id = String(++archiveDownloadRequestId);
+	return new Promise((resolve, reject) => {
+		archiveDownloadRequests.set(id, { resolve, reject });
+		getArchiveDownloadWorker().postMessage({ ...request, id });
+	});
+}
+
+function cleanupOpfsFile(opfsName: string | undefined): Promise<void> {
+	if (!opfsName) return;
+	const id = `cleanup-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	return new Promise((resolve) => {
+		archiveCleanupRequests.set(id, resolve);
+		getArchiveDownloadWorker().postMessage({ id, mode: 'cleanup', opfsName } satisfies ArchiveDownloadWorkerRequest);
+	});
+}
+
+async function cleanupArchiveDownloads(): Promise<void> {
+	for (const url of archiveObjectUrls) URL.revokeObjectURL(url);
+	archiveObjectUrls.clear();
+	const names = Array.from(archiveTempOpfsNames);
+	archiveTempOpfsNames.clear();
+	await Promise.all(names.map(name => cleanupOpfsFile(name)));
+}
+
+async function downloadOpfsFile(result: { opfsName: string; fileHandle: FileSystemFileHandle; filename: string; mimeType: string }): Promise<void> {
+	archiveTempOpfsNames.add(result.opfsName);
+	const file = await result.fileHandle.getFile();
+	const url = URL.createObjectURL(file);
+	archiveObjectUrls.add(url);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = result.filename;
+	document.body.append(a);
+	a.click();
+	a.remove();
+}
+
+function archiveBaseNameFromPath(path: string): string {
+	const segments = path.split('/').filter(Boolean);
+	return (segments.at(-1) ?? props.bucketName).replace(/\.(?:tar|tar\.gz)$/i, '') || 'archive';
+}
+
+function selectedArchiveTargets(): Array<
+	| { type: 'file'; path: string; fileId: string; size: number }
+	| { type: 'directory'; path: string }
+> {
+	if (selectAllMode.value) return [{ type: 'directory', path: props.filePath }];
+	return Array.from(selectedPaths.value).map((path) => {
+		const entry = entries.value.find(item => item.fullPath === path);
+		if (!entry || entry.isDir) return { type: 'directory' as const, path };
+		if (!entry.fileId) throw new Error(`fileId is missing for ${entry.name}`);
+		return { type: 'file' as const, path, fileId: entry.fileId, size: entry.size ?? 0 };
+	});
+}
+
+async function startDirectoryArchiveDownload(format: 'tar' | 'zip'): Promise<void> {
+	archiveDownloadError.value = '';
+	archiveDownloadProgress.value = null;
+	if (!navigator.storage?.getDirectory) {
+		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、アーカイブを作成できません。';
+		return;
+	}
+	try {
+		const baseName = archiveBaseNameFromPath(props.filePath);
+		const result = await runArchiveDownloadWorker({
+			mode: 'directory',
+			format,
+			bucketName: props.bucketName,
+			basePath: props.filePath,
+			targets: selectedArchiveTargets(),
+			excludePaths: Array.from(excludedPaths.value),
+			authHeaders: authHeaders(),
+			filename: `${baseName}.${format}`,
+		});
+		await downloadOpfsFile(result);
+		archiveDownloadProgress.value = null;
+	} catch (err) {
+		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
+		archiveDownloadWorker?.terminate();
+		archiveDownloadWorker = null;
+		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
+	}
+}
+
+async function startArchiveToZipDownload(): Promise<void> {
+	archiveDownloadError.value = '';
+	archiveDownloadProgress.value = null;
+	if (!props.fileId) return;
+	if (!navigator.storage?.getDirectory) {
+		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、ZIP を作成できません。';
+		return;
+	}
+	try {
+		const result = await runArchiveDownloadWorker({
+			mode: 'archive-to-zip',
+			fileId: props.fileId,
+			token: props.token,
+			isTargz: props.isTargz,
+			filename: `${archiveBaseNameFromPath(props.filePath)}.zip`,
+			authHeaders: authHeaders(),
+		});
+		await downloadOpfsFile(result);
+		archiveDownloadProgress.value = null;
+	} catch (err) {
+		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
+		archiveDownloadWorker?.terminate();
+		archiveDownloadWorker = null;
+		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
+	}
 }
 
 function toggleSelect(path: string): void {
@@ -323,6 +488,7 @@ function buildArchiveEntries(): void {
 				isDir: false,
 				fullPath: e.path,
 				size: e.size,
+				fileId: e.id,
 				label: e.mimeType,
 			});
 		} else {
@@ -409,6 +575,7 @@ async function load(): Promise<void> {
 					isDir: false,
 					fullPath: e.path ?? e.name,
 					size: e.size,
+					fileId: e.fileId,
 					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : (e.mimeType ?? ''),
 					visibility: e.visibility,
 				});
@@ -496,7 +663,7 @@ async function executeDeleteArchive(): Promise<void> {
 async function fetchPublicDirectoryEntries(): Promise<{
 	entries: Array<{
 		type: 'dir' | 'file'; name: string; path?: string;
-		size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
+		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
 	}>;
 } | null> {
 	const lsUrl = `/api/files/ls?bucketName=${encodeURIComponent(props.bucketName)}&path=${encodeURIComponent(props.filePath)}`;
@@ -508,12 +675,18 @@ async function fetchPublicDirectoryEntries(): Promise<{
 	return await res.json() as {
 		entries: Array<{
 			type: 'dir' | 'file'; name: string; path?: string;
-			size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
+			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
 		}>;
 	};
 }
 
 onMounted(() => { load(); loadBucketId(); });
+onBeforeUnmount(() => {
+	void cleanupArchiveDownloads().finally(() => {
+		archiveDownloadWorker?.terminate();
+		archiveDownloadWorker = null;
+	});
+});
 watch(() => [props.bucketName, props.filePath], () => { load(); loadBucketId(); });
 watch(() => props.entryPath, (newEntryPath) => {
 	if (isArchive.value) {
@@ -534,6 +707,9 @@ watch([isPartiallySelected, isAllSelected], async () => {
       <template v-if="isArchive" class="flex gap-2 items-center mb-3 flex-wrap">
         <a :href="downloadUrl" download class="btn btn-secondary">ダウンロード</a>
         <a v-if="isTargz" :href="decompressUrl" download class="btn btn-secondary">展開してダウンロード (.tar)</a>
+        <button type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startArchiveToZipDownload">
+          ZIPとしてダウンロード
+        </button>
         <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="archiveDeleteDialog = true">
           <Button.Content>削除</Button.Content>
         </Button.Root>
@@ -573,6 +749,12 @@ watch([isPartiallySelected, isAllSelected], async () => {
               <Button.Root v-if="canDeleteSelectedEntries" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkDelete">
                 <Button.Content>まとめて削除</Button.Content>
               </Button.Root>
+              <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" :disabled="archiveDownloadProgress != null" @click="startDirectoryArchiveDownload('tar')">
+                <Button.Content>tarとしてダウンロード</Button.Content>
+              </Button.Root>
+              <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" :disabled="archiveDownloadProgress != null" @click="startDirectoryArchiveDownload('zip')">
+                <Button.Content>zipとしてダウンロード</Button.Content>
+              </Button.Root>
               <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="clearSelection">
                 <Button.Content>選択を解除</Button.Content>
               </Button.Root>
@@ -587,6 +769,8 @@ watch([isPartiallySelected, isAllSelected], async () => {
     </div>
     <div v-else-if="error" class="alert alert-error">{{ error }}</div>
     <template v-else>
+      <div v-if="archiveProgressLabel" class="alert alert-info mb-3">{{ archiveProgressLabel }}</div>
+      <div v-if="archiveDownloadError" class="alert alert-error mb-3">{{ archiveDownloadError }}</div>
       <div v-if="deleteError" class="alert alert-error mb-3">{{ deleteError }}</div>
 
       <div
