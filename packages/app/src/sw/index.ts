@@ -18,8 +18,28 @@ type PeekResult = { rebuilt: ReadableStream<Uint8Array<ArrayBuffer>> } & (
 );
 
 function getContentDispositionFilename(disposition: string | null): string {
+	const encodedMatch = disposition?.match(/filename\*=UTF-8''([^;]+)/i);
+	if (encodedMatch) {
+		try {
+			return decodeURIComponent(encodedMatch[1]);
+		} catch {
+			return encodedMatch[1];
+		}
+	}
 	const filenameMatch = disposition?.match(/filename="([^"]+)"/i);
 	return filenameMatch ? filenameMatch[1] : '';
+}
+
+function toAsciiFilenameFallback(filename: string): string {
+	const fallback = filename
+		.replace(/[^\x20-\x7e]/g, '_')
+		.replace(/["\\]/g, '_')
+		.trim();
+	return fallback || 'download';
+}
+
+function createContentDisposition(filename: string): string {
+	return `attachment; filename="${toAsciiFilenameFallback(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 async function peekStream(body: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<PeekResult | null> {
@@ -108,7 +128,7 @@ async function handleFullArchive(request: Request): Promise<Response> {
 			|| url.pathname.split('/').pop()
 			|| '';
 		const originalFilename = rawFilename.endsWith('.gz') ? rawFilename.slice(0, -3) : rawFilename;
-		newHeaders.set('Content-Disposition', `attachment; filename="${originalFilename}"`);
+		newHeaders.set('Content-Disposition', createContentDisposition(originalFilename));
 		return new Response(decompressed, { status: response.status, headers: newHeaders });
 	}
 

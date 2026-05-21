@@ -5,7 +5,7 @@ import { createBgzfBlock } from 'bgzf';
 import { aidxRegExp, parseEaidx } from '../../shared/eaid-x';
 import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
+import { createContentDisposition, DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 
@@ -306,7 +306,7 @@ app.get('/d/:fileId', async (c) => {
 		const response = new Response(rangeData.body, {
 			headers: download.withDownloadHeaders({
 				'Content-Type': indexEntry.mimeType,
-				'Content-Disposition': `attachment; filename="${indexEntry.path.split('/').pop()}"`,
+				'Content-Disposition': createContentDisposition(indexEntry.path.split('/').pop() ?? 'download'),
 				'Content-Length': String(indexEntry.size),
 			}),
 		});
@@ -416,7 +416,7 @@ app.get('/d/:fileId', async (c) => {
 	const response = new Response(r2Object.body, {
 		headers: download.withDownloadHeaders({
 			'Content-Type': file.mimeType ?? 'application/octet-stream',
-			'Content-Disposition': `attachment; filename="${file.path.split('/').pop()}"`,
+			'Content-Disposition': createContentDisposition(file.path.split('/').pop() ?? 'download'),
 			'Content-Length': String(file.size ?? 0),
 		}),
 	});
