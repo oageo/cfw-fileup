@@ -188,7 +188,7 @@ async function fetchMeta(): Promise<void> {
 			if (authStore.user) {
 				await issueAutoToken();
 			} else {
-				// キャッシュ済みパスフレーズトークンを復元
+				// キャッシュ済み合言葉トークンを復元
 				const cached = loadCachedToken();
 				if (cached) {
 					autoToken.value = cached.token;
@@ -375,7 +375,7 @@ watch(() => [entryPath.value, queryToken.value], () => {
         {{ formatSize((isEntryFile ? innerMeta?.size : fileSize) ?? 0) }}
       </span>
       <span v-if="passphraseTokenExpiresAt" class="badge badge-info" :title="`${passphraseTokenExpiryStr} まで有効`">
-        パスフレーズ認証済み（{{ passphraseTokenExpiryStr }} まで）
+        合言葉認証済み（{{ passphraseTokenExpiryStr }} まで）
       </span>
     </div>
 
@@ -420,16 +420,16 @@ watch(() => [entryPath.value, queryToken.value], () => {
         />
       </template>
 
-      <!-- 非ログイン + 非公開 + トークンなし: パスフレーズフォーム -->
+      <!-- 非ログイン + 非公開 + トークンなし: 合言葉フォーム -->
       <template v-else-if="needsPassphrase">
         <div class="card">
-          <p :class="[$style.passphraseDesc, 'text-muted']">このファイルはプライベートです。パスフレーズを入力するとアクセスできます。</p>
+          <p :class="[$style.passphraseDesc, 'text-muted']">このファイルはプライベートです。合言葉を入力するとアクセスできます。</p>
           <Form :class="$style.passphraseForm" @submit="submitPassphrase">
             <div class="flex gap-2">
               <div :class="$style.passphraseInputWrapper">
-                <label class="form-label">パスフレーズ</label>
+                <label class="form-label">合言葉</label>
                 <Input.Root v-model="passphraseInput" type="password" required validate-on="submit">
-                  <Input.Control placeholder="パスフレーズ" class="form-input" autocomplete="current-password" />
+                  <Input.Control placeholder="合言葉" class="form-input" autocomplete="current-password" />
                   <Input.Error v-slot="{ errors }">
                     <span v-for="e in errors" :key="e" class="form-error">{{ e }}</span>
                   </Input.Error>

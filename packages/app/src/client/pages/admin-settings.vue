@@ -104,10 +104,10 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           :schema="KNOWN_SETTINGS['registration_mode']"
           title="登録モード"
           :saving="saving['registration_mode']"
-          :option-labels="{ closed: '非公開', passphrase: 'パスフレーズ必須', open: '公開' }"
+          :option-labels="{ closed: '非公開', passphrase: '合言葉必須', open: '公開' }"
           @save="saveSetting('registration_mode', $event)"
         >
-          非公開: 新規登録を受け付けません。パスフレーズ必須: 環境変数 <code>SIGNUP_PASSPHRASE</code> を知るユーザーのみ登録できます。公開: 誰でも登録できます。
+          非公開: 新規登録を受け付けません。合言葉必須: 環境変数 <code>SIGNUP_PASSPHRASE</code> を知るユーザーのみ登録できます。公開: 誰でも登録できます。
         </SettingItem>
 
         <SettingItem
