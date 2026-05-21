@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, type Component } from 'vue';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { EllipsisVertical, File, Folder, FolderOpen, Pencil } from '@lucide/vue';
+import { EllipsisVertical, File, FileArchive, FileAudio, FileCode, FileImage, FileText, FileVideo, Folder, FolderOpen, GripVertical, Pencil } from '@lucide/vue';
 import { authHeaders, authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
@@ -50,6 +50,12 @@ const previewUrl = ref('');
 const previewText = ref('');
 const previewLoading = ref(false);
 const fileRowElements = ref(new Map<string, HTMLButtonElement>());
+const draggingItem = ref<DraggingUploadItem | null>(null);
+const dragOverDirectoryPath = ref<string | null>(null);
+const dragPointerId = ref<number | null>(null);
+const dragPreviewX = ref(0);
+const dragPreviewY = ref(0);
+let previousBodyCursor = '';
 const uploadError = ref('');
 const uploadDone = ref(false);
 const quotaWarningOpen = ref(false);
@@ -92,6 +98,26 @@ const archiveBaseName = computed(() => {
 });
 const archiveUploadBaseName = computed(() => libraryName.value.trim() || archiveBaseName.value);
 const flatDisplayEntries = computed(() => selectedTree.value ? flattenDirectory(selectedTree.value.root) : []);
+const directoryDropEntries = computed<DirectoryDropEntry[]>(() => {
+	const directories = flatDisplayEntries.value.filter((entry): entry is FlatDisplayDirectory => entry.type === 'dir');
+	const entries: DirectoryDropEntry[] = [
+		{ type: 'root', key: 'dir:', name: 'アップロードルート', path: '', depth: 0 },
+		...directories,
+	];
+	const item = draggingItem.value;
+	if (item?.type !== 'dir') return entries;
+	return entries.filter(entry => entry.path !== item.directory.path && !entry.path.startsWith(item.directory.path));
+});
+const draggingSourceDirectoryPath = computed(() => {
+	const item = draggingItem.value;
+	if (!item) return null;
+	return item.type === 'file' ? item.entry.parentPath : getDirectoryParentPath(item.directory.path);
+});
+const draggingItemName = computed(() => {
+	const item = draggingItem.value;
+	if (!item) return '';
+	return item.type === 'file' ? item.entry.name : item.directory.name;
+});
 const selectedUploadBytes = computed(() => selectedTree.value?.totalSize ?? 0);
 const quotaRemainingBytes = computed(() => {
 	if (!bucket.value || maxBucketSizeBytes.value === null) return null;
@@ -223,6 +249,63 @@ async function removeSelectedEntry(path: string): Promise<void> {
 	await setSelectedTree(nextTree, nextEntry);
 }
 
+async function moveEntryToDirectory(entry: UploadEntry, targetDirectoryPath: string): Promise<void> {
+	if (!selectedTree.value) return;
+	const nextPath = `${targetDirectoryPath}${entry.name}`;
+	if (nextPath === entry.path) return;
+
+	const entries = selectedTree.value.entries
+		.filter(current => current.path !== entry.path && current.path !== nextPath)
+		.map(current => ({ path: current.path, file: current.file }));
+	entries.push({ path: nextPath, file: entry.file });
+
+	const nextTree = await UploadTree.from({
+		entries,
+		rootName: inferUploadRootName(entries.map(current => current.path)),
+	});
+	const movedEntry = nextTree.entries.find(current => current.path === nextPath) ?? null;
+	await setSelectedTree(nextTree, movedEntry);
+}
+
+async function moveDirectoryToDirectory(directory: FlatDisplayDirectory, targetDirectoryPath: string): Promise<void> {
+	if (!selectedTree.value) return;
+	const nextPrefix = `${targetDirectoryPath}${directory.name}/`;
+	if (nextPrefix === directory.path || targetDirectoryPath.startsWith(directory.path)) return;
+
+	const selectedPath = selectedEntry.value?.path ?? null;
+	const movedEntries = selectedTree.value.entries
+		.filter(entry => entry.path.startsWith(directory.path))
+		.map(entry => ({ path: `${nextPrefix}${entry.path.slice(directory.path.length)}`, file: entry.file }));
+	const entries = selectedTree.value.entries
+		.filter(entry => !entry.path.startsWith(directory.path) && !entry.path.startsWith(nextPrefix))
+		.map(entry => ({ path: entry.path, file: entry.file }));
+	entries.push(...movedEntries);
+
+	const nextTree = await UploadTree.from({
+		entries,
+		rootName: inferUploadRootName(entries.map(entry => entry.path)),
+	});
+	const nextSelectedPath = selectedPath?.startsWith(directory.path)
+		? `${nextPrefix}${selectedPath.slice(directory.path.length)}`
+		: selectedPath;
+	const nextSelectedEntry = nextTree.entries.find(entry => entry.path === nextSelectedPath) ?? nextTree.entries.find(entry => entry.path.startsWith(nextPrefix)) ?? null;
+	await setSelectedTree(nextTree, nextSelectedEntry);
+}
+
+async function moveItemToDirectory(item: DraggingUploadItem, targetDirectoryPath: string): Promise<void> {
+	if (item.type === 'file') {
+		await moveEntryToDirectory(item.entry, targetDirectoryPath);
+		return;
+	}
+	await moveDirectoryToDirectory(item.directory, targetDirectoryPath);
+}
+
+function getDirectoryParentPath(path: string): string {
+	const parts = path.replace(/\/$/, '').split('/');
+	parts.pop();
+	return parts.length === 0 ? '' : `${parts.join('/')}/`;
+}
+
 function inferUploadRootName(paths: readonly string[]): string {
 	if (paths.length === 0) return '';
 	const first = paths[0].split('/')[0] ?? '';
@@ -237,6 +320,14 @@ interface FlatDisplayDirectory {
 	depth: number;
 }
 
+interface RootDropEntry {
+	type: 'root';
+	key: string;
+	name: string;
+	path: '';
+	depth: 0;
+}
+
 interface FlatDisplayFile {
 	type: 'file';
 	key: string;
@@ -245,6 +336,10 @@ interface FlatDisplayFile {
 }
 
 type FlatDisplayEntry = FlatDisplayDirectory | FlatDisplayFile;
+type DirectoryDropEntry = FlatDisplayDirectory | RootDropEntry;
+type DraggingUploadItem =
+	| { type: 'file'; entry: UploadEntry }
+	| { type: 'dir'; directory: FlatDisplayDirectory };
 
 function flattenDirectory(dir: UploadDirectory, depth = -1): FlatDisplayEntry[] {
 	const result: FlatDisplayEntry[] = [];
@@ -262,6 +357,22 @@ function isTextLike(entry: UploadEntry): boolean {
 	return entry.type.startsWith('text/')
 		|| /(?:^|\/)(?:json|xml|javascript|typescript|csv|yaml|x-yaml)$/.test(entry.type)
 		|| /\.(?:txt|md|json|csv|ts|js|vue|css|scss|html|xml|ya?ml)$/i.test(entry.name);
+}
+
+function getFileIcon(entry: UploadEntry): Component {
+	if (entry.type.startsWith('image/')) return FileImage;
+	if (entry.type.startsWith('video/')) return FileVideo;
+	if (entry.type.startsWith('audio/')) return FileAudio;
+	if (entry.type === 'application/pdf' || isTextLike(entry)) return FileText;
+	if (
+		/(?:^|\/)(?:json|xml|javascript|typescript|wasm)$/.test(entry.type)
+		|| /\.(?:c|cc|cpp|cs|go|h|hpp|java|js|jsx|kt|mjs|php|py|rb|rs|sh|sql|svelte|swift|ts|tsx|vue|wasm)$/i.test(entry.name)
+	) return FileCode;
+	if (
+		/(?:zip|gzip|x-gzip|x-tar|x-7z-compressed|x-rar-compressed|x-bzip2|zstd)$/.test(entry.type)
+		|| /\.(?:7z|bz2|gz|rar|tar|tgz|txz|xz|zip|zst)$/i.test(entry.name)
+	) return FileArchive;
+	return File;
 }
 
 function revokePreviewUrl(): void {
@@ -309,6 +420,96 @@ function onFileListKeydown(event: KeyboardEvent): void {
 	}
 }
 
+function onItemDragStart(event: DragEvent, item: DraggingUploadItem): void {
+	draggingItem.value = item;
+	dragOverDirectoryPath.value = null;
+	dragPreviewX.value = event.clientX;
+	dragPreviewY.value = event.clientY;
+	lockMoveCursor();
+	event.dataTransfer?.setData('text/plain', item.type === 'file' ? item.entry.path : item.directory.path);
+	if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+}
+
+function lockMoveCursor(): void {
+	if (document.body.style.cursor === 'grabbing') return;
+	previousBodyCursor = document.body.style.cursor;
+	document.body.style.cursor = 'grabbing';
+}
+
+function resetFileMoveDrag(): void {
+	draggingItem.value = null;
+	dragOverDirectoryPath.value = null;
+	dragPointerId.value = null;
+	document.body.style.cursor = previousBodyCursor;
+	window.removeEventListener('pointermove', onFileMovePointerMove);
+	window.removeEventListener('pointerup', onFileMovePointerUp);
+	window.removeEventListener('pointercancel', onFileMovePointerCancel);
+}
+
+function onFileDragEnd(): void {
+	resetFileMoveDrag();
+}
+
+function findDirectoryDropPath(target: EventTarget | null): string | null {
+	const element = target instanceof Element
+		? target.closest<HTMLElement>('[data-upload-drop-path]')
+		: null;
+	return element?.dataset.uploadDropPath ?? null;
+}
+
+function onFileMovePointerMove(event: PointerEvent): void {
+	if (dragPointerId.value !== event.pointerId || !draggingItem.value) return;
+	dragPreviewX.value = event.clientX;
+	dragPreviewY.value = event.clientY;
+	dragOverDirectoryPath.value = findDirectoryDropPath(document.elementFromPoint(event.clientX, event.clientY));
+}
+
+async function onFileMovePointerUp(event: PointerEvent): Promise<void> {
+	if (dragPointerId.value !== event.pointerId || !draggingItem.value) return;
+	const item = draggingItem.value;
+	const targetPath = findDirectoryDropPath(document.elementFromPoint(event.clientX, event.clientY));
+	resetFileMoveDrag();
+	if (targetPath !== null) await moveItemToDirectory(item, targetPath);
+}
+
+function onFileMovePointerCancel(event: PointerEvent): void {
+	if (dragPointerId.value !== event.pointerId) return;
+	resetFileMoveDrag();
+}
+
+function onItemMovePointerDown(event: PointerEvent, item: DraggingUploadItem): void {
+	if (event.button !== 0) return;
+	event.preventDefault();
+	draggingItem.value = item;
+	dragOverDirectoryPath.value = null;
+	dragPointerId.value = event.pointerId;
+	dragPreviewX.value = event.clientX;
+	dragPreviewY.value = event.clientY;
+	lockMoveCursor();
+	window.addEventListener('pointermove', onFileMovePointerMove);
+	window.addEventListener('pointerup', onFileMovePointerUp);
+	window.addEventListener('pointercancel', onFileMovePointerCancel);
+}
+
+function onDirectoryDragOver(event: DragEvent, path: string): void {
+	if (!draggingItem.value) return;
+	event.preventDefault();
+	if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+	dragOverDirectoryPath.value = path;
+}
+
+function onDirectoryDragLeave(path: string): void {
+	if (dragOverDirectoryPath.value === path) dragOverDirectoryPath.value = null;
+}
+
+async function onDirectoryDrop(event: DragEvent, path: string): Promise<void> {
+	if (!draggingItem.value) return;
+	event.preventDefault();
+	const item = draggingItem.value;
+	resetFileMoveDrag();
+	await moveItemToDirectory(item, path);
+}
+
 watch(selectedEntry, async (entry) => {
 	revokePreviewUrl();
 	previewText.value = '';
@@ -335,6 +536,7 @@ watch(selectedEntry, async (entry) => {
 
 onUnmounted(() => {
 	revokePreviewUrl();
+	resetFileMoveDrag();
 });
 
 // ---- OPFS helpers ----
@@ -831,7 +1033,7 @@ onMounted(async () => {
           </template>
           <template v-else>
             <Button.Root class="btn btn-primary" @click="destinationDialogOpen = true">
-              <Button.Content><FolderOpen :size="16" :stroke-width="2" />アップロード先を選択</Button.Content>
+              <Button.Content>アップロード先を選択</Button.Content>
             </Button.Root>
           </template>
         </div>
@@ -927,17 +1129,37 @@ onMounted(async () => {
                 </div>
               </template>
             </div>
-            <div :class="$style.fileListPane" @keydown="onFileListKeydown">
+            <div :class="[$style.fileListPane, draggingItem ? $style.fileListPaneDragging : '']" @keydown="onFileListKeydown">
               <div
-                v-for="item in flatDisplayEntries"
+                v-for="item in draggingItem ? directoryDropEntries : flatDisplayEntries"
                 :key="item.key"
                 :class="[
                   $style.fileRow,
-                  item.type === 'dir' ? $style.dirRow : $style.fileItemRow,
+                  item.type === 'dir' || item.type === 'root' ? $style.dirRow : $style.fileItemRow,
+                  item.type === 'root' ? $style.rootDropRow : '',
+                  item.type !== 'file' && dragOverDirectoryPath === item.path ? $style.dirRowDragOver : '',
+                  item.type !== 'file' && draggingSourceDirectoryPath === item.path ? $style.dirRowDragSource : '',
                   item.type === 'file' && selectedEntry?.path === item.entry.path ? $style.fileRowSelected : '',
                 ]"
-                :style="{ paddingLeft: `${12 + item.depth * 18}px` }"
+                :style="{ paddingLeft: `${6 + item.depth * 18}px` }"
+                :data-upload-drop-path="item.type !== 'file' ? item.path : undefined"
+                @dragover="item.type !== 'file' ? onDirectoryDragOver($event, item.path) : undefined"
+                @dragleave="item.type !== 'file' ? onDirectoryDragLeave(item.path) : undefined"
+                @drop="item.type !== 'file' ? onDirectoryDrop($event, item.path) : undefined"
               >
+                <button
+                  v-if="item.type === 'file' || (item.type === 'dir' && !draggingItem)"
+                  type="button"
+                  :class="$style.fileDragHandle"
+                  draggable="true"
+                  :aria-label="item.type === 'file' ? 'ファイルを移動' : 'ディレクトリを移動'"
+                  @dragstart="onItemDragStart($event, item.type === 'file' ? { type: 'file', entry: item.entry } : { type: 'dir', directory: item })"
+                  @dragend="onFileDragEnd"
+                  @pointerdown="onItemMovePointerDown($event, item.type === 'file' ? { type: 'file', entry: item.entry } : { type: 'dir', directory: item })"
+                  @click.stop
+                >
+                  <GripVertical :size="16" :stroke-width="2" aria-hidden="true" />
+                </button>
                 <button
                   v-if="item.type === 'file'"
                   :ref="element => setFileRowElement(item.entry.path, element)"
@@ -945,12 +1167,13 @@ onMounted(async () => {
                   :class="$style.fileSelectButton"
                   @click="selectEntry(item.entry)"
                 >
-                  <File :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
+                  <component :is="getFileIcon(item.entry)" :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
                   <span :class="$style.fileName">{{ item.entry.name }}</span>
                   <span :class="$style.fileSize">{{ formatBytes(item.entry.size) }}</span>
                 </button>
                 <template v-else>
-                  <Folder :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
+                  <FolderOpen v-if="item.type === 'root'" :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
+                  <Folder v-else :class="$style.fileIcon" :size="16" :stroke-width="2" aria-hidden="true" />
                   <span :class="$style.fileName">{{ item.name }}</span>
                 </template>
                 <Popover.Root v-if="item.type === 'file'">
@@ -969,6 +1192,14 @@ onMounted(async () => {
                     </div>
                   </Popover.Content>
                 </Popover.Root>
+              </div>
+              <div
+                v-if="draggingItem"
+                :class="$style.fileMovePreview"
+                :style="{ transform: `translate(${dragPreviewX + 12}px, ${dragPreviewY + 12}px)` }"
+              >
+                <span :class="$style.fileMovePreviewName">{{ draggingItemName }}</span>
+                <span>ここに移動</span>
               </div>
             </div>
           </div>
@@ -1179,7 +1410,7 @@ onMounted(async () => {
 
 .previewObject {
   width: 100%;
-  height: 380px;
+  height: 100%;
   border: 0;
 }
 
@@ -1215,15 +1446,21 @@ onMounted(async () => {
   padding: 0;
 }
 
+.fileListPaneDragging,
+.fileListPaneDragging * {
+  cursor: grabbing;
+}
+
 .fileRow {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   color: var(--color-text);
   font: inherit;
-  padding: 7px 12px;
+  padding: 7px 6px;
+  border-left: 3px solid transparent;
 }
 
 .fileItemRow {
@@ -1237,8 +1474,7 @@ onMounted(async () => {
 
 .fileRowSelected {
   background: var(--color-primary-surface, color-mix(in srgb, var(--color-primary) 12%, transparent));
-  border-left: 3px solid var(--color-primary);
-  padding-left: 9px;
+  border-left-color: var(--color-primary);
 }
 
 .fileRowSelected .fileSelectButton {
@@ -1247,9 +1483,83 @@ onMounted(async () => {
 }
 
 .dirRow {
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   color: var(--color-text-muted);
   font-weight: 600;
+}
+
+.fileListPaneDragging .dirRow {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.rootDropRow {
+  grid-template-columns: auto minmax(0, 1fr);
+  color: var(--color-text);
+}
+
+.dirRowDragOver {
+  background: var(--color-primary-surface, color-mix(in srgb, var(--color-primary) 12%, transparent));
+  border-left-color: transparent;
+  color: var(--color-primary);
+}
+
+.dirRowDragSource {
+  border-left-color: var(--color-primary);
+}
+
+.dirRowDragSource.dirRowDragOver {
+  border-left-color: var(--color-primary);
+}
+
+.fileDragHandle {
+  width: 24px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: grab;
+}
+
+.fileDragHandle:hover,
+.fileDragHandle:focus-visible {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.fileDragHandle:active {
+  cursor: grabbing;
+}
+
+.fileMovePreview {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.fileMovePreviewName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-primary);
 }
 
 .fileSelectButton {
