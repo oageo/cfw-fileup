@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, type Component } from 'vue';
 import type { FileVisibility } from '../../shared/file-visibility';
-import { Button, Popover } from '@vuetify/v0';
+import { Button, Dialog, Popover } from '@vuetify/v0';
 import { EllipsisVertical, File, FileArchive, FileAudio, FileCode, FileImage, FileText, FileVideo, Folder, FolderOpen, GripVertical, Pencil } from '@lucide/vue';
 import { authHeaders, authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
@@ -14,6 +14,7 @@ import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
 import { enqueueUploadJob } from '@/store/upload-worker';
 import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '@/utils/upload-paths';
+import type { ZipExtractWorkerMessage } from '@/workers/zip-extract.worker';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
 
@@ -60,6 +61,32 @@ const uploadError = ref('');
 const uploadDone = ref(false);
 const quotaWarningOpen = ref(false);
 const quotaWarningConfirmed = ref(false);
+const zipConfirmOpen = ref(false);
+const zipConfirmFileName = ref('');
+const zipPasswordOpen = ref(false);
+const zipPasswordFileName = ref('');
+const zipPassword = ref('');
+const zipPasswordError = ref('');
+const zipExtractingOpen = ref(false);
+const zipExtractingFileName = ref('');
+const zipExtractingCurrentFileName = ref('');
+const zipExtractingFileIndex = ref(0);
+const zipExtractingTotalFiles = ref(0);
+const zipWarnings = ref<string[]>([]);
+let zipConfirmResolve: ((value: boolean) => void) | null = null;
+let zipPasswordResolve: ((value: string | null) => void) | null = null;
+let zipExtractWorker: Worker | null = null;
+let zipExtractRequestId = 0;
+const zipExtractRequests = new Map<string, {
+	resolve: (value: ZipExtractDoneResult) => void;
+	reject: (reason?: unknown) => void;
+}>();
+
+interface ZipExtractDoneResult {
+	entries: { path: string; file: File }[];
+	warnings: string[];
+	needsPassword: boolean;
+}
 
 function formatBytes(n: number): string {
 	if (n < 1024) return `${n} B`;
@@ -176,7 +203,7 @@ async function handleFileInputChange(event: Event): Promise<void> {
 async function selectFiles(files: FileList | null): Promise<void> {
 	if (!files || files.length === 0) return;
 	try {
-		await addSelectedTree(await UploadTree.from(files));
+		await addSelectedTreeWithZipPrompts(await UploadTree.from(files));
 	} catch (err) {
 		selectionError.value = err instanceof Error ? err.message : String(err);
 	}
@@ -187,7 +214,7 @@ async function handleDrop(event: DragEvent): Promise<void> {
 	const data = event.dataTransfer;
 	if (!data) return;
 	try {
-		await addSelectedTree(await UploadTree.from(data));
+		await addSelectedTreeWithZipPrompts(await UploadTree.from(data));
 	} catch (err) {
 		selectionError.value = err instanceof Error ? err.message : String(err);
 	}
@@ -219,10 +246,157 @@ async function addSelectedTree(tree: UploadTree): Promise<void> {
 	await setSelectedTree(mergedTree, tree.entries[0] ?? selectedEntry.value);
 }
 
+async function addSelectedTreeWithZipPrompts(tree: UploadTree): Promise<void> {
+	const expanded = await expandZipEntriesInTree(tree);
+	await addSelectedTree(await UploadTree.from({
+		entries: expanded.entries,
+		rootName: inferUploadRootName(expanded.entries.map(entry => entry.path)),
+	}));
+	zipWarnings.value = expanded.warnings;
+}
+
+async function expandZipEntriesInTree(tree: UploadTree): Promise<{ entries: { path: string; file: File }[]; warnings: string[] }> {
+	const entries: { path: string; file: File }[] = [];
+	const warnings: string[] = [];
+	for (const entry of tree.entries) {
+		if (!isZipUploadEntry(entry)) {
+			entries.push({ path: entry.path, file: entry.file });
+			continue;
+		}
+
+		const shouldExtract = await confirmZipExtraction(entry.name);
+		if (!shouldExtract) {
+			entries.push({ path: entry.path, file: entry.file });
+			continue;
+		}
+
+		let password: string | undefined;
+		while (true) {
+			try {
+				startZipExtracting(entry.name);
+				const result = await extractZipInWorker(entry.file, password);
+				stopZipExtracting();
+				if (result.needsPassword) {
+					const nextPassword = await requestZipPassword(entry.name);
+					if (nextPassword === null) {
+						entries.push({ path: entry.path, file: entry.file });
+						break;
+					}
+					password = nextPassword;
+					continue;
+				}
+				entries.push(...result.entries);
+				warnings.push(...result.warnings);
+				break;
+			} catch (err) {
+				stopZipExtracting();
+				if (err instanceof Error && err.message === 'invalid-password') {
+					const nextPassword = await requestZipPassword(entry.name, 'パスワードが正しくありません。');
+					if (nextPassword === null) {
+						entries.push({ path: entry.path, file: entry.file });
+						break;
+					}
+					password = nextPassword;
+					continue;
+				}
+				throw err;
+			}
+		}
+	}
+	return { entries, warnings };
+}
+
+function isZipUploadEntry(entry: UploadEntry): boolean {
+	return /\.zip$/i.test(entry.name) || entry.type === 'application/zip' || entry.type === 'application/x-zip-compressed';
+}
+
+function confirmZipExtraction(fileName: string): Promise<boolean> {
+	zipConfirmFileName.value = fileName;
+	zipConfirmOpen.value = true;
+	return new Promise(resolve => {
+		zipConfirmResolve = resolve;
+	});
+}
+
+function resolveZipConfirm(value: boolean): void {
+	zipConfirmOpen.value = false;
+	zipConfirmResolve?.(value);
+	zipConfirmResolve = null;
+}
+
+function requestZipPassword(fileName: string, error = ''): Promise<string | null> {
+	zipPasswordFileName.value = fileName;
+	zipPassword.value = '';
+	zipPasswordError.value = error;
+	zipPasswordOpen.value = true;
+	return new Promise(resolve => {
+		zipPasswordResolve = resolve;
+	});
+}
+
+function submitZipPassword(): void {
+	zipPasswordOpen.value = false;
+	zipPasswordResolve?.(zipPassword.value);
+	zipPasswordResolve = null;
+}
+
+function cancelZipPassword(): void {
+	zipPasswordOpen.value = false;
+	zipPasswordResolve?.(null);
+	zipPasswordResolve = null;
+}
+
+function startZipExtracting(fileName: string): void {
+	zipExtractingFileName.value = fileName;
+	zipExtractingCurrentFileName.value = '';
+	zipExtractingFileIndex.value = 0;
+	zipExtractingTotalFiles.value = 0;
+	zipExtractingOpen.value = true;
+}
+
+function stopZipExtracting(): void {
+	zipExtractingOpen.value = false;
+}
+
+function extractZipInWorker(file: File, password?: string): Promise<ZipExtractDoneResult> {
+	const worker = getZipExtractWorker();
+	const id = String(++zipExtractRequestId);
+	return new Promise((resolve, reject) => {
+		zipExtractRequests.set(id, { resolve, reject });
+		worker.postMessage({ id, file, password });
+	});
+}
+
+function getZipExtractWorker(): Worker {
+	if (zipExtractWorker) return zipExtractWorker;
+	zipExtractWorker = new Worker(new URL('../workers/zip-extract.worker.ts', import.meta.url), { type: 'module' });
+	zipExtractWorker.onmessage = (event: MessageEvent<ZipExtractWorkerMessage>) => {
+		const message = event.data;
+		if (message.type === 'progress') {
+			zipExtractingCurrentFileName.value = message.progress.fileName;
+			zipExtractingFileIndex.value = message.progress.fileIndex;
+			zipExtractingTotalFiles.value = message.progress.totalFiles;
+			return;
+		}
+		const pending = zipExtractRequests.get(message.id);
+		if (!pending) return;
+		zipExtractRequests.delete(message.id);
+		if (message.type === 'done') {
+			pending.resolve({ entries: message.entries, warnings: message.warnings, needsPassword: message.needsPassword });
+		} else if (message.type === 'invalid-password') {
+			pending.reject(new Error('invalid-password'));
+		} else {
+			pending.reject(new Error(message.error));
+		}
+	};
+	return zipExtractWorker;
+}
+
 function clearSelectedTree(): void {
 	selectedTree.value = null;
 	selectEntry(null);
 	selectionError.value = '';
+	zipWarnings.value = [];
 	uploadError.value = '';
 	uploadDone.value = false;
 }
@@ -534,9 +708,17 @@ watch(selectedEntry, async (entry) => {
 	}
 }, { immediate: true });
 
+watch(zipConfirmOpen, (open) => {
+	if (open || !zipConfirmResolve) return;
+	zipConfirmResolve(false);
+	zipConfirmResolve = null;
+});
+
 onUnmounted(() => {
 	revokePreviewUrl();
 	resetFileMoveDrag();
+	zipExtractWorker?.terminate();
+	zipExtractWorker = null;
 });
 
 // ---- OPFS helpers ----
@@ -1006,7 +1188,7 @@ onMounted(async () => {
 	const pending = takePendingUpload();
 	if (pending) {
 		if (pending.bucketName) selectedBucketName.value = pending.bucketName;
-		if (pending.tree.entries.length > 0) await setSelectedTree(await UploadTree.from(pending.tree));
+		if (pending.tree.entries.length > 0) await addSelectedTreeWithZipPrompts(await UploadTree.from(pending.tree));
 		uploadPrefix.value = pending.prefix;
 	}
 });
@@ -1093,6 +1275,9 @@ onMounted(async () => {
 
         </div>
         <div v-if="selectionError" class="alert alert-error mt-3">{{ selectionError }}</div>
+        <div v-if="zipWarnings.length > 0" class="alert alert-info mt-3">
+          <div v-for="warning in zipWarnings" :key="warning">{{ warning }}</div>
+        </div>
 
         <div v-if="hasSelection" class="mt-3">
           <div :class="$style.fileBrowser">
@@ -1302,11 +1487,124 @@ onMounted(async () => {
         @confirm="confirmQuotaWarning"
         @cancel="quotaWarningOpen = false"
       />
+
+      <ConfirmDialog
+        v-model:open="zipConfirmOpen"
+        title="ZIPを展開しますか？"
+        :message="`${zipConfirmFileName} を展開して中身をアップロード対象に追加します。キャンセルするとZIPファイルのまま追加します。`"
+        confirm-label="展開する"
+        cancel-label="ZIPのまま追加"
+        @confirm="resolveZipConfirm(true)"
+        @cancel="resolveZipConfirm(false)"
+      />
+
+      <Dialog.Root :model-value="zipPasswordOpen" @update:model-value="value => { if (!value) cancelZipPassword(); }">
+        <Dialog.Content :class="$style.dialog">
+          <form :class="$style.dialogInner" @submit.prevent="submitZipPassword">
+            <div :class="$style.dialogHeader">
+              <Dialog.Title :class="$style.dialogTitle">ZIPパスワード</Dialog.Title>
+              <Dialog.Close class="btn btn-ghost btn-icon" aria-label="閉じる" @click="cancelZipPassword">✕</Dialog.Close>
+            </div>
+            <p :class="$style.dialogDescription">{{ zipPasswordFileName }} はパスワードで保護されています。</p>
+            <label class="form-label" for="zip-password">パスワード</label>
+            <input
+              id="zip-password"
+              v-model="zipPassword"
+              class="form-input"
+              type="password"
+              autocomplete="current-password"
+            >
+            <p v-if="zipPasswordError" :class="$style.dialogError">{{ zipPasswordError }}</p>
+            <div :class="$style.dialogActions">
+              <button type="button" class="btn btn-secondary" @click="cancelZipPassword">ZIPのまま追加</button>
+              <button type="submit" class="btn btn-primary">展開する</button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Root>
+
+      <Dialog.Root :model-value="zipExtractingOpen">
+        <Dialog.Content :class="$style.dialog">
+          <div :class="$style.dialogInner">
+            <Dialog.Title :class="$style.dialogTitle">ZIPを展開中</Dialog.Title>
+            <p :class="$style.dialogDescription">{{ zipExtractingFileName }}</p>
+            <div class="progress-root" aria-hidden="true">
+              <div class="progress-track">
+                <div
+                  class="progress-fill"
+                  :style="{ '--v0-progress-fill': zipExtractingTotalFiles > 0 ? `${Math.round(zipExtractingFileIndex / zipExtractingTotalFiles * 100)}%` : '0%' }"
+                />
+              </div>
+            </div>
+            <p :class="$style.dialogDescription">
+              {{ zipExtractingFileIndex }} / {{ zipExtractingTotalFiles || '?' }}
+              <span v-if="zipExtractingCurrentFileName">: {{ zipExtractingCurrentFileName }}</span>
+            </p>
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
     </template>
   </div>
 </template>
 
 <style module lang="scss">
+.dialog {
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  padding: 0;
+  width: min(460px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow: auto;
+
+  &::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+  }
+}
+
+.dialogInner {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dialogHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialogTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dialogDescription {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  margin: 0;
+  word-break: break-word;
+}
+
+.dialogError {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .destinationRow {
   display: flex;
   align-items: center;

@@ -39,6 +39,9 @@ importers:
       '@vuetify/v0':
         specifier: 1.0.0-alpha.4
         version: 1.0.0-alpha.4(vue@3.5.34(typescript@6.0.3))
+      '@zip.js/zip.js':
+        specifier: ^2.8.26
+        version: 2.8.26
       bgzf:
         specifier: workspace:*
         version: link:../bgzf
@@ -2260,6 +2263,10 @@ packages:
         optional: true
       vue-i18n:
         optional: true
+
+  '@zip.js/zip.js@2.8.26':
+    resolution: {integrity: sha512-RQ4h9F6DOiHxpdocUDrOl6xBM+yOtz+LkUol47AVWcfebGBDpZ7w7Xvz9PS24JgXvLGiXXzSAfdCdVy1tPlaFA==}
+    engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=18.0.0'}
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -6190,6 +6197,8 @@ snapshots:
       vue: 3.5.34(typescript@6.0.3)
     optionalDependencies:
       '@js-temporal/polyfill': 0.5.1
+
+  '@zip.js/zip.js@2.8.26': {}
 
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
