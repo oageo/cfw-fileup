@@ -77,19 +77,19 @@ function toggleTheme(): void {
 </script>
 
 <template>
-  <div class="app-layout">
-    <header class="app-nav">
-      <div class="app-nav-inner">
-        <NirA to="/" class="app-nav-brand">CFW FileUp</NirA>
+  <div :class="$style.layout">
+    <header :class="$style.nav">
+      <div :class="$style.navInner">
+        <NirA to="/" :class="$style.navBrand">CFW FileUp</NirA>
 
-        <div class="app-nav-links">
-          <NirA to="/my/buckets" class="app-nav-link">マイバケット</NirA>
+        <div :class="$style.navLinks">
+          <NirA to="/my/buckets" :class="$style.navLink">マイバケット</NirA>
           <template v-if="authStore.user?.isAdmin">
-            <NirA to="/admin" class="app-nav-link">管理</NirA>
+            <NirA to="/admin" :class="$style.navLink">管理</NirA>
           </template>
         </div>
 
-        <div class="app-nav-spacer" />
+        <div :class="$style.navSpacer" />
 
         <Button.Root class="btn btn-ghost btn-icon" :aria-label="isDark ? 'ライトモードに切替' : 'ダークモードに切替'" @click="toggleTheme">
           <Button.Content>
@@ -98,14 +98,14 @@ function toggleTheme(): void {
           </Button.Content>
         </Button.Root>
 
-        <div class="app-nav-user">
+        <div :class="$style.navUser">
           <template v-if="authStore.user">
             <Popover.Root v-model="appNavOpen">
-              <Popover.Activator class="btn btn-ghost app-nav-username" aria-haspopup="true">
+              <Popover.Activator :class="['btn', 'btn-ghost', $style.navUsername]" aria-haspopup="true">
                 <User :size="16" :stroke-width="2" />{{ authStore.user.username }}
               </Popover.Activator>
-              <Popover.Content class="app-nav-user-menu">
-                <div class="app-nav-user-menu-inner">
+              <Popover.Content :class="$style.navUserMenu">
+                <div :class="$style.navUserMenuInner">
                   <Button.Root :as="NirA" to="/my/uploadings" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>アップロード状況</Button.Content>
                   </Button.Root>
@@ -124,29 +124,29 @@ function toggleTheme(): void {
           </template>
         </div>
       </div>
-      <div v-if="authStore.user" class="app-upload-strip">
-        <NirA to="/uploader" class="app-upload-button" aria-label="ファイルアップロード">
-          <span class="app-upload-icon" aria-hidden="true">
+      <div v-if="authStore.user" :class="$style.uploadStrip">
+        <NirA to="/uploader" :class="$style.uploadButton" aria-label="ファイルアップロード">
+          <span :class="$style.uploadIcon" aria-hidden="true">
             <Upload :size="16" :stroke-width="2" />
           </span>
           <span>アップロード</span>
         </NirA>
-        <NirA v-if="latestUploadJob" :to="navUploadLink" class="app-upload-status">
-          <span class="app-upload-text">
+        <NirA v-if="latestUploadJob" :to="navUploadLink" :class="$style.uploadStatus">
+          <span :class="$style.uploadText">
             {{ navUploadText }}
           </span>
-          <span class="app-upload-percent">{{ navUploadPercent }}%</span>
+          <span :class="$style.uploadPercent">{{ navUploadPercent }}%</span>
         </NirA>
-        <NirA to="/my/uploadings?tab=browser" class="app-upload-history-button" aria-label="アップロード履歴">
+        <NirA to="/my/uploadings?tab=browser" :class="$style.uploadHistoryButton" aria-label="アップロード履歴">
           <CircleFadingArrowUp :size="16" :stroke-width="2" />
         </NirA>
-        <span v-if="latestUploadJob" class="app-upload-progress" aria-hidden="true">
-          <span class="app-upload-progress-fill" :style="{ width: `${navUploadPercent}%` }" />
+        <span v-if="latestUploadJob" :class="$style.uploadProgress" aria-hidden="true">
+          <span :class="$style.uploadProgressFill" :style="{ width: `${navUploadPercent}%` }" />
         </span>
       </div>
     </header>
 
-    <main class="app-main">
+    <main :class="$style.main">
       <div v-if="!isReady" class="page-loading">
         <span class="spinner" />
         読み込み中...
@@ -157,5 +157,255 @@ function toggleTheme(): void {
 </template>
 
 <style module lang="scss">
+.layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
 
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  min-height: var(--nav-height);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.navInner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 6px 0;
+}
+
+.navBrand {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary) !important;
+  text-decoration: none !important;
+  letter-spacing: -0.3px;
+  margin-right: 8px;
+  padding-left: 20px;
+
+  &:hover {
+    opacity: 0.85;
+  }
+}
+
+.navLinks {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.navLink {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--color-text-muted) !important;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+  text-decoration: none !important;
+
+  &:hover {
+    background: var(--color-bg);
+    color: var(--color-text) !important;
+  }
+}
+
+.navSpacer {
+  flex: 1;
+}
+
+.navUser {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.navUsername {
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.navUserMenu {
+  min-width: 140px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 18px 40px rgba(15, 23, 42, 0.18),
+    0 4px 12px rgba(15, 23, 42, 0.12);
+  padding: 4px;
+}
+
+.navUserMenuInner {
+  display: flex;
+  flex-direction: column;
+}
+
+.uploadStrip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted) !important;
+  font-size: 0.8125rem;
+}
+
+.uploadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--color-text-muted) !important;
+  font-weight: 500;
+  text-decoration: none !important;
+
+  &:hover {
+    background: var(--color-bg);
+    color: var(--color-text) !important;
+  }
+}
+
+.uploadStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-text-muted) !important;
+  text-decoration: none !important;
+  margin-left: auto;
+
+  &:hover {
+    color: var(--color-text) !important;
+  }
+}
+
+.uploadHistoryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius);
+  color: var(--color-text-muted) !important;
+  text-decoration: none !important;
+
+  &:hover {
+    background: var(--color-bg);
+    color: var(--color-text) !important;
+  }
+}
+
+.uploadIcon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.uploadText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploadProgress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.uploadProgressFill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.2s ease;
+}
+
+.uploadPercent {
+  width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+}
+
+@media (max-width: 640px) {
+  .nav {
+    height: auto;
+  }
+
+  .navInner {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 6px 0 0;
+    gap: 2px;
+  }
+
+  .navBrand {
+    flex: 1;
+    margin-right: 0;
+  }
+
+  .navSpacer {
+    display: none;
+  }
+
+  .navLinks {
+    order: 3;
+    width: 100%;
+    padding: 0 12px;
+    border-top: 1px solid var(--color-border);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .navLink {
+    padding: 4px 8px;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+
+  .navUsername {
+    display: none;
+  }
+
+  .uploadStrip {
+    padding: 0 12px;
+  }
+
+  .uploadProgress {
+    left: 0;
+    right: 0;
+  }
+}
 </style>

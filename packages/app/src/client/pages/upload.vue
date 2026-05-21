@@ -804,7 +804,7 @@ onMounted(async () => {
 	const pending = takePendingUpload();
 	if (pending) {
 		if (pending.bucketName) selectedBucketName.value = pending.bucketName;
-		if (pending.files.length > 0) await setSelectedTree(await UploadTree.from(pending.files));
+		if (pending.tree.entries.length > 0) await setSelectedTree(await UploadTree.from(pending.tree));
 		uploadPrefix.value = pending.prefix;
 	}
 });
@@ -821,7 +821,7 @@ onMounted(async () => {
     <template v-else>
       <!-- アップロード先選択 -->
       <div :class="['card']">
-        <p :class="$style.cardTitle">アップロード先</p>
+        <p class="card-title">アップロード先</p>
         <div :class="$style.destinationRow">
           <template v-if="selectedBucketName">
             <span :class="[$style.destinationDisplay, 'font-mono']">{{ selectedBucketName }}/{{ uploadPrefix }}</span>
@@ -851,7 +851,7 @@ onMounted(async () => {
         @dragleave.prevent="isDragOver = false"
         @drop.prevent="handleDrop"
       >
-        <p :class="[$style.cardTitle, $style.fileSelectCardTitle]">
+        <p :class="['card-title', $style.fileSelectCardTitle]">
           ファイル選択
           <span v-if="selectedTree" class="badge badge-info">
             {{ selectedTree.entries.length }} ファイル / {{ formatBytes(selectedTree.totalSize) }}
@@ -1013,7 +1013,7 @@ onMounted(async () => {
 
       <!-- オプション -->
       <div class="card">
-        <p :class="$style.cardTitle">オプション</p>
+        <p class="card-title">オプション</p>
         <div :class="$style.optionsList">
           <label class="radio-label">
             <input v-model="visibility" type="radio" value="public" :class="$style.radioInput">
@@ -1089,15 +1089,6 @@ onMounted(async () => {
   border-radius: var(--radius);
   padding: 6px 10px;
   word-break: break-all;
-}
-
-.cardTitle {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-muted);
-  margin-bottom: 14px;
 }
 
 .fileLabel {

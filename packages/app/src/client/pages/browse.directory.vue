@@ -12,6 +12,7 @@ import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import InputDialog from '@/components/input-dialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
+import { UploadTree } from '@/utils/upload-tree';
 
 const props = defineProps<{
 	bucketName: string;
@@ -438,8 +439,8 @@ function parentPath(): string | null {
 		: `/v/${props.bucketName}/${parts.join('/')}/`;
 }
 
-function goUpload(): void {
-	setPendingUpload([], props.bucketName, props.filePath);
+async function goUpload(): Promise<void> {
+	setPendingUpload(await UploadTree.from([]), props.bucketName, props.filePath);
 	mainRouter.pushByPath('/uploader');
 }
 
@@ -453,14 +454,23 @@ function onDragLeave(): void {
 	isDragOver.value = false;
 }
 
-function onDrop(e: DragEvent): void {
+async function onDrop(e: DragEvent): Promise<void> {
 	isDragOver.value = false;
 	if (isArchive.value || !authStore.user) return;
 	e.preventDefault();
-	const droppedFiles = Array.from(e.dataTransfer?.files ?? []);
-	if (droppedFiles.length === 0) return;
-	setPendingUpload(droppedFiles, props.bucketName, props.filePath);
-	mainRouter.pushByPath('/uploader');
+	const data = e.dataTransfer;
+	if (!data) return;
+	try {
+		const tree = await UploadTree.from(data);
+		if (tree.entries.length === 0) return;
+		setPendingUpload(tree, props.bucketName, props.filePath);
+		mainRouter.pushByPath('/uploader');
+	} catch {
+		const droppedFiles = Array.from(data.files ?? []);
+		if (droppedFiles.length === 0) return;
+		setPendingUpload(await UploadTree.from(droppedFiles), props.bucketName, props.filePath);
+		mainRouter.pushByPath('/uploader');
+	}
 }
 
 async function executeDeleteArchive(): Promise<void> {
