@@ -269,7 +269,6 @@ app.get('/d/:fileId', async (c) => {
 	if (cacheTarget !== null) {
 		const cached = await matchDownloadCache(cacheTarget.mode, cacheTarget.entryPath);
 		if (cached !== null) {
-			console.log(Array.from(cached.headers.entries()));
 			return cached;
 		}
 	}

@@ -106,7 +106,6 @@ async function handleFullArchive(request: Request): Promise<Response> {
 		const rawFilename = getContentDispositionFilename(response.headers.get('content-disposition'))
 			|| url.pathname.split('/').pop()
 			|| '';
-		console.log(rawFilename);
 		const originalFilename = rawFilename.endsWith('.gz') ? rawFilename.slice(0, -3) : rawFilename;
 		newHeaders.set('Content-Disposition', createContentDisposition(originalFilename));
 		return new Response(decompressed, { status: response.status, headers: newHeaders });
@@ -131,7 +130,6 @@ sw.addEventListener('fetch', (event) => {
 	if (!url.pathname.startsWith('/d/')) return;
 
 	const params = url.searchParams;
-	console.log(params.size, params.keys())
 	if (!params.has('list') && !params.has('file')) {
 		event.respondWith(handleFullArchive(event.request));
 	}
