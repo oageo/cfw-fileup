@@ -298,6 +298,7 @@ function selectedArchiveTargets(): Array<
 }
 
 async function startDirectoryArchiveDownload(format: 'tar' | 'zip'): Promise<void> {
+	selectionPopoverOpen.value = false;
 	archiveDownloadError.value = '';
 	archiveDownloadProgress.value = null;
 	if (!navigator.storage?.getDirectory) {
