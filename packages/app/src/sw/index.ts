@@ -18,16 +18,23 @@ type PeekResult = { rebuilt: ReadableStream<Uint8Array<ArrayBuffer>> } & (
 );
 
 function getContentDispositionFilename(disposition: string | null): string {
-	const encodedMatch = disposition?.match(/filename\*=UTF-8''([^;]+)/i);
-	if (encodedMatch) {
-		try {
-			return decodeURIComponent(encodedMatch[1]);
-		} catch {
-			return encodedMatch[1];
+	if (!disposition) return '';
+	const parts = disposition.split(';').map(part => part.trim());
+	const encodedPart = parts.find(part => part.toLowerCase().startsWith('filename*='));
+	if (encodedPart) {
+		const value = encodedPart.slice(encodedPart.indexOf('=') + 1).replace(/^"|"$/g, '');
+		const match = value.match(/^([^']*)'[^']*'(.*)$/);
+		if (match && match[1].toLowerCase() === 'utf-8') {
+			try {
+				return decodeURIComponent(match[2]);
+			} catch {
+				return match[2];
+			}
 		}
 	}
-	const filenameMatch = disposition?.match(/filename="([^"]+)"/i);
-	return filenameMatch ? filenameMatch[1] : '';
+	const filenamePart = parts.find(part => part.toLowerCase().startsWith('filename='));
+	if (!filenamePart) return '';
+	return filenamePart.slice(filenamePart.indexOf('=') + 1).replace(/^"|"$/g, '');
 }
 
 function toAsciiFilenameFallback(filename: string): string {
@@ -127,6 +134,7 @@ async function handleFullArchive(request: Request): Promise<Response> {
 		const rawFilename = getContentDispositionFilename(response.headers.get('content-disposition'))
 			|| url.pathname.split('/').pop()
 			|| '';
+		console.log(rawFilename);
 		const originalFilename = rawFilename.endsWith('.gz') ? rawFilename.slice(0, -3) : rawFilename;
 		newHeaders.set('Content-Disposition', createContentDisposition(originalFilename));
 		return new Response(decompressed, { status: response.status, headers: newHeaders });
