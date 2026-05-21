@@ -1,5 +1,6 @@
 import { createTarHeader, parseTarStream, createBgzfDecompressor, isBgzf } from 'bgzf';
 import { ZipWriter } from '@zip.js/zip.js';
+import { createOpfsTempFile } from './opfs-temp';
 
 type ArchiveFormat = 'tar' | 'zip';
 
@@ -20,11 +21,6 @@ type DirectoryTarget =
 export type ArchiveDownloadWorkerRequest =
 	| {
 		readonly id: string;
-		readonly mode: 'cleanup';
-		readonly opfsName: string;
-	}
-	| {
-		readonly id: string;
 		readonly mode: 'directory';
 		readonly format: ArchiveFormat;
 		readonly bucketName: string;
@@ -42,15 +38,6 @@ export type ArchiveDownloadWorkerRequest =
 		readonly isTargz: boolean;
 		readonly filename: string;
 		readonly authHeaders: Record<string, string>;
-	}
-	| {
-		readonly id: string;
-		readonly mode: 'full-archive';
-		readonly fileId: string;
-		readonly token?: string;
-		readonly decompress: boolean;
-		readonly filename: string;
-		readonly authHeaders: Record<string, string>;
 	};
 
 export type ArchiveDownloadProgress = {
@@ -63,14 +50,10 @@ export type ArchiveDownloadProgress = {
 export type ArchiveDownloadWorkerMessage =
 	| { type: 'progress'; id: string; progress: ArchiveDownloadProgress }
 	| { type: 'done'; id: string; opfsName: string; filename: string; mimeType: string }
-	| { type: 'cleanup-done'; id: string }
 	| { type: 'error'; id: string; error: string; opfsName?: string };
 
 const TAR_MIME = 'application/x-tar';
-const GZIP_MIME = 'application/gzip';
 const ZIP_MIME = 'application/zip';
-const TEMP_FILE_PREFIX = 'cfw-fileup-';
-let startupCleanupPromise: Promise<void> | null = null;
 
 self.onmessage = (event: MessageEvent<ArchiveDownloadWorkerRequest>) => {
 	void handleRequest(event.data);
@@ -79,15 +62,9 @@ self.onmessage = (event: MessageEvent<ArchiveDownloadWorkerRequest>) => {
 async function handleRequest(request: ArchiveDownloadWorkerRequest): Promise<void> {
 	let opfsName: string | undefined;
 	try {
-		const root = await getOpfsRoot();
-		if (request.mode === 'cleanup') {
-			await root.removeEntry(request.opfsName).catch(() => {});
-			post({ type: 'cleanup-done', id: request.id });
-			return;
-		}
-		await cleanupStaleTempFiles(root);
-		opfsName = `${TEMP_FILE_PREFIX}${request.id}-${Date.now()}${opfsExtension(request)}`;
-		const fileHandle = await root.getFileHandle(opfsName, { create: true });
+		const tempFile = await createOpfsTempFile(request.id, opfsExtension(request));
+		opfsName = tempFile.opfsName;
+		const fileHandle = tempFile.fileHandle;
 
 		if (request.mode === 'directory') {
 			const files = await resolveDirectoryTargets(request);
@@ -106,35 +83,14 @@ async function handleRequest(request: ArchiveDownloadWorkerRequest): Promise<voi
 			post({ type: 'done', id: request.id, opfsName, filename: request.filename, mimeType: ZIP_MIME });
 			return;
 		}
-
-		await writeFullArchive(fileHandle, request);
-		post({ type: 'done', id: request.id, opfsName, filename: request.filename, mimeType: request.decompress ? TAR_MIME : GZIP_MIME });
 	} catch (err) {
 		post({ type: 'error', id: request.id, error: err instanceof Error ? err.message : String(err), opfsName });
 	}
 }
 
-function opfsExtension(request: Exclude<ArchiveDownloadWorkerRequest, { mode: 'cleanup' }>): string {
+function opfsExtension(request: ArchiveDownloadWorkerRequest): string {
 	if (request.mode === 'directory') return request.format === 'tar' ? '.tar' : '.zip';
-	if (request.mode === 'full-archive') return request.decompress ? '.tar' : '.tar.gz';
 	return '.zip';
-}
-
-async function getOpfsRoot(): Promise<FileSystemDirectoryHandle> {
-	if (!('storage' in navigator) || !navigator.storage.getDirectory) {
-		throw new Error('OPFS is not supported in this browser');
-	}
-	return await navigator.storage.getDirectory();
-}
-
-async function cleanupStaleTempFiles(root: FileSystemDirectoryHandle): Promise<void> {
-	startupCleanupPromise ??= (async () => {
-		for await (const [name] of root as unknown as AsyncIterable<[string, FileSystemHandle]>) {
-			if (!name.startsWith(TEMP_FILE_PREFIX)) continue;
-			await root.removeEntry(name).catch(() => {});
-		}
-	})();
-	await startupCleanupPromise;
 }
 
 function post(message: ArchiveDownloadWorkerMessage): void {
@@ -278,11 +234,6 @@ function archiveDownloadUrl(request: Extract<ArchiveDownloadWorkerRequest, { mod
 	return request.token ? `${base}?token=${encodeURIComponent(request.token)}` : base;
 }
 
-function fullArchiveDownloadUrl(request: Extract<ArchiveDownloadWorkerRequest, { mode: 'full-archive' }>): string {
-	const base = `/d/${encodeURIComponent(request.fileId)}`;
-	return request.token ? `${base}?token=${encodeURIComponent(request.token)}` : base;
-}
-
 async function writeArchiveAsZip(fileHandle: FileSystemFileHandle, request: Extract<ArchiveDownloadWorkerRequest, { mode: 'archive-to-zip' }>): Promise<void> {
 	const writable = await fileHandle.createWritable();
 	const zipWriter = new ZipWriter(writable, { bufferedWrite: false });
@@ -343,28 +294,4 @@ async function peekArchiveStream(stream: ReadableStream<Uint8Array>): Promise<{
 	});
 	const gzip = first.value.length >= 2 && first.value[0] === 0x1f && first.value[1] === 0x8b;
 	return { rebuilt, gzip, bgzf: gzip && isBgzf(first.value) };
-}
-
-async function writeFullArchive(fileHandle: FileSystemFileHandle, request: Extract<ArchiveDownloadWorkerRequest, { mode: 'full-archive' }>): Promise<void> {
-	const writable = await fileHandle.createWritable();
-	try {
-		progress(request.id, { phase: 'reading', processedFiles: 0, totalFiles: 1, currentFile: request.filename });
-		const res = await fetch(fullArchiveDownloadUrl(request), { headers: request.authHeaders });
-		if (!res.ok || !res.body) throw new Error(`Failed to fetch archive: HTTP ${res.status}`);
-		const { rebuilt, gzip, bgzf } = await peekArchiveStream(res.body);
-		const stream = request.decompress && gzip
-			? bgzf
-				? rebuilt.pipeThrough(createBgzfDecompressor())
-				: rebuilt.pipeThrough(new DecompressionStream('gzip'))
-			: !request.decompress && bgzf
-				? rebuilt.pipeThrough(createBgzfDecompressor()).pipeThrough(new CompressionStream('gzip'))
-				: rebuilt;
-		progress(request.id, { phase: 'writing', processedFiles: 0, totalFiles: 1, currentFile: request.filename });
-		await pipeToWritable(stream, writable);
-		await writable.close();
-		progress(request.id, { phase: 'done', processedFiles: 1, totalFiles: 1, currentFile: '' });
-	} catch (err) {
-		await writable.abort().catch(() => {});
-		throw err;
-	}
 }

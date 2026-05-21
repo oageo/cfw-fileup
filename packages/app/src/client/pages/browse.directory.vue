@@ -14,6 +14,8 @@ import InputDialog from '@/components/input-dialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { UploadTree } from '@/utils/upload-tree';
 import type { ArchiveDownloadWorkerMessage, ArchiveDownloadWorkerRequest, ArchiveDownloadProgress } from '@/workers/archive-download.worker';
+import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest } from '@/workers/download-transform.worker';
+import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 
 const props = defineProps<{
 	bucketName: string;
@@ -89,12 +91,16 @@ const headerCheckbox = ref<HTMLInputElement | null>(null);
 const archiveDownloadError = ref('');
 const archiveDownloadProgress = ref<ArchiveDownloadProgress | null>(null);
 let archiveDownloadWorker: Worker | null = null;
+let downloadTransformWorker: Worker | null = null;
 let archiveDownloadRequestId = 0;
 const archiveDownloadRequests = new Map<string, {
 	resolve: (value: { opfsName: string; filename: string; mimeType: string }) => void;
 	reject: (error: Error & { opfsName?: string }) => void;
 }>();
-const archiveCleanupRequests = new Map<string, () => void>();
+const downloadTransformRequests = new Map<string, {
+	resolve: (value: { opfsName: string; filename: string; mimeType: string }) => void;
+	reject: (error: Error & { opfsName?: string }) => void;
+}>();
 const archiveTempOpfsNames = new Set<string>();
 const archiveObjectUrls = new Set<string>();
 
@@ -217,11 +223,6 @@ function getArchiveDownloadWorker(): Worker {
 			archiveDownloadProgress.value = message.progress;
 			return;
 		}
-		if (message.type === 'cleanup-done') {
-			archiveCleanupRequests.get(message.id)?.();
-			archiveCleanupRequests.delete(message.id);
-			return;
-		}
 		const pending = archiveDownloadRequests.get(message.id);
 		if (!pending) return;
 		archiveDownloadRequests.delete(message.id);
@@ -244,13 +245,40 @@ function runArchiveDownloadWorker(request: Omit<ArchiveDownloadWorkerRequest, 'i
 	});
 }
 
-function cleanupOpfsFile(opfsName: string | undefined): Promise<void> {
-	if (!opfsName) return;
-	const id = `cleanup-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-	return new Promise((resolve) => {
-		archiveCleanupRequests.set(id, resolve);
-		getArchiveDownloadWorker().postMessage({ id, mode: 'cleanup', opfsName } satisfies ArchiveDownloadWorkerRequest);
+function getDownloadTransformWorker(): Worker {
+	if (downloadTransformWorker) return downloadTransformWorker;
+	downloadTransformWorker = new Worker(new URL('../workers/download-transform.worker.ts', import.meta.url), { type: 'module' });
+	downloadTransformWorker.onmessage = (event: MessageEvent<DownloadTransformWorkerMessage>) => {
+		const message = event.data;
+		if (message.type === 'progress') {
+			archiveDownloadProgress.value = message.progress;
+			return;
+		}
+		const pending = downloadTransformRequests.get(message.id);
+		if (!pending) return;
+		downloadTransformRequests.delete(message.id);
+		if (message.type === 'done') {
+			pending.resolve({ opfsName: message.opfsName, filename: message.filename, mimeType: message.mimeType });
+		} else if (message.type === 'error') {
+			const error = new Error(message.error) as Error & { opfsName?: string };
+			error.opfsName = message.opfsName;
+			pending.reject(error);
+		}
+	};
+	return downloadTransformWorker;
+}
+
+function runDownloadTransformWorker(request: Omit<DownloadTransformWorkerRequest, 'id'>): Promise<{ opfsName: string; filename: string; mimeType: string }> {
+	const id = `download-${++archiveDownloadRequestId}`;
+	return new Promise((resolve, reject) => {
+		downloadTransformRequests.set(id, { resolve, reject });
+		getDownloadTransformWorker().postMessage({ ...request, id });
 	});
+}
+
+async function cleanupOpfsFile(opfsName: string | undefined): Promise<void> {
+	if (!opfsName) return;
+	await removeOpfsTempFile(opfsName);
 }
 
 async function cleanupArchiveDownloads(): Promise<void> {
@@ -263,9 +291,7 @@ async function cleanupArchiveDownloads(): Promise<void> {
 
 async function downloadOpfsFile(result: { opfsName: string; filename: string; mimeType: string }): Promise<void> {
 	archiveTempOpfsNames.add(result.opfsName);
-	const root = await navigator.storage.getDirectory();
-	const fileHandle = await root.getFileHandle(result.opfsName);
-	const sourceFile = await fileHandle.getFile();
+	const sourceFile = await getOpfsTempFile(result.opfsName);
 	const file = new File([sourceFile], result.filename, { type: result.mimeType, lastModified: sourceFile.lastModified });
 	const url = URL.createObjectURL(file);
 	archiveObjectUrls.add(url);
@@ -319,8 +345,8 @@ async function startDirectoryArchiveDownload(format: 'tar' | 'zip'): Promise<voi
 		archiveDownloadProgress.value = null;
 	} catch (err) {
 		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
-		archiveDownloadWorker?.terminate();
-		archiveDownloadWorker = null;
+		downloadTransformWorker?.terminate();
+		downloadTransformWorker = null;
 		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
 	}
 }
@@ -362,12 +388,12 @@ async function startFullArchiveDownload(decompress: boolean): Promise<void> {
 	}
 	try {
 		const baseName = archiveBaseNameFromPath(props.filePath);
-		const result = await runArchiveDownloadWorker({
-			mode: 'full-archive',
-			fileId: props.fileId,
-			token: props.token,
-			decompress,
+		const result = await runDownloadTransformWorker({
+			mode: 'download',
+			url: downloadUrl.value,
 			filename: `${baseName}${decompress ? '.tar' : '.tar.gz'}`,
+			mimeType: decompress ? 'application/x-tar' : 'application/gzip',
+			transform: decompress ? 'decompress-gzip' : 'recompress-bgzf',
 			authHeaders: authHeaders(),
 		});
 		await downloadOpfsFile(result);
@@ -712,6 +738,8 @@ onBeforeUnmount(() => {
 	void cleanupArchiveDownloads().finally(() => {
 		archiveDownloadWorker?.terminate();
 		archiveDownloadWorker = null;
+		downloadTransformWorker?.terminate();
+		downloadTransformWorker = null;
 	});
 });
 watch(() => [props.bucketName, props.filePath], () => { load(); loadBucketId(); });
