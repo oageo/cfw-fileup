@@ -5,7 +5,7 @@ import { createBgzfBlock } from 'bgzf';
 import { aidxRegExp, parseEaidx } from '../../shared/eaid-x';
 import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { createContentDisposition, DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
+import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 
@@ -17,6 +17,14 @@ function createMissingFileCacheRequest(fileId: string): Request {
 	keyUrl.searchParams.set('v', '1');
 	keyUrl.searchParams.set('fileId', fileId);
 	return new Request(keyUrl, { method: 'GET' });
+}
+
+function toDownloadBasename(path: string): string {
+	return path.split('/').pop() ?? 'download';
+}
+
+function addGzipExtensionForUngzipClients(filename: string, download: DownloadContext): string {
+	return download.acceptsGzip ? filename : `${filename}.gz`;
 }
 
 function stripInternalCacheHeaders(cached: Response): Response {
@@ -185,7 +193,7 @@ app.get('/d/:fileId', async (c) => {
 			}
 		}
 
-		return download.stripInternalCacheHeaders(cached);
+		return download.stripInternalCacheHeaders(cached, mode);
 	}
 
 	function putDownloadCache(
@@ -206,6 +214,7 @@ app.get('/d/:fileId', async (c) => {
 				status: 200,
 				statusText: 'OK',
 				headers,
+				...(mode === 'targz-entry' ? { encodeBody: 'manual' } : {}),
 			}));
 		})();
 
@@ -259,7 +268,10 @@ app.get('/d/:fileId', async (c) => {
 	const cacheTarget = download.cacheTarget;
 	if (cacheTarget !== null) {
 		const cached = await matchDownloadCache(cacheTarget.mode, cacheTarget.entryPath);
-		if (cached !== null) return cached;
+		if (cached !== null) {
+			console.log(Array.from(cached.headers.entries()));
+			return cached;
+		}
 	}
 
 	if ((file.isTargz || file.isTar) && download.isListMode) {
@@ -306,7 +318,7 @@ app.get('/d/:fileId', async (c) => {
 		const response = new Response(rangeData.body, {
 			headers: download.withDownloadHeaders({
 				'Content-Type': indexEntry.mimeType,
-				'Content-Disposition': createContentDisposition(indexEntry.path.split('/').pop() ?? 'download'),
+				'Content-Disposition': download.createContentDisposition(toDownloadBasename(indexEntry.path)),
 				'Content-Length': String(indexEntry.size),
 			}),
 		});
@@ -395,9 +407,10 @@ app.get('/d/:fileId', async (c) => {
 				headers: download.withDownloadHeaders({
 					'Content-Type': indexEntry.mimeType,
 					'Content-Encoding': 'gzip',
-					'Content-Disposition': download.getContentDisposition(indexEntry.path),
+					'Content-Disposition': download.createContentDisposition(indexEntry.path, addGzipExtensionForUngzipClients),
 					'ETag': download.getETag(indexEntry.path),
 				}),
+				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', fileQuery);
 			return response;
@@ -416,7 +429,7 @@ app.get('/d/:fileId', async (c) => {
 	const response = new Response(r2Object.body, {
 		headers: download.withDownloadHeaders({
 			'Content-Type': file.mimeType ?? 'application/octet-stream',
-			'Content-Disposition': createContentDisposition(file.path.split('/').pop() ?? 'download'),
+			'Content-Disposition': download.createContentDisposition(toDownloadBasename(file.path)),
 			'Content-Length': String(file.size ?? 0),
 		}),
 	});

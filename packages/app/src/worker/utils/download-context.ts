@@ -36,7 +36,7 @@ function toAsciiFilenameFallback(filename: string): string {
 	return fallback || 'download';
 }
 
-export function createContentDisposition(filename: string): string {
+function buildContentDisposition(filename: string): string {
 	const fallback = toAsciiFilenameFallback(filename);
 	return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
@@ -121,9 +121,12 @@ export class DownloadContext {
 		this.authContext = { type: 'expired-file-token', token };
 	}
 
-	getContentDisposition(filename: string): string {
-		const displayName = this.acceptsGzip ? filename : `${filename}.gz`;
-		return createContentDisposition(displayName);
+	createContentDisposition(
+		filename: string,
+		transform?: (filename: string, context: DownloadContext) => string,
+	): string {
+		const displayName = transform?.(filename, this) ?? filename;
+		return buildContentDisposition(displayName);
 	}
 
 	getETag(entryPath?: string): string {
@@ -174,7 +177,7 @@ export class DownloadContext {
 		});
 	}
 
-	stripInternalCacheHeaders(cached: Response): Response {
+	stripInternalCacheHeaders(cached: Response, mode: CacheMode): Response {
 		const headers = new Headers(cached.headers);
 		const cachedStatus = Number(headers.get(internalStatusHeader));
 		const status = Number.isInteger(cachedStatus) && cachedStatus >= 100 && cachedStatus <= 599
@@ -192,6 +195,7 @@ export class DownloadContext {
 			status,
 			statusText,
 			headers,
+			...(mode === 'targz-entry' ? { encodeBody: 'manual' } : {}),
 		});
 	}
 }

@@ -73,34 +73,6 @@ async function peekStream(body: ReadableStream<Uint8Array<ArrayBuffer>>): Promis
 	return { rebuilt, gzip: true, bgzf: isBgzf(firstChunk) };
 }
 
-// Issue #16: Full BGZF archive → standard single-stream gzip
-async function handleFileInArchive(request: Request): Promise<Response> {
-	const response = await fetch(request);
-	if (!response.body) return response;
-
-	// If the user explicitly wants a .gz file, serve raw bytes as-is
-	const disposition = response.headers.get('content-disposition') ?? '';
-	const filename = getContentDispositionFilename(disposition);
-	if (filename.toLowerCase().endsWith('.gz')) return response;
-
-	const peek = await peekStream(response.body);
-	if (!peek) return response;
-	const { rebuilt, gzip, bgzf } = peek;
-
-	if (!gzip) {
-		return new Response(rebuilt, { status: response.status, headers: response.headers });
-	}
-
-	const decompressed = bgzf
-		? rebuilt.pipeThrough(createBgzfDecompressor())
-		: rebuilt.pipeThrough(new DecompressionStream('gzip'));
-
-	const newHeaders = new Headers(response.headers);
-	newHeaders.delete('Content-Length');
-	newHeaders.delete('Content-Encoding');
-	return new Response(decompressed, { status: response.status, headers: newHeaders });
-}
-
 async function handleFullArchive(request: Request): Promise<Response> {
 	const url = new URL(request.url);
 	const decompress = url.searchParams.has('decompress');
@@ -159,9 +131,8 @@ sw.addEventListener('fetch', (event) => {
 	if (!url.pathname.startsWith('/d/')) return;
 
 	const params = url.searchParams;
-	if (params.has('file')) {
-		event.respondWith(handleFileInArchive(event.request));
-	} else if (!params.has('list')) {
+	console.log(params.size, params.keys())
+	if (!params.has('list') && !params.has('file')) {
 		event.respondWith(handleFullArchive(event.request));
 	}
 });
