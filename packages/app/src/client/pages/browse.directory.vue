@@ -703,13 +703,14 @@ watch([isPartiallySelected, isAllSelected], async () => {
 <template>
   <div>
 
-    <div class="flex gap-2 items-center mb-3 flex-wrap">
+    <div class="card file-actions flex gap-2 items-center mb-3 flex-wrap">
       <!-- アーカイブ操作 -->
       <template v-if="isArchive" class="flex gap-2 items-center mb-3 flex-wrap">
-        <a :href="downloadUrl" download class="btn btn-secondary">ダウンロード</a>
+        <a v-if="isTargz" :href="downloadUrl" download class="btn btn-primary">ダウンロード (.tar.gz)</a>
+        <a v-else :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
         <a v-if="isTargz" :href="decompressUrl" download class="btn btn-secondary">展開してダウンロード (.tar)</a>
         <button type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startArchiveToZipDownload">
-          ZIPとしてダウンロード
+          zipとしてダウンロード
         </button>
         <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="archiveDeleteDialog = true">
           <Button.Content>削除</Button.Content>

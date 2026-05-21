@@ -386,7 +386,7 @@ watch(() => [entryPath.value, queryToken.value], () => {
     <template v-else>
       <!-- アーカイブ内ファイルビュー (ログイン有無問わず) -->
       <template v-if="(isTargz || isTar) && isEntryFile">
-        <div class="file-actions">
+        <div class="card file-actions">
           <a :href="innerDownloadUrl" download class="btn btn-primary">ダウンロード</a>
           <a v-if="isInnerText" :href="innerDownloadUrl" target="_blank" class="btn btn-secondary">ブラウザで開く</a>
         </div>

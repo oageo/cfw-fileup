@@ -67,7 +67,7 @@ async function executeDelete(): Promise<void> {
 
 <template>
   <div>
-    <div class="file-actions">
+    <div class="card file-actions">
       <a :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
       <a v-if="isGz" :href="decompressUrl" download class="btn btn-secondary">展開してダウンロード</a>
       <a v-if="isText" :href="downloadUrl" target="_blank" class="btn btn-secondary">ブラウザで開く</a>
