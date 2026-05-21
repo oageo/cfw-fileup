@@ -7,6 +7,8 @@ import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest, DownloadTransformProgress } from '@/workers/download-transform.worker';
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
+import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
+import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
 
 const props = defineProps<{
 	bucketName: string;
@@ -45,8 +47,6 @@ const downloadTransformRequests = new Map<string, {
 	resolve: (value: { opfsName: string; filename: string; mimeType: string }) => void;
 	reject: (error: Error & { opfsName?: string }) => void;
 }>();
-const tempOpfsNames = new Set<string>();
-const objectUrls = new Set<string>();
 
 const parentPath = computed(() => {
 	const parts = props.filePath.split('/');
@@ -78,6 +78,7 @@ function getDownloadTransformWorker(): Worker {
 		const message = event.data;
 		if (message.type === 'progress') {
 			downloadProgress.value = message.progress;
+			updateDownloadStatus(message.id, message.progress);
 			return;
 		}
 		const pending = downloadTransformRequests.get(message.id);
@@ -107,20 +108,11 @@ async function cleanupTempFile(opfsName: string | undefined): Promise<void> {
 	await removeOpfsTempFile(opfsName);
 }
 
-async function cleanupDownloads(): Promise<void> {
-	for (const url of objectUrls) URL.revokeObjectURL(url);
-	objectUrls.clear();
-	const names = Array.from(tempOpfsNames);
-	tempOpfsNames.clear();
-	await Promise.all(names.map(name => cleanupTempFile(name)));
-}
-
 async function downloadOpfsFile(result: { opfsName: string; filename: string; mimeType: string }): Promise<void> {
-	tempOpfsNames.add(result.opfsName);
 	const sourceFile = await getOpfsTempFile(result.opfsName);
 	const file = new File([sourceFile], result.filename, { type: result.mimeType, lastModified: sourceFile.lastModified });
 	const url = URL.createObjectURL(file);
-	objectUrls.add(url);
+	registerDownloadedOpfsFile(url, result.opfsName);
 	const a = document.createElement('a');
 	a.href = url;
 	a.download = result.filename;
@@ -140,30 +132,34 @@ async function startDecompressedDownload(): Promise<void> {
 		downloadError.value = 'このブラウザは OPFS に対応していないため、展開してダウンロードできません。';
 		return;
 	}
+	const statusId = String(downloadTransformRequestId + 1);
+	const filename = decompressedFilename(props.filePath);
+	startDownloadStatus(statusId, filename);
 	try {
 		const result = await runDownloadTransformWorker({
 			mode: 'download',
 			url: downloadUrl.value,
-			filename: decompressedFilename(props.filePath),
+			filename,
 			mimeType: 'application/octet-stream',
 			transform: 'decompress-gzip',
 			authHeaders: authHeaders(),
 		});
 		await downloadOpfsFile(result);
+		completeDownloadStatus(statusId);
 		downloadProgress.value = null;
 	} catch (err) {
 		await cleanupTempFile((err as Error & { opfsName?: string }).opfsName);
 		downloadTransformWorker?.terminate();
 		downloadTransformWorker = null;
-		downloadError.value = err instanceof Error ? err.message : String(err);
+		const message = err instanceof Error ? err.message : String(err);
+		failDownloadStatus(statusId, message);
+		downloadError.value = message;
 	}
 }
 
 onBeforeUnmount(() => {
-	void cleanupDownloads().finally(() => {
-		downloadTransformWorker?.terminate();
-		downloadTransformWorker = null;
-	});
+	downloadTransformWorker?.terminate();
+	downloadTransformWorker = null;
 });
 </script>
 

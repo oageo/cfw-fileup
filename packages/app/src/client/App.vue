@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, defineComponent, h, watch } from 'vue';
 import { Button, Popover, useTheme } from '@vuetify/v0';
-import { CircleFadingArrowUp, Moon, Sun, Upload, User } from '@lucide/vue';
+import { CircleFadingArrowUp, Download, Moon, Sun, Upload, User } from '@lucide/vue';
 import { mainRouter } from './router';
 import { fetchCurrentUser, authStore, clearAuth } from './store/auth';
 import { navigateFn } from './navigate';
 import NirA from './components/nira.vue';
-import { connectUploadWorker, latestActiveUploadJob, latestUploadJob } from './store/upload-worker';
+import { connectUploadWorker, latestUploadJob } from './store/upload-worker';
+import { downloadStatus, downloadStatusPercent } from './store/download-status';
 
 navigateFn.value = (path) => mainRouter.pushByPath(path);
 
@@ -38,6 +39,17 @@ const navUploadText = computed(() => {
 	if (job.status === 'done') return `完了: ${job.completedPath ?? job.filename}`;
 	if (job.status === 'error') return `エラー: ${job.filename || job.prefix || 'アップロード'}`;
 	return job.filename || 'アップロード準備中';
+});
+const navDownloadPhaseText = computed(() => {
+	const status = downloadStatus.value;
+	if (!status) return '';
+	if (status.error) return `エラー: ${status.filename}`;
+	if (status.progress.phase === 'done') return `完了: ${status.filename}`;
+	const phase = status.progress.phase === 'resolving' ? '対象解決中'
+		: status.progress.phase === 'reading' ? '読み込み中'
+			: '書き込み中';
+	const current = status.progress.currentFile || status.filename;
+	return `${phase}: ${current}`;
 });
 
 (async () => {
@@ -109,6 +121,9 @@ function toggleTheme(): void {
                   <Button.Root :as="NirA" to="/my/uploadings" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>アップロード状況</Button.Content>
                   </Button.Root>
+                  <Button.Root :as="NirA" to="/my/downloads" class="btn btn-ghost w-full" @click="closeAppNav">
+                    <Button.Content>ダウンロード状況</Button.Content>
+                  </Button.Root>
                   <Button.Root :as="NirA" to="/my/passkeys" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>パスキー</Button.Content>
                   </Button.Root>
@@ -124,25 +139,42 @@ function toggleTheme(): void {
           </template>
         </div>
       </div>
-      <div v-if="authStore.user" :class="$style.uploadStrip">
-        <NirA to="/uploader" :class="$style.uploadButton" aria-label="ファイルアップロード">
-          <span :class="$style.uploadIcon" aria-hidden="true">
-            <Upload :size="16" :stroke-width="2" />
+      <div :class="$style.statusStrip">
+        <div v-if="authStore.user" :class="$style.statusRow">
+          <span v-if="latestUploadJob" :class="$style.uploadProgress" aria-hidden="true">
+            <span :class="$style.uploadProgressFill" :style="{ width: `${navUploadPercent}%` }" />
           </span>
-          <span v-if="!latestUploadJob">アップロード</span>
-        </NirA>
-        <NirA v-if="latestUploadJob" :to="navUploadLink" :class="[$style.uploadStatus, 'ms-auto']">
-          <span :class="$style.uploadText">
-            {{ navUploadText }}
+          <NirA to="/uploader" :class="$style.statusAction" aria-label="ファイルアップロード">
+            <span :class="$style.statusIcon" aria-hidden="true">
+              <Upload :size="16" :stroke-width="2" />
+            </span>
+            <span v-if="!latestUploadJob">アップロード</span>
+          </NirA>
+          <NirA v-if="latestUploadJob" :to="navUploadLink" :class="$style.statusTextLink">
+            <span :class="$style.statusText">
+              {{ navUploadText }}
+            </span>
+            <span :class="$style.statusPercent">{{ navUploadPercent }}%</span>
+          </NirA>
+          <NirA to="/my/uploadings?tab=browser" :class="[$style.statusIconButton, !latestUploadJob ? $style.statusRight : null]" aria-label="アップロード履歴">
+            <CircleFadingArrowUp :size="16" :stroke-width="2" />
+          </NirA>
+        </div>
+        <div :class="$style.statusRow">
+          <span v-if="downloadStatus" :class="$style.downloadProgress" aria-hidden="true">
+            <span :class="$style.downloadProgressFill" :style="{ width: `${downloadStatusPercent}%` }" />
           </span>
-          <span :class="$style.uploadPercent">{{ navUploadPercent }}%</span>
-        </NirA>
-        <NirA to="/my/uploadings?tab=browser" :class="[$style.uploadHistoryButton, ...(!latestUploadJob ? ['ms-auto'] : [])]" aria-label="アップロード履歴">
-          <CircleFadingArrowUp :size="16" :stroke-width="2" />
-        </NirA>
-        <span v-if="latestUploadJob" :class="$style.uploadProgress" aria-hidden="true">
-          <span :class="$style.uploadProgressFill" :style="{ width: `${navUploadPercent}%` }" />
-        </span>
+          <NirA to="/my/downloads" :class="$style.statusAction" aria-label="ダウンロード状況">
+            <span :class="$style.statusIcon" aria-hidden="true">
+              <Download :size="16" :stroke-width="2" />
+            </span>
+            <span v-if="navDownloadPhaseText === ''">ダウンロード</span>
+          </NirA>
+          <div :class="[$style.downloadStatus, !downloadStatus ? $style.statusPlaceholder : null]">
+            <span :class="$style.statusText">{{ navDownloadPhaseText }}</span>
+            <span v-if="downloadStatus" :class="$style.statusPercent">{{ downloadStatusPercent }}%</span>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -250,21 +282,34 @@ function toggleTheme(): void {
   flex-direction: column;
 }
 
-.uploadStrip {
+.statusStrip {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 28px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
   max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 20px;
+  margin: 0 auto -1px;
+  padding: 2px 20px;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted) !important;
   font-size: 0.8125rem;
 }
 
-.uploadButton {
+.statusRow {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  height: 28px;
+  overflow: visible;
+  align-items: center;
+}
+
+.statusRow > * {
+  flex: 0 0 auto;
+}
+
+.statusAction {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -275,7 +320,9 @@ function toggleTheme(): void {
   border-radius: var(--radius);
   color: var(--color-text-muted) !important;
   font-weight: 500;
+  line-height: 22px;
   text-decoration: none !important;
+  text-wrap: nowrap;
 
   &:hover {
     background: var(--color-bg);
@@ -283,7 +330,8 @@ function toggleTheme(): void {
   }
 }
 
-.uploadStatus {
+.statusTextLink {
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -297,7 +345,27 @@ function toggleTheme(): void {
   }
 }
 
-.uploadHistoryButton {
+.downloadStatus {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  text-align: right;
+}
+
+.statusPlaceholder {
+  opacity: 0.72;
+}
+
+.statusRight {
+  margin-left: auto;
+}
+
+.statusIconButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -313,15 +381,16 @@ function toggleTheme(): void {
   }
 }
 
-.uploadIcon {
+.statusIcon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
 }
 
-.uploadText {
-  min-width: 0;
+.statusText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -329,9 +398,20 @@ function toggleTheme(): void {
 
 .uploadProgress {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
+  left: -20px;
+  right: -20px;
+  top: 0;
+  height: 2px;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.downloadProgress {
+  position: absolute;
+  left: -20px;
+  right: -20px;
+  bottom: 0;
   height: 2px;
   overflow: hidden;
   background: transparent;
@@ -345,10 +425,18 @@ function toggleTheme(): void {
   transition: width 0.2s ease;
 }
 
-.uploadPercent {
+.downloadProgressFill {
+  display: block;
+  height: 100%;
+  background: var(--color-success, #16a34a);
+  transition: width 0.2s ease;
+}
+
+.statusPercent {
   width: 36px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
 }
 
 .main {
@@ -399,13 +487,18 @@ function toggleTheme(): void {
     display: none;
   }
 
-  .uploadStrip {
+  .statusStrip {
     padding: 0 12px;
   }
 
   .uploadProgress {
-    left: 0;
-    right: 0;
+    left: -12px;
+    right: -12px;
+  }
+
+  .downloadProgress {
+    left: -12px;
+    right: -12px;
   }
 }
 </style>

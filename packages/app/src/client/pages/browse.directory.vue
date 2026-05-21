@@ -16,6 +16,8 @@ import { UploadTree } from '@/utils/upload-tree';
 import type { ArchiveDownloadWorkerMessage, ArchiveDownloadWorkerRequest, ArchiveDownloadProgress } from '@/workers/archive-download.worker';
 import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest } from '@/workers/download-transform.worker';
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
+import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
+import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
 
 const props = defineProps<{
 	bucketName: string;
@@ -101,8 +103,6 @@ const downloadTransformRequests = new Map<string, {
 	resolve: (value: { opfsName: string; filename: string; mimeType: string }) => void;
 	reject: (error: Error & { opfsName?: string }) => void;
 }>();
-const archiveTempOpfsNames = new Set<string>();
-const archiveObjectUrls = new Set<string>();
 
 /** 選択可能なエントリ */
 const selectableEntries = computed(() => entries.value);
@@ -221,6 +221,7 @@ function getArchiveDownloadWorker(): Worker {
 		const message = event.data;
 		if (message.type === 'progress') {
 			archiveDownloadProgress.value = message.progress;
+			updateDownloadStatus(message.id, message.progress);
 			return;
 		}
 		const pending = archiveDownloadRequests.get(message.id);
@@ -252,6 +253,7 @@ function getDownloadTransformWorker(): Worker {
 		const message = event.data;
 		if (message.type === 'progress') {
 			archiveDownloadProgress.value = message.progress;
+			updateDownloadStatus(message.id, message.progress);
 			return;
 		}
 		const pending = downloadTransformRequests.get(message.id);
@@ -281,20 +283,11 @@ async function cleanupOpfsFile(opfsName: string | undefined): Promise<void> {
 	await removeOpfsTempFile(opfsName);
 }
 
-async function cleanupArchiveDownloads(): Promise<void> {
-	for (const url of archiveObjectUrls) URL.revokeObjectURL(url);
-	archiveObjectUrls.clear();
-	const names = Array.from(archiveTempOpfsNames);
-	archiveTempOpfsNames.clear();
-	await Promise.all(names.map(name => cleanupOpfsFile(name)));
-}
-
 async function downloadOpfsFile(result: { opfsName: string; filename: string; mimeType: string }): Promise<void> {
-	archiveTempOpfsNames.add(result.opfsName);
 	const sourceFile = await getOpfsTempFile(result.opfsName);
 	const file = new File([sourceFile], result.filename, { type: result.mimeType, lastModified: sourceFile.lastModified });
 	const url = URL.createObjectURL(file);
-	archiveObjectUrls.add(url);
+	registerDownloadedOpfsFile(url, result.opfsName);
 	const a = document.createElement('a');
 	a.href = url;
 	a.download = result.filename;
@@ -329,8 +322,10 @@ async function startDirectoryArchiveDownload(format: 'tar' | 'zip'): Promise<voi
 		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、アーカイブを作成できません。';
 		return;
 	}
+	const filename = `${archiveBaseNameFromPath(props.filePath)}.${format}`;
+	const statusId = String(archiveDownloadRequestId + 1);
+	startDownloadStatus(statusId, filename);
 	try {
-		const baseName = archiveBaseNameFromPath(props.filePath);
 		const result = await runArchiveDownloadWorker({
 			mode: 'directory',
 			format,
@@ -339,15 +334,18 @@ async function startDirectoryArchiveDownload(format: 'tar' | 'zip'): Promise<voi
 			targets: selectedArchiveTargets(),
 			excludePaths: Array.from(excludedPaths.value),
 			authHeaders: authHeaders(),
-			filename: `${baseName}.${format}`,
+			filename,
 		});
 		await downloadOpfsFile(result);
+		completeDownloadStatus(statusId);
 		archiveDownloadProgress.value = null;
 	} catch (err) {
 		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
 		downloadTransformWorker?.terminate();
 		downloadTransformWorker = null;
-		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
+		const message = err instanceof Error ? err.message : String(err);
+		failDownloadStatus(statusId, message);
+		archiveDownloadError.value = message;
 	}
 }
 
@@ -359,22 +357,28 @@ async function startArchiveToZipDownload(): Promise<void> {
 		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、ZIP を作成できません。';
 		return;
 	}
+	const filename = `${archiveBaseNameFromPath(props.filePath)}.zip`;
+	const statusId = String(archiveDownloadRequestId + 1);
+	startDownloadStatus(statusId, filename);
 	try {
 		const result = await runArchiveDownloadWorker({
 			mode: 'archive-to-zip',
 			fileId: props.fileId,
 			token: props.token,
 			isTargz: props.isTargz,
-			filename: `${archiveBaseNameFromPath(props.filePath)}.zip`,
+			filename,
 			authHeaders: authHeaders(),
 		});
 		await downloadOpfsFile(result);
+		completeDownloadStatus(statusId);
 		archiveDownloadProgress.value = null;
 	} catch (err) {
 		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
 		archiveDownloadWorker?.terminate();
 		archiveDownloadWorker = null;
-		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
+		const message = err instanceof Error ? err.message : String(err);
+		failDownloadStatus(statusId, message);
+		archiveDownloadError.value = message;
 	}
 }
 
@@ -386,23 +390,29 @@ async function startFullArchiveDownload(decompress: boolean): Promise<void> {
 		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、アーカイブをダウンロードできません。';
 		return;
 	}
+	const baseName = archiveBaseNameFromPath(props.filePath);
+	const filename = `${baseName}${decompress ? '.tar' : '.tar.gz'}`;
+	const statusId = `download-${archiveDownloadRequestId + 1}`;
+	startDownloadStatus(statusId, filename);
 	try {
-		const baseName = archiveBaseNameFromPath(props.filePath);
 		const result = await runDownloadTransformWorker({
 			mode: 'download',
 			url: downloadUrl.value,
-			filename: `${baseName}${decompress ? '.tar' : '.tar.gz'}`,
+			filename,
 			mimeType: decompress ? 'application/x-tar' : 'application/gzip',
 			transform: decompress ? 'decompress-gzip' : 'recompress-bgzf',
 			authHeaders: authHeaders(),
 		});
 		await downloadOpfsFile(result);
+		completeDownloadStatus(statusId);
 		archiveDownloadProgress.value = null;
 	} catch (err) {
 		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
 		archiveDownloadWorker?.terminate();
 		archiveDownloadWorker = null;
-		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
+		const message = err instanceof Error ? err.message : String(err);
+		failDownloadStatus(statusId, message);
+		archiveDownloadError.value = message;
 	}
 }
 
@@ -733,14 +743,15 @@ async function fetchPublicDirectoryEntries(): Promise<{
 	};
 }
 
-onMounted(() => { load(); loadBucketId(); });
+onMounted(() => {
+	load();
+	loadBucketId();
+});
 onBeforeUnmount(() => {
-	void cleanupArchiveDownloads().finally(() => {
-		archiveDownloadWorker?.terminate();
-		archiveDownloadWorker = null;
-		downloadTransformWorker?.terminate();
-		downloadTransformWorker = null;
-	});
+	archiveDownloadWorker?.terminate();
+	archiveDownloadWorker = null;
+	downloadTransformWorker?.terminate();
+	downloadTransformWorker = null;
 });
 watch(() => [props.bucketName, props.filePath], () => { load(); loadBucketId(); });
 watch(() => props.entryPath, (newEntryPath) => {
