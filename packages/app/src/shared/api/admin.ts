@@ -14,6 +14,13 @@ const QuotaResponse = v.pipe(
 );
 
 const OkResponse = { 200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } } };
+const WorkerCachePurgeResponse = v.pipe(
+	v.object({
+		ok: v.literal(true),
+		version: v.string(),
+	}),
+	v.metadata({ ref: 'WorkerCachePurgeResponse' }),
+);
 const AdminErrors = {};
 
 export const adminApiDef = {
@@ -46,6 +53,12 @@ export const adminApiDef = {
 		tags: ['admin'],
 		req: v.object({ bucketId: IdString }),
 		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (missing bucketId)', content: { 'application/json': { vSchema: ErrorResponse } } }, 404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+	},
+	'/api/admin/purge-worker-cache': {
+		summary: 'Purge Worker cache',
+		tags: ['admin'],
+		req: v.object({}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: WorkerCachePurgeResponse } } }, ...AdminErrors },
 	},
 	'/api/admin/set-user-quota': {
 		summary: 'Set quota for a user',

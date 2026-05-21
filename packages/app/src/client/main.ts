@@ -47,7 +47,7 @@ createApp(App)
 			dark: {
 				dark: true,
 				colors: {
-					'primary': '#96a1ff',
+					'primary': '#828efc',
 					'primary-hover': '#6366f1',
 					'primary-active': '#4f46e5',
 					'primary-fg': '#ffffff',

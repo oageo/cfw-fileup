@@ -1,10 +1,9 @@
 import { createMiddleware } from 'hono/factory';
+import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 
 type ShortGetCacheOptions = {
 	maxAgeSeconds: number;
 };
-
-const shortGetCachePromise = caches.open('api-short-get');
 
 function isExpired(response: Response): boolean {
 	const expires = response.headers.get('Expires');
@@ -14,8 +13,8 @@ function isExpired(response: Response): boolean {
 	return !Number.isNaN(expiresAt) && expiresAt <= Date.now();
 }
 
-async function matchShortGetCache(request: Request): Promise<Response | null> {
-	const cache = await shortGetCachePromise;
+async function matchShortGetCache(env: Env, request: Request): Promise<Response | null> {
+	const cache = await openWorkerCache(env, workerCacheBaseNames.shortGet);
 	const cached = await cache.match(request);
 	if (cached === undefined) return null;
 
@@ -28,13 +27,15 @@ async function matchShortGetCache(request: Request): Promise<Response | null> {
 }
 
 function putShortGetCache(
+	env: Env,
 	request: Request,
 	response: Response,
 	waitUntil: (promise: Promise<void>) => void,
 ): void {
+	const cacheResponse = response.clone();
 	const putPromise = (async () => {
-		const cache = await shortGetCachePromise;
-		await cache.put(request, response.clone());
+		const cache = await openWorkerCache(env, workerCacheBaseNames.shortGet);
+		await cache.put(request, cacheResponse);
 	})();
 
 	try {
@@ -53,7 +54,7 @@ export function shortGetCache(options: ShortGetCacheOptions) {
 			return;
 		}
 
-		const cached = await matchShortGetCache(c.req.raw);
+		const cached = await matchShortGetCache(c.env, c.req.raw);
 		if (cached !== null) {
 			const headers = new Headers(cached.headers);
 			headers.set('X-Cache', 'HIT');
@@ -80,11 +81,11 @@ export function shortGetCache(options: ShortGetCacheOptions) {
 			headers,
 		});
 
-		putShortGetCache(c.req.raw, c.res, (promise) => c.executionCtx.waitUntil(promise));
+		putShortGetCache(c.env, c.req.raw, c.res, (promise) => c.executionCtx.waitUntil(promise));
 	});
 }
 
-export async function deleteShortGetCache(request: Request): Promise<boolean> {
-	const cache = await shortGetCachePromise;
+export async function deleteShortGetCache(env: Env, request: Request): Promise<boolean> {
+	const cache = await openWorkerCache(env, workerCacheBaseNames.shortGet);
 	return cache.delete(request);
 }

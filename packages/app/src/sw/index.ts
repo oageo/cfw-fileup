@@ -17,6 +17,11 @@ type PeekResult = { rebuilt: ReadableStream<Uint8Array<ArrayBuffer>> } & (
 	| { gzip: true; bgzf: boolean }
 );
 
+function getContentDispositionFilename(disposition: string | null): string {
+	const filenameMatch = disposition?.match(/filename="([^"]+)"/i);
+	return filenameMatch ? filenameMatch[1] : '';
+}
+
 async function peekStream(body: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<PeekResult | null> {
 	const reader = body.getReader();
 	const { done, value: firstChunk } = await reader.read();
@@ -48,8 +53,7 @@ async function handleFileInArchive(request: Request): Promise<Response> {
 
 	// If the user explicitly wants a .gz file, serve raw bytes as-is
 	const disposition = response.headers.get('content-disposition') ?? '';
-	const filenameMatch = disposition.match(/filename="([^"]+)"/i);
-	const filename = filenameMatch ? filenameMatch[1] : '';
+	const filename = getContentDispositionFilename(disposition);
 	if (filename.toLowerCase().endsWith('.gz')) return response;
 
 	const peek = await peekStream(response.body);
@@ -100,7 +104,9 @@ async function handleFullArchive(request: Request): Promise<Response> {
 		newHeaders.delete('Content-Encoding');
 		newHeaders.delete('Content-Type');
 
-		const rawFilename = url.pathname.split('/').pop() ?? '';
+		const rawFilename = getContentDispositionFilename(response.headers.get('content-disposition'))
+			|| url.pathname.split('/').pop()
+			|| '';
 		const originalFilename = rawFilename.endsWith('.gz') ? rawFilename.slice(0, -3) : rawFilename;
 		newHeaders.set('Content-Disposition', `attachment; filename="${originalFilename}"`);
 		return new Response(decompressed, { status: response.status, headers: newHeaders });

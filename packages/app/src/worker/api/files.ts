@@ -3,7 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, gte, desc, sql, count, like } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
-import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
+import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser } from '../utils/rate-limit';
 import { authMiddleware } from '../middleware/auth';
@@ -11,7 +11,7 @@ import { shortGetCache } from '../middleware/short-get-cache';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
-import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
+import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -113,9 +113,11 @@ app.get('/ls', async (c) => {
 app.get('/meta', async (c) => {
 	const bucketName = c.req.query('bucketName');
 	const path = c.req.query('path');
+	const fileToken = c.req.query('token');
 	if (!bucketName || path == null) throw new HTTPException(400, { message: 'bucketName and path are required' });
 	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw new HTTPException(400, { message: `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters` });
 	if (path.length > MAX_FILE_PATH_LENGTH) throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+	if (fileToken && fileToken.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `token must be at most ${MAX_ID_LENGTH} characters` });
 
 	const db = getDb(c.env);
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
@@ -146,6 +148,18 @@ app.get('/meta', async (c) => {
 	const base = { visibility: file.visibility, isTargz: file.isTargz, isTar: file.isTar, size: file.size };
 	if (file.visibility === 'public' || isOwnerOrAdmin) {
 		return c.json({ ...base, fileId: file.id, bucketId: bucket.id });
+	}
+	if (fileToken) {
+		const fileTokenRecord = await db
+			.select()
+			.from(fileAccessTokens)
+			.where(and(eq(fileAccessTokens.token, fileToken), eq(fileAccessTokens.fileId, file.id)))
+			.get();
+		if (!fileTokenRecord) throw new HTTPException(403, { message: 'Forbidden' });
+		if (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now()) {
+			throw new HTTPException(403, { message: 'Forbidden' });
+		}
+		return c.json({ ...base, fileId: file.id });
 	}
 	return c.json(base);
 });

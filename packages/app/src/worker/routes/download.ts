@@ -7,10 +7,9 @@ import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens }
 import { getDb } from '../utils/db';
 import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
+import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 
 const app = new Hono<{ Bindings: Env }>();
-const downloadCacheName = 'download';
-const missingFileCacheName = 'download-file-not-found';
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
 
 function createMissingFileCacheRequest(fileId: string): Request {
@@ -36,9 +35,9 @@ function stripInternalCacheHeaders(cached: Response): Response {
 	});
 }
 
-async function matchMissingFileCache(fileId: string): Promise<Response | null> {
+async function matchMissingFileCache(env: Env, fileId: string): Promise<Response | null> {
 	const cacheRequest = createMissingFileCacheRequest(fileId);
-	const cache = await caches.open(missingFileCacheName);
+	const cache = await openWorkerCache(env, workerCacheBaseNames.missingDownloadFile);
 	const cached = await cache.match(cacheRequest);
 	if (cached === undefined) return null;
 
@@ -72,10 +71,10 @@ function createMissingFileResponse(fileId: string): Response {
 	});
 }
 
-function putMissingFileCache(fileId: string, response: Response, waitUntil: (promise: Promise<void>) => void): void {
+function putMissingFileCache(env: Env, fileId: string, response: Response, waitUntil: (promise: Promise<void>) => void): void {
+	const cacheResponse = response.clone();
 	const putPromise = (async () => {
-		const cache = await caches.open(missingFileCacheName);
-		const cacheResponse = response.clone();
+		const cache = await openWorkerCache(env, workerCacheBaseNames.missingDownloadFile);
 		const headers = new Headers(cacheResponse.headers);
 		headers.set(downloadCacheInternalHeaders.status, String(cacheResponse.status));
 		headers.set(downloadCacheInternalHeaders.statusText, cacheResponse.statusText);
@@ -138,13 +137,13 @@ app.get('/d/:fileId', async (c) => {
 	const fileId = c.req.param('fileId');
 	if (fileId.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `fileId must be at most ${MAX_ID_LENGTH} characters` });
 	if (!aidxRegExp.test(fileId)) throw new HTTPException(400, { message: 'Invalid file ID' });
-	const cachedMissingFile = await matchMissingFileCache(fileId);
+	const cachedMissingFile = await matchMissingFileCache(c.env, fileId);
 	if (cachedMissingFile !== null) return cachedMissingFile;
 
 	const file = await db.select().from(files).where(eq(files.id, fileId)).get();
 	if (!file) {
 		const response = createMissingFileResponse(fileId);
-		putMissingFileCache(fileId, response, (promise) => c.executionCtx.waitUntil(promise));
+		putMissingFileCache(c.env, fileId, response, (promise) => c.executionCtx.waitUntil(promise));
 		return response;
 	}
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
@@ -173,7 +172,7 @@ app.get('/d/:fileId', async (c) => {
 	): Promise<Response | null> {
 		const cacheRequest = download.getCacheRequest(mode, entryPath);
 		if (cacheRequest === null) return null;
-		const cache = await caches.open(downloadCacheName);
+		const cache = await openWorkerCache(c.env, workerCacheBaseNames.download);
 		const cached = await cache.match(cacheRequest);
 		if (cached === undefined) return null;
 
@@ -196,9 +195,9 @@ app.get('/d/:fileId', async (c) => {
 	): void {
 		const cacheRequest = download.getCacheRequest(mode, entryPath);
 		if (cacheRequest === null) return;
+		const cacheResponse = response.clone();
 		const putPromise = (async () => {
-			const cache = await caches.open(downloadCacheName);
-			const cacheResponse = response.clone();
+			const cache = await openWorkerCache(c.env, workerCacheBaseNames.download);
 			const headers = new Headers(cacheResponse.headers);
 			headers.set('Cache-Control', download.getInternalCacheControl());
 			headers.set(downloadCacheInternalHeaders.status, String(cacheResponse.status));
@@ -417,6 +416,7 @@ app.get('/d/:fileId', async (c) => {
 	const response = new Response(r2Object.body, {
 		headers: download.withDownloadHeaders({
 			'Content-Type': file.mimeType ?? 'application/octet-stream',
+			'Content-Disposition': `attachment; filename="${file.path.split('/').pop()}"`,
 			'Content-Length': String(file.size ?? 0),
 		}),
 	});
