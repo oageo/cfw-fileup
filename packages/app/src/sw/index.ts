@@ -73,18 +73,11 @@ async function peekStream(body: ReadableStream<Uint8Array<ArrayBuffer>>): Promis
 	return { rebuilt, gzip: true, bgzf: isBgzf(firstChunk) };
 }
 
-async function handleFullArchive(request: Request): Promise<Response> {
+async function handleDecompressDownload(request: Request): Promise<Response> {
 	const url = new URL(request.url);
-	const decompress = url.searchParams.has('decompress');
-
-	let fetchTarget: Request;
-	if (decompress) {
-		const originUrl = new URL(request.url);
-		originUrl.searchParams.delete('decompress');
-		fetchTarget = new Request(originUrl, { headers: request.headers });
-	} else {
-		fetchTarget = request;
-	}
+	const originUrl = new URL(request.url);
+	originUrl.searchParams.delete('decompress');
+	const fetchTarget = new Request(originUrl, { headers: request.headers });
 
 	const response = await fetch(fetchTarget);
 	if (!response.body) return response;
@@ -93,7 +86,7 @@ async function handleFullArchive(request: Request): Promise<Response> {
 	if (!peek) return response;
 	const { rebuilt, bgzf, gzip } = peek;
 
-	if (decompress && gzip) {
+	if (gzip) {
 		const decompressed = bgzf
 			? rebuilt.pipeThrough(createBgzfDecompressor())
 			: rebuilt.pipeThrough(new DecompressionStream('gzip'));
@@ -111,16 +104,6 @@ async function handleFullArchive(request: Request): Promise<Response> {
 		return new Response(decompressed, { status: response.status, headers: newHeaders });
 	}
 
-	// !decompress && bgzf: re-compress BGZF to standard single-stream gzip (issue #16)
-	if (!decompress && bgzf) {
-		const gzipStream = rebuilt.pipeThrough(createBgzfDecompressor())
-			.pipeThrough(new CompressionStream('gzip'));
-
-		const newHeaders = new Headers(response.headers);
-		newHeaders.delete('Content-Length');
-		return new Response(gzipStream, { status: response.status, headers: newHeaders });
-	}
-
 	return new Response(rebuilt, { status: response.status, headers: response.headers });
 }
 
@@ -130,8 +113,8 @@ sw.addEventListener('fetch', (event) => {
 	if (!url.pathname.startsWith('/d/')) return;
 
 	const params = url.searchParams;
-	if (!params.has('list') && !params.has('file')) {
-		event.respondWith(handleFullArchive(event.request));
+	if (params.has('decompress') && !params.has('list') && !params.has('file')) {
+		event.respondWith(handleDecompressDownload(event.request));
 	}
 });
 

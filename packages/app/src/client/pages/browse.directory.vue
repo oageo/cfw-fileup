@@ -44,11 +44,6 @@ const downloadUrl = computed(() => {
 	const base = `/d/${props.fileId}`;
 	return props.token ? `${base}?token=${props.token}` : base;
 });
-const decompressUrl = computed(() => {
-	if (!props.fileId) return '';
-	const base = `/d/${props.fileId}?decompress`;
-	return props.token ? `${base}&token=${props.token}` : base;
-});
 
 const entries = ref<DisplayEntry[]>([]);
 const error = ref('');
@@ -96,7 +91,7 @@ const archiveDownloadProgress = ref<ArchiveDownloadProgress | null>(null);
 let archiveDownloadWorker: Worker | null = null;
 let archiveDownloadRequestId = 0;
 const archiveDownloadRequests = new Map<string, {
-	resolve: (value: { opfsName: string; fileHandle: FileSystemFileHandle; filename: string; mimeType: string }) => void;
+	resolve: (value: { opfsName: string; filename: string; mimeType: string }) => void;
 	reject: (error: Error & { opfsName?: string }) => void;
 }>();
 const archiveCleanupRequests = new Map<string, () => void>();
@@ -231,7 +226,7 @@ function getArchiveDownloadWorker(): Worker {
 		if (!pending) return;
 		archiveDownloadRequests.delete(message.id);
 		if (message.type === 'done') {
-			pending.resolve({ opfsName: message.opfsName, fileHandle: message.fileHandle, filename: message.filename, mimeType: message.mimeType });
+			pending.resolve({ opfsName: message.opfsName, filename: message.filename, mimeType: message.mimeType });
 		} else {
 			const error = new Error(message.error) as Error & { opfsName?: string };
 			error.opfsName = message.opfsName;
@@ -241,7 +236,7 @@ function getArchiveDownloadWorker(): Worker {
 	return archiveDownloadWorker;
 }
 
-function runArchiveDownloadWorker(request: Omit<ArchiveDownloadWorkerRequest, 'id'>): Promise<{ opfsName: string; fileHandle: FileSystemFileHandle; filename: string; mimeType: string }> {
+function runArchiveDownloadWorker(request: Omit<ArchiveDownloadWorkerRequest, 'id'>): Promise<{ opfsName: string; filename: string; mimeType: string }> {
 	const id = String(++archiveDownloadRequestId);
 	return new Promise((resolve, reject) => {
 		archiveDownloadRequests.set(id, { resolve, reject });
@@ -266,9 +261,12 @@ async function cleanupArchiveDownloads(): Promise<void> {
 	await Promise.all(names.map(name => cleanupOpfsFile(name)));
 }
 
-async function downloadOpfsFile(result: { opfsName: string; fileHandle: FileSystemFileHandle; filename: string; mimeType: string }): Promise<void> {
+async function downloadOpfsFile(result: { opfsName: string; filename: string; mimeType: string }): Promise<void> {
 	archiveTempOpfsNames.add(result.opfsName);
-	const file = await result.fileHandle.getFile();
+	const root = await navigator.storage.getDirectory();
+	const fileHandle = await root.getFileHandle(result.opfsName);
+	const sourceFile = await fileHandle.getFile();
+	const file = new File([sourceFile], result.filename, { type: result.mimeType, lastModified: sourceFile.lastModified });
 	const url = URL.createObjectURL(file);
 	archiveObjectUrls.add(url);
 	const a = document.createElement('a');
@@ -342,6 +340,34 @@ async function startArchiveToZipDownload(): Promise<void> {
 			token: props.token,
 			isTargz: props.isTargz,
 			filename: `${archiveBaseNameFromPath(props.filePath)}.zip`,
+			authHeaders: authHeaders(),
+		});
+		await downloadOpfsFile(result);
+		archiveDownloadProgress.value = null;
+	} catch (err) {
+		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
+		archiveDownloadWorker?.terminate();
+		archiveDownloadWorker = null;
+		archiveDownloadError.value = err instanceof Error ? err.message : String(err);
+	}
+}
+
+async function startFullArchiveDownload(decompress: boolean): Promise<void> {
+	archiveDownloadError.value = '';
+	archiveDownloadProgress.value = null;
+	if (!props.fileId) return;
+	if (!navigator.storage?.getDirectory) {
+		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、アーカイブをダウンロードできません。';
+		return;
+	}
+	try {
+		const baseName = archiveBaseNameFromPath(props.filePath);
+		const result = await runArchiveDownloadWorker({
+			mode: 'full-archive',
+			fileId: props.fileId,
+			token: props.token,
+			decompress,
+			filename: `${baseName}${decompress ? '.tar' : '.tar.gz'}`,
 			authHeaders: authHeaders(),
 		});
 		await downloadOpfsFile(result);
@@ -706,9 +732,9 @@ watch([isPartiallySelected, isAllSelected], async () => {
     <div class="card file-actions flex gap-2 items-center mb-3 flex-wrap">
       <!-- アーカイブ操作 -->
       <template v-if="isArchive" class="flex gap-2 items-center mb-3 flex-wrap">
-        <a v-if="isTargz" :href="downloadUrl" download class="btn btn-primary">ダウンロード (.tar.gz)</a>
+        <button v-if="isTargz" type="button" class="btn btn-primary" :disabled="archiveDownloadProgress != null" @click="startFullArchiveDownload(false)">ダウンロード (.tar.gz)</button>
         <a v-else :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
-        <a v-if="isTargz" :href="decompressUrl" download class="btn btn-secondary">展開してダウンロード (.tar)</a>
+        <button v-if="isTargz" type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startFullArchiveDownload(true)">展開してダウンロード (.tar)</button>
         <button type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startArchiveToZipDownload">
           zipとしてダウンロード
         </button>

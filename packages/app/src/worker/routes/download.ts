@@ -23,8 +23,16 @@ function toDownloadBasename(path: string): string {
 	return path.split('/').pop() ?? 'download';
 }
 
-function addGzipExtensionForUngzipClients(filename: string, download: DownloadContext): string {
-	return download.acceptsGzip ? filename : `${filename}.gz`;
+function addGzipExtension(filename: string): string {
+	return `${filename}.gz`;
+}
+
+function getTargzEntryHeaders(download: DownloadContext, path: string, mimeType: string): HeadersInit {
+	return download.withDownloadHeaders({
+		'Content-Type': mimeType,
+		'Content-Disposition': download.createContentDisposition(path, addGzipExtension),
+		'ETag': download.getETag(path),
+	});
 }
 
 function stripInternalCacheHeaders(cached: Response): Response {
@@ -403,12 +411,7 @@ app.get('/d/:fileId', async (c) => {
 			});
 
 			const response = new Response(combinedStream, {
-				headers: download.withDownloadHeaders({
-					'Content-Type': indexEntry.mimeType,
-					'Content-Encoding': 'gzip',
-					'Content-Disposition': download.createContentDisposition(indexEntry.path, addGzipExtensionForUngzipClients),
-					'ETag': download.getETag(indexEntry.path),
-				}),
+				headers: getTargzEntryHeaders(download, indexEntry.path, indexEntry.mimeType),
 				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', fileQuery);
