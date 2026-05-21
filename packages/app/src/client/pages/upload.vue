@@ -13,6 +13,7 @@ import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
 import { enqueueUploadJob } from '@/store/upload-worker';
+import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '@/utils/upload-paths';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
 
@@ -119,6 +120,13 @@ const previewKind = computed(() => {
 	if (isTextLike(entry)) return 'text';
 	return 'meta';
 });
+
+function getEffectiveSelectedFileEntries() {
+	const tree = selectedTree.value;
+	if (!tree) return [];
+	const shouldTrimSingleRoot = libraryName.value.trim() === '' && (archiveMode.value === 'tar' || archiveMode.value === 'targz');
+	return getEffectiveUploadEntries(tree.entries, shouldTrimSingleRoot).entries;
+}
 
 async function loadBucket(): Promise<void> {
 	const result = await apiPost('/api/buckets/list');
@@ -735,24 +743,33 @@ async function executeUpload(): Promise<void> {
 	uploadError.value = '';
 	uploadDone.value = false;
 	if (!bucket.value) return;
+	const tree = selectedTree.value;
+	if (!tree || tree.entries.length === 0) return;
+
+	let files;
+	try {
+		files = getEffectiveSelectedFileEntries();
+	} catch (err) {
+		uploadError.value = err instanceof Error ? err.message : String(err);
+		return;
+	}
 
 	// Pre-upload existence check
 	const paths = getUploadPaths();
 	if (!validateUploadPaths(paths)) return;
 	if (paths.length > 0) {
 		const conflicts: string[] = [];
-		for (const path of paths) {
-			const lastSlash = path.lastIndexOf('/');
-			const parentPath = lastSlash === -1 ? '' : path.slice(0, lastSlash + 1);
-			const fileName = path.slice(lastSlash + 1);
+		const missingDirectories = new Set<string>();
+		for (const { parentPath, targets } of buildUploadConflictDirectoryPlan(paths)) {
+			if (isPathUnderMissingDirectory(parentPath, missingDirectories)) continue;
 			const result = await apiPost('/api/files/ls', {
 				bucketName: selectedBucketName.value,
 				path: parentPath,
 			});
 			if (result.ok) {
-				if (result.data.entries.some(e => e.type === 'file' && e.name === fileName)) {
-					conflicts.push(path);
-				}
+				conflicts.push(...findUploadConflictsInDirectory(targets, result.data.entries));
+			} else if (result.status === 404) {
+				missingDirectories.add(parentPath);
 			}
 		}
 		if (conflicts.length > 0) {
@@ -767,22 +784,19 @@ async function executeUpload(): Promise<void> {
 		}
 	}
 
-	const tree = selectedTree.value;
-	if (tree && tree.entries.length > 0) {
-		enqueueUploadJob({
-			bucketId: bucket.value.id,
-			bucketName: selectedBucketName.value,
-			prefix: uploadPrefix.value,
-			mode: archiveMode.value,
-			archiveBaseName: archiveUploadBaseName.value,
-			visibility: visibility.value,
-			passphrase: passphrase.value || undefined,
-			files: tree.toFileEntries(),
-			totalBytes: tree.totalSize,
-			authToken: authStore.token,
-		});
-		uploadDone.value = true;
-	}
+	enqueueUploadJob({
+		bucketId: bucket.value.id,
+		bucketName: selectedBucketName.value,
+		prefix: uploadPrefix.value,
+		mode: archiveMode.value,
+		archiveBaseName: archiveUploadBaseName.value,
+		visibility: visibility.value,
+		passphrase: passphrase.value || undefined,
+		files,
+		totalBytes: tree.totalSize,
+		authToken: authStore.token,
+	});
+	uploadDone.value = true;
 }
 
 onMounted(async () => {

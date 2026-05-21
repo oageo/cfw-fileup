@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { UploadTree } from '../src/client/utils/upload-tree';
+import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '../src/client/utils/upload-paths';
 
 const enc = new TextEncoder();
 
@@ -145,5 +146,95 @@ describe('UploadTree', () => {
 			{ path: 'same.txt', file: file('same.txt') },
 			{ path: 'same.txt', file: file('same.txt') },
 		] })).rejects.toThrow('Duplicate upload path');
+	});
+});
+
+describe('upload path helpers', () => {
+	test('trims a single root directory when archive trimming is enabled', async () => {
+		const tree = await UploadTree.from([
+			withRelativePath(file('a.txt'), 'root/a.txt'),
+			withRelativePath(file('b.txt'), 'root/sub/b.txt'),
+		]);
+
+		const result = getEffectiveUploadEntries(tree.entries, true);
+
+		expect(result.trimmedRootName).toBe('root');
+		expect(result.entries.map(entry => entry.path)).toEqual(['a.txt', 'sub/b.txt']);
+	});
+
+	test('keeps paths when archive trimming is disabled for individual and gzip uploads', async () => {
+		const tree = await UploadTree.from([
+			withRelativePath(file('a.txt'), 'root/a.txt'),
+			withRelativePath(file('b.txt'), 'root/sub/b.txt'),
+		]);
+
+		const result = getEffectiveUploadEntries(tree.entries, false);
+
+		expect(result.trimmedRootName).toBeNull();
+		expect(result.entries.map(entry => entry.path)).toEqual(['root/a.txt', 'root/sub/b.txt']);
+	});
+
+	test('does not trim multiple root directories', async () => {
+		const tree = await UploadTree.from({
+			entries: [
+				{ path: 'one/a.txt', file: file('a.txt') },
+				{ path: 'two/b.txt', file: file('b.txt') },
+			],
+		});
+
+		const result = getEffectiveUploadEntries(tree.entries, true);
+
+		expect(result.trimmedRootName).toBeNull();
+		expect(result.entries.map(entry => entry.path)).toEqual(['one/a.txt', 'two/b.txt']);
+	});
+
+	test('rejects duplicate paths after trimming', () => {
+		expect(() => getEffectiveUploadEntries([
+			{ path: 'root/a.txt', file: file('a.txt') },
+			{ path: 'root/a.txt', file: file('a.txt') },
+		], true)).toThrow('Duplicate upload path');
+	});
+
+	test('groups conflict checks by parent directory', () => {
+		const plan = buildUploadConflictDirectoryPlan([
+			'dir/a.txt',
+			'dir/b.txt',
+			'dir/sub/c.txt',
+			'root.txt',
+		]);
+
+		expect(plan).toEqual([
+			{
+				parentPath: '',
+				targets: [{ path: 'root.txt', parentPath: '', fileName: 'root.txt' }],
+			},
+			{
+				parentPath: 'dir/',
+				targets: [
+					{ path: 'dir/a.txt', parentPath: 'dir/', fileName: 'a.txt' },
+					{ path: 'dir/b.txt', parentPath: 'dir/', fileName: 'b.txt' },
+				],
+			},
+			{
+				parentPath: 'dir/sub/',
+				targets: [{ path: 'dir/sub/c.txt', parentPath: 'dir/sub/', fileName: 'c.txt' }],
+			},
+		]);
+	});
+
+	test('detects paths below missing directories', () => {
+		const missingDirectories = new Set(['dir/']);
+		expect(isPathUnderMissingDirectory('dir/sub/', missingDirectories)).toBe(true);
+		expect(isPathUnderMissingDirectory('other/', missingDirectories)).toBe(false);
+		expect(isPathUnderMissingDirectory('', missingDirectories)).toBe(false);
+	});
+
+	test('detects existing file conflicts in a listed directory', () => {
+		const [plan] = buildUploadConflictDirectoryPlan(['dir/a.txt', 'dir/b.txt']);
+
+		expect(findUploadConflictsInDirectory(plan.targets, [
+			{ type: 'dir', name: 'a.txt' },
+			{ type: 'file', name: 'b.txt' },
+		])).toEqual(['dir/b.txt']);
 	});
 });
