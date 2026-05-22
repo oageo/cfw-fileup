@@ -25,8 +25,22 @@ app.post(
       id: user.id,
       username: user.username,
       isAdmin: user.isAdmin,
+      termsAgreedAt: user.termsAgreedAt,
     }, 200);
   }, getResponseDefWithAuth('/api/account/me'))
+);
+
+app.post(
+	'/agree-terms',
+	describeRoute(omitResAndReq(apiDef['/api/account/agree-terms'])),
+	validator('json', apiDef['/api/account/agree-terms'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/agree-terms', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const body = c.req.valid('json');
+		await db.update(users).set({ termsAgreedAt: body.agreedAt }).where(eq(users.id, user.id));
+		return c.json({ ok: true, termsAgreedAt: body.agreedAt }, 200);
+	}, getResponseDefWithAuth('/api/account/agree-terms')),
 );
 
 app.post(

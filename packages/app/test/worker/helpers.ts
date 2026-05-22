@@ -4,6 +4,7 @@ import migration0000 from '../../migrations/0000_rich_gressill.sql?raw';
 import migration0001 from '../../migrations/0001_blushing_sandman.sql?raw';
 import migration0002 from '../../migrations/0002_pretty_talos.sql?raw';
 import migration0003 from '../../migrations/0003_overjoyed_pyro.sql?raw';
+import migration0004 from '../../migrations/0004_parched_hairball.sql?raw';
 
 export { env, app };
 
@@ -12,6 +13,7 @@ const migrations = [
 	migration0001,
 	migration0002,
 	migration0003,
+	migration0004,
 ] as const;
 
 const tables = [

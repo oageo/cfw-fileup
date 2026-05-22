@@ -264,3 +264,28 @@ describe('POST /api/account/update', () => {
 		expect(status).toBe(200);
 	});
 });
+
+describe('POST /api/account/agree-terms', () => {
+	test('records terms agreement timestamp', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+		const agreedAt = Date.now();
+
+		const res = await app.request('/api/account/agree-terms', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ agreedAt }),
+		}, env);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true, termsAgreedAt: agreedAt });
+
+		const meRes = await app.request('/api/account/me', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({}),
+		}, env);
+		expect(meRes.status).toBe(200);
+		const me = await meRes.json() as { termsAgreedAt?: number | null };
+		expect(me.termsAgreedAt).toBe(agreedAt);
+	});
+});

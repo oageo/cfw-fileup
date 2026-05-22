@@ -8,7 +8,7 @@ import BrowseFileTokens from './browse.file-tokens.vue';
 import TurnstileWidget from '@/components/turnstile-widget.vue';
 import MarkdownPreview from '@/components/markdown-preview.vue';
 import NirA from '@/components/nira.vue';
-import { authStore, authHeaders } from '@/store/auth';
+import { authStore, authHeaders, updateTermsAgreedAt } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
 
@@ -105,6 +105,10 @@ const isTar = ref(false);
 const fileSize = ref<number | null>(null);
 const fileId = ref<string | null>(null);
 const fileBucketId = ref<string | null>(null);
+const browseTermsLoading = ref(false);
+const browseTermsUrl = ref('');
+const browseTermsAccepted = ref(false);
+const browseTermsError = ref('');
 const metaLoading = ref(false);
 const metaError = ref('');
 const fileVisibility = ref<FileVisibility>('public');
@@ -130,11 +134,97 @@ const passphraseTokenExpiryStr = computed(() => {
 });
 
 const needsPassphrase = computed(() =>
-	!isDirectory.value && !authStore.user && fileVisibility.value === 'passphrase' && !autoToken.value && !metaLoading.value && !metaError.value,
+	!browseTermsBlocked.value && !isDirectory.value && !authStore.user && fileVisibility.value === 'passphrase' && !autoToken.value && !metaLoading.value && !metaError.value,
 );
 const detailsLoading = computed(() =>
-	metaLoading.value || (activeTab.value === 'info' && authStore.user && !isDirectory.value && fileVisibility.value !== 'public' && autoTokenLoading.value),
+	browseTermsLoading.value || metaLoading.value || (activeTab.value === 'info' && authStore.user && !isDirectory.value && fileVisibility.value !== 'public' && autoTokenLoading.value),
 );
+const browseTermsUpdatedAt = ref('');
+const currentBrowseUrl = computed(() => {
+	const parsed = mainRouter.currentRef.value?._parsedRoute;
+	if (!parsed) return location.href;
+	return `${location.origin}${parsed.fullPath}`;
+});
+const isTermsPage = computed(() => {
+	if (!browseTermsUrl.value) return false;
+	try {
+		const termsUrl = new URL(browseTermsUrl.value, location.origin);
+		const currentUrl = new URL(currentBrowseUrl.value);
+		return termsUrl.origin === currentUrl.origin &&
+			currentUrl.pathname.startsWith(termsUrl.pathname) &&
+			(!termsUrl.search || currentUrl.search === termsUrl.search);
+	} catch {
+		return false;
+	}
+});
+const browseTermsRequiredAt = computed(() => {
+	if (!browseTermsUrl.value) return 0;
+	if (!browseTermsUpdatedAt.value) return 1;
+	const time = Date.parse(`${browseTermsUpdatedAt.value}T00:00:00.000Z`);
+	return Number.isNaN(time) ? 1 : time;
+});
+const browseTermsBlocked = computed(() => browseTermsUrl.value !== '' && !isTermsPage.value && !browseTermsAccepted.value);
+
+const browseTermsStorageKey = 'cfw-fileup:browse-terms-agreed-at';
+
+function loadAnonymousBrowseTermsAgreedAt(): number | null {
+	try {
+		const raw = localStorage.getItem(browseTermsStorageKey);
+		if (!raw) return null;
+		const agreedAt = Number(raw);
+		return Number.isFinite(agreedAt) ? agreedAt : null;
+	} catch {
+		return null;
+	}
+}
+
+function hasAcceptedBrowseTerms(): boolean {
+	const requiredAt = browseTermsRequiredAt.value;
+	if (requiredAt === 0) return true;
+	const agreedAt = authStore.user
+		? authStore.user.termsAgreedAt
+		: loadAnonymousBrowseTermsAgreedAt();
+	return agreedAt !== null && agreedAt >= requiredAt;
+}
+
+async function acceptBrowseTerms(): Promise<void> {
+	const agreedAt = Date.now();
+	if (authStore.user) {
+		const result = await apiPost('/api/account/agree-terms', { agreedAt });
+		if (!result.ok) {
+			browseTermsError.value = result.data.error ?? '利用規約への同意を保存できませんでした';
+			return;
+		}
+		updateTermsAgreedAt(result.data.termsAgreedAt);
+	} else {
+		try {
+			localStorage.setItem(browseTermsStorageKey, String(agreedAt));
+		} catch { /* */ }
+	}
+	browseTermsAccepted.value = true;
+	fetchMeta();
+}
+
+async function fetchBrowseTerms(): Promise<void> {
+	browseTermsLoading.value = true;
+	browseTermsError.value = '';
+	try {
+		const res = await fetch('/api/meta');
+		if (!res.ok) {
+			browseTermsError.value = `利用規約の取得に失敗しました: ${res.status}`;
+			return;
+		}
+		const data = await res.json() as { termsUrl?: string; termsUpdatedAt?: string };
+		browseTermsUrl.value = data.termsUrl ?? '';
+		browseTermsUpdatedAt.value = data.termsUpdatedAt ?? '';
+		browseTermsAccepted.value = hasAcceptedBrowseTerms();
+		if (!browseTermsBlocked.value) fetchMeta();
+	} catch (e) {
+		browseTermsError.value = String(e);
+	} finally {
+		browseTermsLoading.value = false;
+	}
+}
 
 async function fetchInnerMeta(): Promise<void> {
 	if (!isEntryFile.value || !entryPath.value || !fileId.value) return;
@@ -150,6 +240,7 @@ async function fetchInnerMeta(): Promise<void> {
 }
 
 async function fetchMeta(): Promise<void> {
+	if (browseTermsBlocked.value) return;
 	if (isDirectory.value) {
 		isTargz.value = false;
 		return;
@@ -329,7 +420,7 @@ function tokenDeleted(tokenId: string) {
 	try { sessionStorage.removeItem(autoTokenCacheKey()); } catch { /* */ }
 }
 
-onMounted(fetchMeta);
+onMounted(fetchBrowseTerms);
 watch(() => [props.bucketName, props.filePath], () => {
 	activeTab.value = 'info';
 	autoToken.value = null;
@@ -340,16 +431,16 @@ watch(() => [props.bucketName, props.filePath], () => {
 	fileId.value = null;
 	fileBucketId.value = null;
 	clearExpiryTimer();
-	fetchMeta();
+	fetchBrowseTerms();
 });
 onUnmounted(clearExpiryTimer);
 watch(() => [entryPath.value, queryToken.value], () => {
 	innerMeta.value = null;
 	if (queryToken.value !== autoToken.value) {
-		fetchMeta();
+		fetchBrowseTerms();
 		return;
 	}
-	if (isEntryFile.value) fetchInnerMeta();
+	if (!browseTermsBlocked.value && isEntryFile.value) fetchInnerMeta();
 });
 </script>
 
@@ -382,6 +473,20 @@ watch(() => [entryPath.value, queryToken.value], () => {
 
     <div v-if="detailsLoading" class="page-loading">
       <span class="spinner"></span>読み込み中...
+    </div>
+    <div v-else-if="browseTermsError" class="alert alert-error">{{ browseTermsError }}</div>
+    <div v-else-if="browseTermsBlocked" class="card" :class="$style.termsGate">
+      <h2 :class="$style.termsGateTitle">利用規約への同意が必要です</h2>
+      <p :class="[$style.termsGateDesc, 'text-muted']">
+        ファイルやディレクトリを表示する前に、利用規約を確認して同意してください。
+      </p>
+      <p v-if="browseTermsUpdatedAt" :class="[$style.termsGateDate, 'text-muted']">
+        利用規約更新日: {{ browseTermsUpdatedAt }}
+      </p>
+      <div :class="$style.termsGateActions">
+        <a :href="browseTermsUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">利用規約を開く</a>
+        <button type="button" class="btn btn-primary" @click="acceptBrowseTerms">同意して表示</button>
+      </div>
     </div>
     <div v-else-if="metaError" class="alert alert-error">{{ metaError }}</div>
     <template v-else>
@@ -472,6 +577,30 @@ watch(() => [entryPath.value, queryToken.value], () => {
 
 .innerMarkdownPreview {
   margin-top: 16px;
+}
+
+.termsGate {
+  max-width: 520px;
+}
+
+.termsGateTitle {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.termsGateDesc {
+  margin: 0 0 8px;
+}
+
+.termsGateDate {
+  margin: 0 0 16px;
+  font-size: 0.875rem;
+}
+
+.termsGateActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .passphraseDesc {

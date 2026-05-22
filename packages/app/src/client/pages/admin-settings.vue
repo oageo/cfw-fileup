@@ -45,6 +45,9 @@ async function fetchSettings(): Promise<void> {
 				case 'terms_url':
 					map.terms_url = s.value;
 					break;
+				case 'terms_updated_at':
+					map.terms_updated_at = s.value;
+					break;
 				case 'indieauth_blocked_servers':
 					map.indieauth_blocked_servers = s.value;
 					break;
@@ -131,6 +134,17 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           @save="saveSetting('terms_url', $event)"
         >
           サインアップ時に表示する利用規約ページのURLです。空欄の場合は同意チェックを表示しません。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['terms_updated_at']"
+          :schema="KNOWN_SETTINGS['terms_updated_at']"
+          title="利用規約更新日"
+          :saving="saving['terms_updated_at']"
+          input-type="date"
+          @save="saveSetting('terms_updated_at', $event)"
+        >
+          YYYY-MM-DD 形式で指定します。この日付より古い同意は再確認されます。空欄の場合はURL設定時点の同意だけを確認します。
         </SettingItem>
 
         <SettingItem

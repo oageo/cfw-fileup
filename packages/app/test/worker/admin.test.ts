@@ -314,18 +314,26 @@ describe('POST /api/admin/update-setting', () => {
 	test('admin can set terms_url and meta exposes it', async () => {
 		const { adminToken } = await setupAdminAndUser();
 		const termsUrl = 'https://example.com/terms.md';
+		const termsUpdatedAt = '2026-05-23';
 
-		const res = await app.request('/api/admin/update-setting', {
+		const urlRes = await app.request('/api/admin/update-setting', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({ key: 'terms_url', value: termsUrl }),
 		}, env);
-		expect(res.status).toBe(200);
+		expect(urlRes.status).toBe(200);
+		const updatedAtRes = await app.request('/api/admin/update-setting', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ key: 'terms_updated_at', value: termsUpdatedAt }),
+		}, env);
+		expect(updatedAtRes.status).toBe(200);
 
 		const metaRes = await app.request('/api/meta', { method: 'GET' }, env);
 		expect(metaRes.status).toBe(200);
-		const meta = await metaRes.json() as { termsUrl?: string };
+		const meta = await metaRes.json() as { termsUrl?: string; termsUpdatedAt?: string };
 		expect(meta.termsUrl).toBe(termsUrl);
+		expect(meta.termsUpdatedAt).toBe(termsUpdatedAt);
 	});
 
 	test('invalid key-value pair returns an error', async () => {
@@ -346,6 +354,17 @@ describe('POST /api/admin/update-setting', () => {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({ key: 'terms_url', value: 'not-a-url' }),
+		}, env);
+		expect(res.status).toBe(400);
+	});
+
+	test('invalid terms_updated_at returns an error', async () => {
+		const { adminToken } = await setupAdminAndUser();
+
+		const res = await app.request('/api/admin/update-setting', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ key: 'terms_updated_at', value: '2026/05/23' }),
 		}, env);
 		expect(res.status).toBe(400);
 	});

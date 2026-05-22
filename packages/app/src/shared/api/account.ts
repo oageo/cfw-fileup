@@ -10,8 +10,16 @@ export const accountApiDef = {
     tags: ['account'],
 		req: v.object({}),
 		res: {
-			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ id: v.string(), username: v.string(), isAdmin: v.boolean() }) } } },
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ id: v.string(), username: v.string(), isAdmin: v.boolean(), termsAgreedAt: v.nullable(v.number()) }) } } },
     },
+	},
+	'/api/account/agree-terms': {
+    summary: 'Record terms agreement',
+    tags: ['account'],
+		req: v.object({ agreedAt: v.number() }),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true), termsAgreedAt: v.number() }) } } },
+		},
 	},
 	'/api/account/update': {
     summary: 'Update account info',

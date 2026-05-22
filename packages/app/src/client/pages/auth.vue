@@ -460,10 +460,6 @@ async function signupWithPasskey(): Promise<void> {
         </div>
 
         <template v-if="activeMode === 'signin'">
-          <div v-if="googleRequired" class="alert alert-error">
-            このサービスはGoogleアカウントによるサインインのみ受け付けています。
-          </div>
-
           <div v-if="!googleRequired" :class="$style.methodBlock">
             <button
               v-if="!useBackupCode"

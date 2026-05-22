@@ -10,6 +10,7 @@ type MetaResponse = {
 	registrationEnabled: boolean;
 	passphraseRequired: boolean;
 	termsUrl: string;
+	termsUpdatedAt: string;
 	turnstileEnabled: boolean;
 	turnstileSiteKey: string;
 	googleAuthEnabled: boolean;
@@ -52,11 +53,17 @@ app.get('/meta', async (c) => {
 			.from(appSettings)
 			.where(eq(appSettings.key, 'terms_url'))
 			.get();
+		const termsUpdatedAtSetting = await db
+			.select()
+			.from(appSettings)
+			.where(eq(appSettings.key, 'terms_updated_at'))
+			.get();
 
 		return createMetaResponse({
 			registrationEnabled: mode !== 'closed',
 			passphraseRequired: mode === 'passphrase',
 			termsUrl: termsUrlSetting?.value ?? '',
+			termsUpdatedAt: termsUpdatedAtSetting?.value ?? '',
 			turnstileEnabled: (c.env.TURNSTILE_SECRET as string) !== '',
 			turnstileSiteKey: c.env.TURNSTILE_SITE_KEY,
 			googleAuthEnabled,
@@ -68,6 +75,7 @@ app.get('/meta', async (c) => {
 			registrationEnabled: true,
 			passphraseRequired: true,
 			termsUrl: '',
+			termsUpdatedAt: '',
 			turnstileEnabled: false,
 			turnstileSiteKey: '',
 			googleAuthEnabled: false,

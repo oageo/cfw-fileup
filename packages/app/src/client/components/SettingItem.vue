@@ -19,6 +19,7 @@ const props = defineProps<{
 	title: string;
 	saving?: boolean;
 	multiline?: boolean;
+	inputType?: 'date';
 	/** selectの選択肢に表示するラベル。未指定時はvalue値をそのまま表示 */
 	optionLabels?: Record<string, string>;
 }>();
@@ -28,7 +29,7 @@ const emit = defineEmits<{
 	save: [value: TValue];
 }>();
 
-type InputKind = 'checkbox' | 'select' | 'textarea' | 'text' | 'number';
+type InputKind = 'checkbox' | 'select' | 'textarea' | 'text' | 'number' | 'date';
 
 function unwrapSchema(schema: unknown): SchemaLike {
 	const s = schema as SchemaLike;
@@ -46,6 +47,7 @@ const innerSchema = computed<SchemaLike>(() => {
 });
 
 const inputKind = computed<InputKind>(() => {
+	if (props.inputType === 'date') return 'date';
 	if (innerSchema.value.type === 'number') return 'number';
 	if (innerSchema.value.type === 'picklist') {
 		const opts = innerSchema.value.options ?? [];
@@ -197,7 +199,7 @@ function onSave() {
       </div>
     </template>
 
-    <!-- text -->
+    <!-- date/text -->
     <template v-else>
       <div :class="$style.settingRowInfo">
         <label :class="[$style.label]">{{ title }}</label>
@@ -209,7 +211,7 @@ function onSave() {
         <div class="flex gap-2">
           <input
             :value="(modelValue as string)"
-            type="text"
+            :type="inputKind === 'date' ? 'date' : 'text'"
             :disabled="saving"
             :aria-invalid="validationError != null"
             :class="[$style.textInput, 'form-input']"

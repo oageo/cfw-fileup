@@ -8,6 +8,7 @@ export const users = sqliteTable('users', {
 	misskeyId: text('misskey_id').unique(),
 	isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
 	isSuspended: integer('is_suspended', { mode: 'boolean' }).notNull().default(false),
+	termsAgreedAt: integer('terms_agreed_at'),
 });
 
 export const tokens = sqliteTable('tokens', {

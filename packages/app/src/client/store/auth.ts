@@ -4,6 +4,7 @@ export interface AuthUser {
 	id: string;
 	username: string;
 	isAdmin: boolean;
+	termsAgreedAt: number | null;
 }
 
 const TOKEN_KEY = 'cfw_fileup_token';
@@ -12,7 +13,9 @@ const USER_KEY = 'cfw_fileup_user';
 function loadStoredUser(): AuthUser | null {
 	try {
 		const raw = localStorage.getItem(USER_KEY);
-		return raw ? (JSON.parse(raw) as AuthUser) : null;
+		if (!raw) return null;
+		const user = JSON.parse(raw) as Omit<AuthUser, 'termsAgreedAt'> & { termsAgreedAt?: number | null };
+		return { ...user, termsAgreedAt: user.termsAgreedAt ?? null };
 	} catch {
 		return null;
 	}
@@ -72,4 +75,10 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
 		state.initialized = true;
 		return null;
 	}
+}
+
+export function updateTermsAgreedAt(termsAgreedAt: number): void {
+	if (!state.user) return;
+	state.user = { ...state.user, termsAgreedAt };
+	localStorage.setItem(USER_KEY, JSON.stringify(state.user));
 }
