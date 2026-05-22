@@ -13,6 +13,7 @@ import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { inferMimeTypeByExtension } from '../utils/mime-by-extension';
+import { isValidFilePath } from '../../shared/name-validation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -194,6 +195,9 @@ app.post(
 		if (!body.bucketId || !body.path) {
 			throw new HTTPException(400, { message: 'bucketId and path are required' });
 		}
+		if (!isValidFilePath(body.path)) {
+			throw new HTTPException(400, { message: 'Invalid file path' });
+		}
 
 		const partSize = body.partSize ?? DEFAULT_PART_SIZE;
 		if (partSize < MIN_PART_SIZE) {
@@ -277,6 +281,10 @@ app.post(
 		if (!body.fileId || !body.files) {
 			throw new HTTPException(400, { message: 'fileId and files are required' });
 		}
+		const invalidEntry = body.files.find(entry => !isValidFilePath(entry.path));
+		if (invalidEntry) {
+			throw new HTTPException(400, { message: `Invalid file path: ${invalidEntry.path}` });
+		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
 
@@ -333,6 +341,10 @@ app.post(
 
 		if (!body.fileId || !body.files) {
 			throw new HTTPException(400, { message: 'fileId and files are required' });
+		}
+		const invalidEntry = body.files.find(entry => !isValidFilePath(entry.path));
+		if (invalidEntry) {
+			throw new HTTPException(400, { message: `Invalid file path: ${invalidEntry.path}` });
 		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();

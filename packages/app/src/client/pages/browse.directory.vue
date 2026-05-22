@@ -12,6 +12,7 @@ import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import InputDialog from '@/components/input-dialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
+import { pathSegmentNameValidation } from '../../shared/name-validation';
 import { UploadTree } from '@/utils/upload-tree';
 import type { ArchiveDownloadWorkerMessage, ArchiveDownloadWorkerRequest, ArchiveDownloadProgress } from '@/workers/archive-download.worker';
 import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest } from '@/workers/download-transform.worker';
@@ -78,7 +79,7 @@ const directoryNameSchema = v.pipe(
 	v.trim(),
 	v.minLength(1, 'フォルダ名を入力してください'),
 	v.maxLength(MAX_DIRECTORY_NAME_LENGTH, `フォルダ名は${MAX_DIRECTORY_NAME_LENGTH}文字以内で入力してください`),
-	v.regex(/^[^/\\]+$/, 'フォルダ名に / や \\ は使えません'),
+	pathSegmentNameValidation,
 );
 
 const deleteDialog = ref(false);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { UploadTree } from '../src/client/utils/upload-tree';
 import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '../src/client/utils/upload-paths';
+import { getZipUploadRootName, normalizeZipEntryPath } from '../src/client/utils/zip-extract';
 
 const enc = new TextEncoder();
 
@@ -142,6 +143,8 @@ describe('UploadTree', () => {
 
 	test('rejects invalid and duplicate paths', async () => {
 		await expect(UploadTree.from({ entries: [{ path: '../bad.txt', file: file('bad.txt') }] })).rejects.toThrow('Invalid upload path');
+		await expect(UploadTree.from({ entries: [{ path: 'bad:name.txt', file: file('bad:name.txt') }] })).rejects.toThrow('Invalid upload path');
+		await expect(UploadTree.from({ entries: [{ path: 'dir/trailingdot.', file: file('trailingdot.') }] })).rejects.toThrow('Invalid upload path');
 		await expect(UploadTree.from({ entries: [
 			{ path: 'same.txt', file: file('same.txt') },
 			{ path: 'same.txt', file: file('same.txt') },
@@ -195,6 +198,12 @@ describe('upload path helpers', () => {
 		], true)).toThrow('Duplicate upload path');
 	});
 
+	test('rejects invalid paths after trimming', () => {
+		expect(() => getEffectiveUploadEntries([
+			{ path: 'root/bad?.txt', file: file('bad?.txt') },
+		], true)).toThrow('Invalid upload path');
+	});
+
 	test('groups conflict checks by parent directory', () => {
 		const plan = buildUploadConflictDirectoryPlan([
 			'dir/a.txt',
@@ -236,5 +245,19 @@ describe('upload path helpers', () => {
 			{ type: 'dir', name: 'a.txt' },
 			{ type: 'file', name: 'b.txt' },
 		])).toEqual(['dir/b.txt']);
+	});
+});
+
+describe('zip upload path helpers', () => {
+	test('normalizes valid ZIP paths and rejects unsafe names', () => {
+		expect(normalizeZipEntryPath('root/日本語.txt')).toBe('root/日本語.txt');
+		expect(normalizeZipEntryPath('root/bad?.txt')).toBeNull();
+		expect(normalizeZipEntryPath('root/trailingdot.')).toBeNull();
+		expect(normalizeZipEntryPath('../bad.txt')).toBeNull();
+	});
+
+	test('sanitizes ZIP upload root names', () => {
+		expect(getZipUploadRootName('bad?.zip')).toBe('bad_');
+		expect(getZipUploadRootName('...zip')).toBe('archive');
 	});
 });

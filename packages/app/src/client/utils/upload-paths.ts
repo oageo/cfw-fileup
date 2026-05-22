@@ -1,4 +1,5 @@
 import type { FileEntry } from 'bgzf';
+import { isValidFilePath } from '../../shared/name-validation';
 
 export interface UploadPathEntry extends FileEntry {
 	readonly path: string;
@@ -88,7 +89,7 @@ export function findUploadConflictsInDirectory(targets: readonly UploadConflictT
 function validateUploadEntryPaths(entries: readonly Pick<UploadPathEntry, 'path'>[]): void {
 	const seen = new Set<string>();
 	for (const entry of entries) {
-		if (entry.path === '' || entry.path.endsWith('/')) throw new Error(`Invalid upload path: ${entry.path}`);
+		if (!isValidFilePath(entry.path)) throw new Error(`Invalid upload path: ${entry.path}`);
 		if (seen.has(entry.path)) throw new Error(`Duplicate upload path: ${entry.path}`);
 		seen.add(entry.path);
 	}

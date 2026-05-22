@@ -11,6 +11,7 @@ import { takePendingUpload } from '@/store/pending-upload';
 import UploadDestinationDialog from '@/components/upload-destination-dialog.vue';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
+import { isValidFilePath } from '../../shared/name-validation';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
 import { enqueueUploadJob } from '@/store/upload-worker';
 import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '@/utils/upload-paths';
@@ -109,6 +110,11 @@ function getUploadPaths(): string[] {
 function validateUploadPaths(paths: string[]): boolean {
 	if ((archiveMode.value === 'tar' || archiveMode.value === 'targz') && /[\\/]/.test(archiveUploadBaseName.value)) {
 		uploadError.value = 'ライブラリ名に / または \\ は使えません。';
+		return false;
+	}
+	const invalidPath = paths.find(path => !isValidFilePath(path));
+	if (invalidPath) {
+		uploadError.value = `パスに使用できない名前が含まれています: ${invalidPath}`;
 		return false;
 	}
 	const tooLongPath = paths.find(path => path.length > MAX_FILE_PATH_LENGTH);

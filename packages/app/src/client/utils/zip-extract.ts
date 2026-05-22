@@ -1,5 +1,6 @@
 import { BlobReader, BlobWriter, ZipReader, type Entry } from '@zip.js/zip.js';
 import type { FileEntry } from 'bgzf';
+import { isValidFilePath } from '../../shared/name-validation';
 
 export interface ZipExtractOptions {
 	readonly password?: string;
@@ -49,6 +50,11 @@ export async function extractZipFile(file: File, options: ZipExtractOptions = {}
 			const normalizedPath = normalizeZipEntryPath(entry.filename);
 			if (!normalizedPath) continue;
 			const uploadPath = trimZipRootPath(normalizedPath, trimRootName);
+			const rootPath = `${rootName}/${uploadPath}`;
+			if (!isValidFilePath(rootPath)) {
+				warnings.push(`ZIP内の使用できない名前をスキップしました: ${entry.filename}`);
+				continue;
+			}
 
 			fileIndex += 1;
 			options.onProgress?.({ fileName: entry.filename, fileIndex, totalFiles: uploadFilePaths.size });
@@ -60,7 +66,7 @@ export async function extractZipFile(file: File, options: ZipExtractOptions = {}
 					type: blob.type,
 					lastModified: entry.lastModDate?.getTime() || file.lastModified,
 				});
-				extracted.push({ path: `${rootName}/${uploadPath}`, file: entryFile });
+				extracted.push({ path: rootPath, file: entryFile });
 			} catch (err) {
 				if (isInvalidPasswordError(err)) throw new ZipInvalidPasswordError();
 				throw err;
@@ -106,6 +112,10 @@ function getUploadFilePaths(entries: readonly Entry[], warnings: string[]): stri
 			warnings.push(`ZIP内の危険なパスをスキップしました: ${entry.filename}`);
 			continue;
 		}
+		if (!isValidFilePath(normalizedPath)) {
+			warnings.push(`ZIP内の使用できない名前をスキップしました: ${entry.filename}`);
+			continue;
+		}
 		paths.push(normalizedPath);
 	}
 	return paths;
@@ -126,18 +136,20 @@ function trimZipRootPath(path: string, rootName: string | null): string {
 
 export function getZipUploadRootName(fileName: string): string {
 	const base = fileName.replace(/\.zip$/i, '').trim() || 'archive';
-	const safe = base.replace(/[\\/]/g, '_').replace(/^\.+$/, 'archive');
+	const safe = base.replace(/[\u0000-\u001F\u007F<>:"|?*\\/]/g, '_').replace(/[ .]+$/g, '').replace(/^\.+$/, 'archive');
 	return safe || 'archive';
 }
 
 export function normalizeZipEntryPath(path: string): string | null {
+	if (path.includes('\\')) return null;
 	if (path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(path)) return null;
-	const normalized = path.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+	const normalized = path.replace(/^\/+/, '').replace(/\/+$/, '');
 	if (!normalized) return null;
 	const segments = normalized.split('/');
 	if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) return null;
 	if (segments[0] === '__MACOSX') return null;
-	return segments.join('/');
+	const joined = segments.join('/');
+	return isValidFilePath(joined) ? joined : null;
 }
 
 function isSkippableZipPath(path: string): boolean {

@@ -101,6 +101,19 @@ describe('POST /api/files/create/open', () => {
 		}, env);
 		expect(res.status).toBe(400);
 	});
+
+	test('invalid file path returns 400', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		for (const path of ['bad?.txt', 'dir/bad:name.txt', 'dir/trailingdot.']) {
+			const res = await app.request('/api/files/create/open', {
+				method: 'POST',
+				headers: authHeaders(token),
+				body: JSON.stringify({ bucketId, path }),
+			}, env);
+			expect(res.status).toBe(400);
+		}
+	});
 });
 
 describe('POST /api/files/ls', () => {
@@ -165,6 +178,36 @@ describe('POST /api/files/create/targz-index', () => {
 		expect(body.ok).toBe(true);
 	});
 
+	test('invalid targz index path returns 400', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'archive.tar.gz' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		const res = await app.request('/api/files/create/targz-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{
+					path: 'bad?.txt',
+					mimeType: 'text/plain',
+					aStart: 0,
+					aFirstEnd: 512,
+					aFinalStart: 512,
+					aEnd: 512,
+					rStartOffset: 0,
+					rEndOffset: 0,
+				}],
+			}),
+		}, env);
+		expect(res.status).toBe(400);
+	});
+
 	test('nonexistent fileId returns 404', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
@@ -178,6 +221,34 @@ describe('POST /api/files/create/targz-index', () => {
 			}),
 		}, env);
 		expect(res.status).toBe(404);
+	});
+});
+
+describe('POST /api/files/create/tar-index', () => {
+	test('invalid tar index path returns 400', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'archive.tar' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		const res = await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{
+					path: 'bad:name.txt',
+					mimeType: 'text/plain',
+					offset: 0,
+					size: 1,
+				}],
+			}),
+		}, env);
+		expect(res.status).toBe(400);
 	});
 });
 

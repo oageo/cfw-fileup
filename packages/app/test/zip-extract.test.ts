@@ -76,6 +76,6 @@ describe('zip extraction upload helper', () => {
 		expect(normalizeZipEntryPath('safe/../escape.txt')).toBeNull();
 		expect(normalizeZipEntryPath('safe//empty.txt')).toBeNull();
 		expect(normalizeZipEntryPath('__MACOSX/._file')).toBeNull();
-		expect(normalizeZipEntryPath('safe\\path.txt')).toBe('safe/path.txt');
+		expect(normalizeZipEntryPath('safe\\path.txt')).toBeNull();
 	});
 });

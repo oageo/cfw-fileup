@@ -9,6 +9,8 @@ import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
+import { isValidDirectoryPath } from '../../shared/name-validation';
+import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -28,6 +30,13 @@ app.post(
 		const normalizedPath = body.path.endsWith('/') ? body.path : `${body.path}/`;
 		if (normalizedPath.length > MAX_FILE_PATH_LENGTH) {
 			throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+		}
+		if (!isValidDirectoryPath(normalizedPath)) {
+			throw new HTTPException(400, { message: 'Invalid directory path' });
+		}
+		const directoryNameError = await validateDirectoryPathForbiddenNames(db, normalizedPath);
+		if (directoryNameError) {
+			throw new HTTPException(400, { message: directoryNameError });
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();

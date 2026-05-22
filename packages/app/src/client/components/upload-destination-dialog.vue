@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { Dialog } from '@vuetify/v0';
 import { ArrowLeft, ArrowRight, Check, Folder, FolderPlus, X } from '@lucide/vue';
 import { apiPost } from '../utils/api';
+import { isValidPathSegmentName } from '../../shared/name-validation';
 
 const props = defineProps<{
 	open: boolean;
@@ -141,6 +142,10 @@ async function createDirectory(): Promise<void> {
 	const name = newDirName.value.trim();
 	if (!name || !selectedBucketId.value) return;
 	mkdirError.value = '';
+	if (!isValidPathSegmentName(name)) {
+		mkdirError.value = 'フォルダ名に使用できない文字が含まれています';
+		return;
+	}
 	const path = `${currentPath.value}${name}/`;
 	const result = await apiPost('/api/directories/create', { bucketId: selectedBucketId.value, path });
 	if (!result.ok) {

@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { fileVisibilitySchema } from '../file-visibility.js';
+import { filePathValidation } from '../name-validation.js';
 import {
 	MAX_ARCHIVE_INDEX_ENTRIES,
 	MAX_BUCKET_NAME_LENGTH,
@@ -13,6 +14,7 @@ import {
 
 const BucketNameString = v.pipe(v.string(), v.maxLength(MAX_BUCKET_NAME_LENGTH));
 const FilePathString = v.pipe(v.string(), v.maxLength(MAX_FILE_PATH_LENGTH));
+const FileCreatePathString = v.pipe(v.string(), v.maxLength(MAX_FILE_PATH_LENGTH), filePathValidation);
 const MimeTypeString = v.pipe(v.string(), v.maxLength(MAX_MIME_TYPE_LENGTH));
 
 const UploadingFileResponse = v.pipe(
@@ -52,7 +54,7 @@ export const filesApiDef = {
 		tags: ['files'],
 		req: v.object({
 			bucketId: IdString,
-			path: FilePathString,
+			path: FileCreatePathString,
 			partSize: v.optional(v.number()),
 		}),
 		res: {
@@ -69,7 +71,7 @@ export const filesApiDef = {
 		req: v.object({
 			fileId: IdString,
 			files: v.pipe(v.array(v.object({
-				path: FilePathString,
+				path: FileCreatePathString,
 				mimeType: MimeTypeString,
 				aStart: v.number(),
 				aFirstEnd: v.number(),
@@ -92,7 +94,7 @@ export const filesApiDef = {
 		req: v.object({
 			fileId: IdString,
 			files: v.pipe(v.array(v.object({
-				path: FilePathString,
+				path: FileCreatePathString,
 				mimeType: MimeTypeString,
 				offset: v.number(),
 				size: v.number(),

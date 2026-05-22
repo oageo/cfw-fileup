@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { MAX_FILE_PATH_LENGTH } from '../const.js';
+import { directoryPathValidation } from '../name-validation.js';
 
 export const directoriesApiDef = {
 	'/api/directories/create': {
@@ -9,7 +10,7 @@ export const directoriesApiDef = {
 		tags: ['directories'],
 		req: v.object({
 			bucketId: IdString,
-			path: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_FILE_PATH_LENGTH)),
+			path: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_FILE_PATH_LENGTH), directoryPathValidation),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },

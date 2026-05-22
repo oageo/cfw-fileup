@@ -1,4 +1,5 @@
 import type { FileEntry } from 'bgzf';
+import { getInvalidPathSegment } from '../../shared/name-validation';
 
 export interface UploadEntry extends FileEntry {
 	readonly name: string;
@@ -164,7 +165,9 @@ export class UploadTree {
 	}
 
 	private static normalizePath(path: string): string {
-		const normalized = path.replace(/\\/g, '/').replace(/^\/+/, '');
+		const invalidSegment = getInvalidPathSegment(path, { allowTrailingSlash: false });
+		if (invalidSegment !== null) throw new Error(`Invalid upload path: ${path}`);
+		const normalized = path.replace(/^\/+/, '');
 		const segments = normalized.split('/');
 		if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
 			throw new Error(`Invalid upload path: ${path}`);
