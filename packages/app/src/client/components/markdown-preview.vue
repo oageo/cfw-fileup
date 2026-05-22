@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { authHeaders } from '@/store/auth';
+import ShikiCodePreview from './shiki-code-preview.vue';
 
 const props = defineProps<{
 	url: string;
@@ -95,8 +96,8 @@ onBeforeUnmount(() => {
       <span class="spinner"></span>読み込み中...
     </div>
     <div v-else-if="error" class="alert alert-error">{{ error }}</div>
-    <div v-else class="markdown-preview">
-      <pre v-if="viewMode === 'raw'" class="markdown-raw">{{ source }}</pre>
+    <div v-else :class="['markdown-preview', viewMode === 'raw' && 'markdown-preview-raw-mode']">
+      <ShikiCodePreview v-if="viewMode === 'raw'" :code="source" lang="markdown" />
       <div v-else class="markdown-body" v-html="html"></div>
     </div>
   </section>
@@ -112,6 +113,11 @@ onBeforeUnmount(() => {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+}
+
+.markdown-preview-raw-mode {
+  padding: 0;
+  overflow: hidden;
 }
 
 .markdown-preview-toolbar {
@@ -215,11 +221,4 @@ onBeforeUnmount(() => {
   height: auto;
 }
 
-.markdown-raw {
-  margin: 0;
-  color: var(--color-text);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 </style>

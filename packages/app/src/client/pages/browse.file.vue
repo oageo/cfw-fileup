@@ -10,6 +10,8 @@ import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
 import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
 import MarkdownPreview from '@/components/markdown-preview.vue';
+import RawTextPreview from '@/components/raw-text-preview.vue';
+import JsonPreview from '@/components/json-preview.vue';
 
 const props = defineProps<{
 	bucketName: string;
@@ -36,6 +38,15 @@ const isImage = computed(() => {
 const isMarkdown = computed(() => {
 	const lower = props.filePath.toLowerCase();
 	return lower.endsWith('.md') || lower.endsWith('.markdown');
+});
+const isJson = computed(() => {
+	const lower = props.filePath.toLowerCase();
+	return lower.endsWith('.json') || lower.endsWith('.jsonl') || lower.endsWith('.geojson');
+});
+const isTextLike = computed(() => {
+	const lower = props.filePath.toLowerCase();
+	const ext = lower.split('.').pop() ?? '';
+	return ['txt', 'json', 'csv', 'ts', 'js', 'mjs', 'jsx', 'tsx', 'vue', 'css', 'scss', 'html', 'xml', 'yml', 'yaml', 'md', 'markdown', 'c', 'cc', 'cpp', 'cs', 'go', 'h', 'hpp', 'java', 'kt', 'php', 'py', 'rb', 'rs', 'sh', 'sql', 'svelte', 'swift'].includes(ext);
 });
 
 const deleteError = ref('');
@@ -178,6 +189,8 @@ onBeforeUnmount(() => {
       <img :src="downloadUrl" :alt="filePath" class="file-preview-image">
     </div>
     <MarkdownPreview v-else-if="isMarkdown" :url="downloadUrl" :filename="filePath" :class="$style.markdownPreview" />
+    <JsonPreview v-else-if="isJson" :url="downloadUrl" :filename="filePath" :class="$style.jsonPreview" />
+    <RawTextPreview v-else-if="isTextLike" :url="downloadUrl" :filename="filePath" :class="$style.rawPreview" />
 
     <div v-if="downloadError" class="alert alert-error mt-3">{{ downloadError }}</div>
     <div v-if="deleteError" class="alert alert-error mt-3">{{ deleteError }}</div>
@@ -200,6 +213,14 @@ onBeforeUnmount(() => {
 }
 
 .markdownPreview {
+  margin-top: 16px;
+}
+
+.jsonPreview {
+  margin-top: 16px;
+}
+
+.rawPreview {
   margin-top: 16px;
 }
 </style>

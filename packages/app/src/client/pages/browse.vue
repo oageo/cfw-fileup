@@ -7,6 +7,8 @@ import BrowseFile from './browse.file.vue';
 import BrowseFileTokens from './browse.file-tokens.vue';
 import TurnstileWidget from '@/components/turnstile-widget.vue';
 import MarkdownPreview from '@/components/markdown-preview.vue';
+import RawTextPreview from '@/components/raw-text-preview.vue';
+import JsonPreview from '@/components/json-preview.vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders, updateTermsAgreedAt } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -51,6 +53,19 @@ const isInnerMarkdown = computed(() => {
 	if (mime === 'text/markdown') return true;
 	const lower = entryPath.value?.toLowerCase() ?? '';
 	return lower.endsWith('.md') || lower.endsWith('.markdown');
+});
+const isInnerJson = computed(() => {
+	const mime = innerMeta.value?.mimeType ?? '';
+	if (mime === 'application/json' || mime.endsWith('+json')) return true;
+	const lower = entryPath.value?.toLowerCase() ?? '';
+	return /\.(?:json|jsonl|geojson)$/.test(lower);
+});
+const isInnerTextLike = computed(() => {
+	const mime = innerMeta.value?.mimeType ?? '';
+	if (mime.startsWith('text/')) return true;
+	if (/(?:^|\/)(?:json|xml|javascript|typescript|csv|yaml|x-yaml)$/.test(mime)) return true;
+	const lower = entryPath.value?.toLowerCase() ?? '';
+	return /\.(?:txt|md|markdown|json|csv|ts|js|mjs|jsx|tsx|vue|css|scss|html|xml|ya?ml|c|cc|cpp|cs|go|h|hpp|java|kt|php|py|rb|rs|sh|sql|svelte|swift)$/.test(lower);
 });
 
 const breadcrumbs = computed(() => {
@@ -499,6 +514,8 @@ watch(() => [entryPath.value, queryToken.value], () => {
           <img :src="innerDownloadUrl" :alt="entryPath ?? ''" class="file-preview-image">
         </div>
         <MarkdownPreview v-else-if="isInnerMarkdown" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerMarkdownPreview" />
+        <JsonPreview v-else-if="isInnerJson" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerJsonPreview" />
+        <RawTextPreview v-else-if="isInnerTextLike" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerRawPreview" />
       </template>
 
       <!-- ファイル・ログイン済み: タブ付きパネル -->
@@ -576,6 +593,14 @@ watch(() => [entryPath.value, queryToken.value], () => {
 }
 
 .innerMarkdownPreview {
+  margin-top: 16px;
+}
+
+.innerJsonPreview {
+  margin-top: 16px;
+}
+
+.innerRawPreview {
   margin-top: 16px;
 }
 
