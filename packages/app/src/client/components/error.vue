@@ -17,6 +17,8 @@ defineProps<{ error?: Error }>();
 }
 
 .title {
+  color: var(--color-danger);
+  font-size: 1rem;
   margin: 0;
   font-weight: 600;
 }

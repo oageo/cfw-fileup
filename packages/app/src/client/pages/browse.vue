@@ -476,7 +476,7 @@ watch(() => [entryPath.value, queryToken.value], () => {
     </div>
     <div v-else-if="browseTermsError" class="alert alert-error">{{ browseTermsError }}</div>
     <div v-else-if="browseTermsBlocked" class="card" :class="$style.termsGate">
-      <h2 :class="$style.termsGateTitle">利用規約への同意が必要です</h2>
+      <h2 :class="['card-title', $style.termsGateTitle]">利用規約への同意が必要です</h2>
       <p :class="[$style.termsGateDesc, 'text-muted']">
         ファイルやディレクトリを表示する前に、利用規約を確認して同意してください。
       </p>
@@ -585,7 +585,6 @@ watch(() => [entryPath.value, queryToken.value], () => {
 
 .termsGateTitle {
   margin: 0 0 8px;
-  font-size: 1.1rem;
 }
 
 .termsGateDesc {

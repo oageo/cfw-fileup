@@ -68,6 +68,7 @@ async function purgeWorkerCache(): Promise<void> {
 }
 
 .maintenanceTitle {
+  color: var(--color-text);
   margin: 0 0 12px;
   font-size: 1rem;
 }

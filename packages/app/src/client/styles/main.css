@@ -81,11 +81,11 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 }
 .card + .card { margin-top: 16px; }
 .card-title {
-  font-size: 0.8125rem;
+  font-size: 1em;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--color-text-muted);
+  color: var(--color-text);
   margin-bottom: 14px;
   padding-bottom: 0;
   border-bottom: 0;

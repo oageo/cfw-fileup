@@ -678,7 +678,7 @@ async function signupWithPasskey(): Promise<void> {
       </section>
 
       <aside :class="['card', $style.ssoCard, !canUseExternalAuth && $style.ssoCardDisabled]" :aria-disabled="!canUseExternalAuth">
-        <h2 :class="$style.sideTitle">外部サイト認証</h2>
+        <h2 :class="['card-title', $style.sideTitle]">外部サイト認証</h2>
         <div :class="$style.methodBlock">
           <button
             v-if="googleAuthEnabled"
@@ -815,7 +815,6 @@ async function signupWithPasskey(): Promise<void> {
 
 .sideTitle {
   margin-bottom: 16px;
-  font-size: 1rem;
 }
 
 .sideText {

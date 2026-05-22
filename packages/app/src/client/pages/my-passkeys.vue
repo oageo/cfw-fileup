@@ -167,7 +167,7 @@ onMounted(async () => {
 
     <!-- Backup codes section -->
     <div :class="['card', $style.backupCard, shouldWarnBackupCodes && $style.backupCardWarning]">
-      <h3 :class="$style.backupTitle">バックアップコード</h3>
+      <h3 :class="['card-title', $style.backupTitle]">バックアップコード</h3>
       <p :class="$style.backupDescription">
         パスキーが使えない場合、安全のためバックアップコードを入力する必要があります。<br>
         新しいコードを生成すると、古いコードはすべて無効になります。
@@ -219,7 +219,7 @@ onMounted(async () => {
 
     <!-- Register section -->
     <div :class="['card', $style.registerCard]">
-      <h3 :class="$style.sectionTitle">新しいパスキーを登録</h3>
+      <h3 :class="['card-title', $style.sectionTitle]">新しいパスキーを登録</h3>
       <Form @submit="registerPasskey">
         <div :class="['form-group', $style.formGroup]">
           <label class="form-label" for="passkey-name">パスキー名（任意）</label>
@@ -254,7 +254,7 @@ onMounted(async () => {
 
     <!-- Passkey list -->
     <div :class="['card', $style.passkeyCard]">
-      <h3 :class="$style.sectionTitle">登録済みパスキー</h3>
+      <h3 :class="['card-title', $style.sectionTitle]">登録済みパスキー</h3>
       <div v-if="loading" :class="$style.mutedText">読み込み中...</div>
       <div v-else-if="error" class="alert alert-error">{{ error }}</div>
       <div v-else-if="passkeys.length === 0" :class="$style.emptyText">
@@ -306,6 +306,8 @@ onMounted(async () => {
 }
 
 .title {
+  color: var(--color-text);
+  font-size: 1.375rem;
   margin-bottom: 24px;
 }
 
@@ -321,7 +323,6 @@ onMounted(async () => {
 
 .sectionTitle {
   margin-bottom: 12px;
-  font-size: 1rem;
 }
 
 .formGroup {
@@ -371,7 +372,6 @@ onMounted(async () => {
 
 .backupTitle {
   margin-bottom: 8px;
-  font-size: 1rem;
 }
 
 .backupDescription {
