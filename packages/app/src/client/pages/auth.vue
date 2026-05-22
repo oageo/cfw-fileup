@@ -10,6 +10,9 @@ import type { ApiReq } from '../../shared/api';
 import { navigateTo } from '../navigate';
 import TurnstileWidget from '../components/turnstile-widget.vue';
 import { isValidNameFormat, NAME_FORMAT_ERROR } from '../../shared/name-validation';
+import { MAX_PASSPHRASE_LENGTH } from '../../shared/const';
+
+const PASSWORD_MIN_LENGTH = 8;
 
 const signinForm = reactive({ username: '', password: '' });
 const signinError = ref('');
@@ -49,6 +52,12 @@ const signupUsernameFormatError = computed(() => {
 	if (!isValidNameFormat(signupForm.username)) return NAME_FORMAT_ERROR;
 	return '';
 });
+const signupPasswordError = computed(() => {
+	if (signupMethod.value !== 'password' || !signupPrerequisitesMet.value) return '';
+	if (!signupForm.password) return 'パスワードを入力してください';
+	if (signupForm.password.length < PASSWORD_MIN_LENGTH) return `パスワードは${PASSWORD_MIN_LENGTH}文字以上にしてください`;
+	return '';
+});
 
 const canPasswordSignin = computed(() => !turnstileEnabled.value || signinTurnstileToken.value !== null);
 const termsRequired = computed(() => termsUrl.value !== '');
@@ -64,7 +73,7 @@ const signupUsernameReady = computed(() =>
 	!!signupForm.username.trim() &&
 	!signupUsernameFormatError.value,
 );
-const canPasswordSignup = computed(() => signupUsernameReady.value);
+const canPasswordSignup = computed(() => signupUsernameReady.value && signupPasswordError.value === '');
 const canPasskeySignup = computed(() => signupUsernameReady.value);
 const canUseExternalAuth = computed(() =>
 	activeMode.value === 'signin' || signupUsernameReady.value,
@@ -367,6 +376,10 @@ async function signupWithPassword({ valid }: { valid: boolean }): Promise<void> 
 		signupError.value = signupUsernameFormatError.value;
 		return;
 	}
+	if (signupPasswordError.value) {
+		signupError.value = signupPasswordError.value;
+		return;
+	}
 	signupError.value = '';
 	signupLoading.value = true;
 	try {
@@ -638,9 +651,13 @@ async function signupWithPasskey(): Promise<void> {
                     class="form-input"
                     type="password"
                     required
+                    :minlength="PASSWORD_MIN_LENGTH"
+                    :maxlength="MAX_PASSPHRASE_LENGTH"
                     autocomplete="new-password"
                     placeholder="••••••••"
                   >
+                  <div v-if="signupPasswordError" class="form-hint form-hint--error">{{ signupPasswordError }}</div>
+                  <div v-else class="form-hint">{{ PASSWORD_MIN_LENGTH }}文字以上</div>
                 </div>
 
                 <button type="submit" :class="['btn', 'btn-primary', 'w-full', $style.fullButton]" :disabled="!canPasswordSignup || signupLoading">

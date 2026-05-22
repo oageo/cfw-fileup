@@ -201,6 +201,7 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 .form-input-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
 .form-error { font-size: 0.8rem; color: var(--color-danger); }
 .form-hint { font-size: 0.8rem; color: var(--color-text-muted); }
+.form-hint--error { color: var(--color-danger); }
 .form-row { display: flex; gap: 8px; align-items: flex-end; }
 
 /* Input.Root + Input.Control (Vuetify0) */
