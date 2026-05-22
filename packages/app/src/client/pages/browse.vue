@@ -163,7 +163,7 @@ const browseTermsRequiredAt = computed(() => {
 	const time = Date.parse(`${browseTermsUpdatedAt.value}T00:00:00.000Z`);
 	return Number.isNaN(time) ? 1 : time;
 });
-const browseTermsBlocked = computed(() => browseTermsUrl.value !== '' && !isTermsPage.value && !browseTermsAccepted.value);
+const browseTermsBlocked = computed(() => !authStore.user && browseTermsUrl.value !== '' && !isTermsPage.value && !browseTermsAccepted.value);
 
 const browseTermsStorageKey = 'cfw-fileup:browse-terms-agreed-at';
 
