@@ -37,6 +37,8 @@ const signupTurnstileToken = ref<string | null>(null);
 const signupPrerequisitesConfirmed = ref(false);
 const googleAuthEnabled = ref(false);
 const googleRequired = ref(false);
+const termsUrl = ref('');
+const termsAccepted = ref(false);
 
 const activeMode = computed<'signin' | 'signup'>(() => (
 	mainRouter.currentRef.value.route.name === 'signup' ? 'signup' : 'signin'
@@ -49,11 +51,13 @@ const signupUsernameFormatError = computed(() => {
 });
 
 const canPasswordSignin = computed(() => !turnstileEnabled.value || signinTurnstileToken.value !== null);
-const signupPrerequisitesRequired = computed(() => passphraseRequired.value || turnstileEnabled.value);
+const termsRequired = computed(() => termsUrl.value !== '');
+const signupPrerequisitesRequired = computed(() => passphraseRequired.value || turnstileEnabled.value || termsRequired.value);
 const signupPrerequisitesMet = computed(() =>
 	(!signupPrerequisitesRequired.value || signupPrerequisitesConfirmed.value) &&
 	(!passphraseRequired.value || !!signupForm.passphrase) &&
-	(!turnstileEnabled.value || signupTurnstileToken.value !== null)
+	(!turnstileEnabled.value || signupTurnstileToken.value !== null) &&
+	(!termsRequired.value || termsAccepted.value)
 );
 const signupUsernameReady = computed(() =>
 	signupPrerequisitesMet.value &&
@@ -75,12 +79,14 @@ async function fetchMeta(): Promise<void> {
 			turnstileSiteKey?: string;
 			googleAuthEnabled?: boolean;
 			googleRequired?: boolean;
+			termsUrl?: string;
 		};
 		passphraseRequired.value = data.passphraseRequired ?? false;
 		turnstileEnabled.value = data.turnstileEnabled ?? false;
 		turnstileSiteKey.value = data.turnstileSiteKey ?? '';
 		googleAuthEnabled.value = data.googleAuthEnabled ?? false;
 		googleRequired.value = data.googleRequired ?? false;
+		termsUrl.value = data.termsUrl ?? '';
 	} catch (e) {
 		console.error('Failed to fetch meta:', e);
 	}
@@ -89,6 +95,9 @@ async function fetchMeta(): Promise<void> {
 fetchMeta();
 
 watch(() => signupForm.passphrase, () => {
+	signupPrerequisitesConfirmed.value = false;
+});
+watch(termsAccepted, () => {
 	signupPrerequisitesConfirmed.value = false;
 });
 
@@ -112,6 +121,10 @@ function confirmSignupPrerequisites(): void {
 	}
 	if (turnstileEnabled.value && !signupTurnstileToken.value) {
 		signupError.value = 'Turnstileの確認を完了してください';
+		return;
+	}
+	if (termsRequired.value && !termsAccepted.value) {
+		signupError.value = '利用規約に同意してください';
 		return;
 	}
 	signupPrerequisitesConfirmed.value = true;
@@ -568,6 +581,13 @@ async function signupWithPasskey(): Promise<void> {
               @update:token="signupTurnstileToken = $event"
             />
 
+            <label v-if="termsRequired" :class="$style.termsAgreement">
+              <input v-model="termsAccepted" type="checkbox" :class="$style.termsCheckbox">
+              <span>
+                <a :href="termsUrl" target="_blank" rel="noopener noreferrer">利用規約</a>に同意する
+              </span>
+            </label>
+
             <div v-if="signupError" class="alert alert-error">{{ signupError }}</div>
 
             <button
@@ -719,6 +739,20 @@ async function signupWithPasskey(): Promise<void> {
 
 .tabs {
   margin-bottom: 20px;
+}
+
+.termsAgreement {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+
+.termsCheckbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
 }
 
 .tabItemButton {

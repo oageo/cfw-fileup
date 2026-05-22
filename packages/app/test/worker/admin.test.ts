@@ -311,6 +311,23 @@ describe('POST /api/admin/update-setting', () => {
 		expect(await settingsRes.json()).toContainEqual({ key: 'registration_mode', value: 'open' });
 	});
 
+	test('admin can set terms_url and meta exposes it', async () => {
+		const { adminToken } = await setupAdminAndUser();
+		const termsUrl = 'https://example.com/terms.md';
+
+		const res = await app.request('/api/admin/update-setting', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ key: 'terms_url', value: termsUrl }),
+		}, env);
+		expect(res.status).toBe(200);
+
+		const metaRes = await app.request('/api/meta', { method: 'GET' }, env);
+		expect(metaRes.status).toBe(200);
+		const meta = await metaRes.json() as { termsUrl?: string };
+		expect(meta.termsUrl).toBe(termsUrl);
+	});
+
 	test('invalid key-value pair returns an error', async () => {
 		const { adminToken } = await setupAdminAndUser();
 
@@ -318,6 +335,17 @@ describe('POST /api/admin/update-setting', () => {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({ key: 'registration_mode', value: 'not-a-mode' }),
+		}, env);
+		expect(res.status).toBe(400);
+	});
+
+	test('invalid terms_url returns an error', async () => {
+		const { adminToken } = await setupAdminAndUser();
+
+		const res = await app.request('/api/admin/update-setting', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ key: 'terms_url', value: 'not-a-url' }),
 		}, env);
 		expect(res.status).toBe(400);
 	});

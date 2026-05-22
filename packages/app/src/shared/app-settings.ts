@@ -11,6 +11,10 @@ export const DEFAULT_FORBIDDEN_BUCKET_NAMES =
 
 export const registrationModeSchema = v.picklist(['closed', 'passphrase', 'open']);
 export type RegistrationMode = v.InferOutput<typeof registrationModeSchema>;
+export const optionalUrlSettingSchema = v.union([
+	v.literal(''),
+	v.pipe(v.string(), v.url(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)),
+]);
 
 /**
  * app_settings テーブルで管理する設定項目。
@@ -19,6 +23,7 @@ export type RegistrationMode = v.InferOutput<typeof registrationModeSchema>;
 export const KNOWN_SETTINGS = {
 	registration_mode: v.optional(registrationModeSchema, 'passphrase' satisfies RegistrationMode),
 	google_required: v.optional(v.picklist(['true', 'false']), 'false'),
+	terms_url: v.optional(optionalUrlSettingSchema, ''),
 	indieauth_blocked_servers: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
 	forbidden_usernames: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_USERNAMES),
 	forbidden_bucket_names: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_BUCKET_NAMES),

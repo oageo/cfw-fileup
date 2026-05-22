@@ -9,6 +9,7 @@ const app = new Hono<{ Bindings: Env }>();
 type MetaResponse = {
 	registrationEnabled: boolean;
 	passphraseRequired: boolean;
+	termsUrl: string;
 	turnstileEnabled: boolean;
 	turnstileSiteKey: string;
 	googleAuthEnabled: boolean;
@@ -46,10 +47,16 @@ app.get('/meta', async (c) => {
 
 		const googleRequired = googleRequiredSetting?.value === 'true';
 		const googleAuthEnabled = (c.env.GOOGLE_CLIENT_ID as string) !== '' && (c.env.GOOGLE_CLIENT_SECRET as string) !== '';
+		const termsUrlSetting = await db
+			.select()
+			.from(appSettings)
+			.where(eq(appSettings.key, 'terms_url'))
+			.get();
 
 		return createMetaResponse({
 			registrationEnabled: mode !== 'closed',
 			passphraseRequired: mode === 'passphrase',
+			termsUrl: termsUrlSetting?.value ?? '',
 			turnstileEnabled: (c.env.TURNSTILE_SECRET as string) !== '',
 			turnstileSiteKey: c.env.TURNSTILE_SITE_KEY,
 			googleAuthEnabled,
@@ -60,6 +67,7 @@ app.get('/meta', async (c) => {
 		return createMetaResponse({
 			registrationEnabled: true,
 			passphraseRequired: true,
+			termsUrl: '',
 			turnstileEnabled: false,
 			turnstileSiteKey: '',
 			googleAuthEnabled: false,

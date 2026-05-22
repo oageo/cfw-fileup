@@ -42,6 +42,9 @@ async function fetchSettings(): Promise<void> {
 				case 'google_required':
 					map.google_required = s.value;
 					break;
+				case 'terms_url':
+					map.terms_url = s.value;
+					break;
 				case 'indieauth_blocked_servers':
 					map.indieauth_blocked_servers = s.value;
 					break;
@@ -118,6 +121,16 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           @save="saveSetting('google_required', $event)"
         >
           有効にすると Google アカウントによる登録・サインインのみが許可されます。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['terms_url']"
+          :schema="KNOWN_SETTINGS['terms_url']"
+          title="利用規約URL"
+          :saving="saving['terms_url']"
+          @save="saveSetting('terms_url', $event)"
+        >
+          サインアップ時に表示する利用規約ページのURLです。空欄の場合は同意チェックを表示しません。
         </SettingItem>
 
         <SettingItem
