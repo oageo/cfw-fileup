@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { eq, and, like } from 'drizzle-orm';
 import { createBgzfBlock } from 'bgzf';
+import parseRange from 'range-parser';
 import { aidxRegExp, parseEaidx } from '../../shared/eaid-x';
 import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
@@ -11,6 +12,18 @@ import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 
 const app = new Hono<{ Bindings: Env }>();
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
+
+type ByteRange = {
+	start: number;
+	end: number;
+};
+
+type RangeParseResult =
+	| { type: 'range'; ranges: ByteRange[] }
+	| { type: 'ignore' }
+	| { type: 'invalid' };
+
+const maxByteRanges = 16;
 
 function createMissingFileCacheRequest(fileId: string): Request {
 	const keyUrl = new URL('https://cache.cfw-fileup.local/download-file-not-found');
@@ -25,6 +38,217 @@ function toDownloadBasename(path: string): string {
 
 function addGzipExtensionForUngzipClients(filename: string, download: DownloadContext): string {
 	return download.acceptsGzip ? filename : `${filename}.gz`;
+}
+
+function parseByteRange(rangeHeader: string | null, size: number): RangeParseResult {
+	if (rangeHeader === null) return { type: 'ignore' };
+	if (!Number.isSafeInteger(size) || size < 0) return { type: 'ignore' };
+
+	const trimmedRangeHeader = rangeHeader.trim();
+	const separatorIndex = trimmedRangeHeader.indexOf('=');
+	if (separatorIndex === -1) return { type: 'invalid' };
+	const unit = trimmedRangeHeader.slice(0, separatorIndex);
+	const rangeSet = trimmedRangeHeader.slice(separatorIndex + 1);
+	if (unit.toLowerCase() !== 'bytes') return { type: 'ignore' };
+
+	const rangeSpecs = rangeSet.split(',');
+	if (rangeSpecs.length > maxByteRanges) return { type: 'ignore' };
+	for (const rangeSpec of rangeSpecs) {
+		const trimmedRangeSpec = rangeSpec.trim();
+		if (!/^\d*-\d*$/.test(trimmedRangeSpec)) return { type: 'invalid' };
+		if (trimmedRangeSpec === '-') return { type: 'invalid' };
+	}
+
+	const parsed = parseRange(size, rangeHeader, { combine: true });
+	if (parsed === -1) return { type: 'invalid' };
+	if (parsed === -2) return { type: 'invalid' };
+	if (parsed.type.toLowerCase() !== 'bytes') return { type: 'ignore' };
+	if (parsed.length > maxByteRanges) return { type: 'ignore' };
+
+	const ranges = Array.from(parsed, (range) => ({ start: range.start, end: range.end }));
+	let previousStart = -1;
+	for (const range of ranges) {
+		if (range.start < previousStart) return { type: 'ignore' };
+		previousStart = range.start;
+	}
+	return { type: 'range', ranges };
+}
+
+function sliceStream(
+	stream: ReadableStream<Uint8Array<ArrayBuffer>>,
+	range: ByteRange,
+): ReadableStream<Uint8Array<ArrayBuffer>> {
+	let position = 0;
+
+	return stream.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+		transform(chunk, controller) {
+			const chunkStart = position;
+			const chunkEnd = position + chunk.byteLength - 1;
+			position += chunk.byteLength;
+
+			if (chunkEnd < range.start) return;
+			if (chunkStart > range.end) return;
+
+			const start = Math.max(range.start - chunkStart, 0);
+			const end = Math.min(range.end - chunkStart + 1, chunk.byteLength);
+			controller.enqueue(chunk.slice(start, end));
+			if (chunkEnd >= range.end) controller.terminate();
+		},
+	}));
+}
+
+function multipartRangePartHeader(boundary: string, contentType: string, range: ByteRange, size: number): string {
+	return `--${boundary}\r\nContent-Type: ${contentType}\r\nContent-Range: bytes ${range.start}-${range.end}/${size}\r\n\r\n`;
+}
+
+function multipartRangeContentLength(boundary: string, contentType: string, ranges: ByteRange[], size: number): number {
+	const encoder = new TextEncoder();
+	return ranges.reduce((sum, range) => {
+		const headerLength = encoder.encode(multipartRangePartHeader(boundary, contentType, range, size)).byteLength;
+		return sum + headerLength + (range.end - range.start + 1) + encoder.encode('\r\n').byteLength;
+	}, encoder.encode(`--${boundary}--\r\n`).byteLength);
+}
+
+function sliceMultipartRangeStream(
+	stream: ReadableStream<Uint8Array<ArrayBuffer>>,
+	ranges: ByteRange[],
+	size: number,
+	boundary: string,
+	contentType: string,
+): ReadableStream<Uint8Array<ArrayBuffer>> {
+	const encoder = new TextEncoder();
+	let position = 0;
+	let rangeIndex = 0;
+	let wrotePartHeader = false;
+
+	return stream.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+		transform(chunk, controller) {
+			const chunkStart = position;
+			const chunkEnd = position + chunk.byteLength - 1;
+			position += chunk.byteLength;
+
+			while (rangeIndex < ranges.length) {
+				const range = ranges[rangeIndex];
+				if (chunkEnd < range.start) return;
+				if (chunkStart > range.end) {
+					if (wrotePartHeader) controller.enqueue(encoder.encode('\r\n'));
+					rangeIndex++;
+					wrotePartHeader = false;
+					continue;
+				}
+
+				if (!wrotePartHeader) {
+					controller.enqueue(encoder.encode(multipartRangePartHeader(boundary, contentType, range, size)));
+					wrotePartHeader = true;
+				}
+
+				const start = Math.max(range.start - chunkStart, 0);
+				const end = Math.min(range.end - chunkStart + 1, chunk.byteLength);
+				controller.enqueue(chunk.slice(start, end));
+
+				if (chunkEnd < range.end) return;
+				controller.enqueue(encoder.encode('\r\n'));
+				rangeIndex++;
+				wrotePartHeader = false;
+			}
+
+			controller.enqueue(encoder.encode(`--${boundary}--\r\n`));
+			controller.terminate();
+		},
+		flush(controller) {
+			if (rangeIndex < ranges.length && wrotePartHeader) controller.enqueue(encoder.encode('\r\n'));
+			controller.enqueue(encoder.encode(`--${boundary}--\r\n`));
+		},
+	}));
+}
+
+function ifRangeMatches(headers: Headers, ifRangeHeader: string | null): boolean {
+	if (ifRangeHeader === null) return true;
+
+	const etag = headers.get('ETag');
+	if (etag !== null) return ifRangeHeader.trim() === etag;
+
+	const lastModified = headers.get('Last-Modified');
+	if (lastModified === null) return false;
+	return ifRangeHeader.trim() === lastModified;
+}
+
+function applyRangeRequest(response: Response, rangeHeader: string | null, ifRangeHeader: string | null): Response {
+	const headers = new Headers(response.headers);
+	const sizeText = headers.get('Content-Length');
+	const size = sizeText === null ? Number.NaN : Number(sizeText);
+	const canServeRange = response.status === 200 && Number.isSafeInteger(size) && size >= 0;
+	if (canServeRange) headers.set('Accept-Ranges', 'bytes');
+
+	if (!canServeRange || rangeHeader === null || !ifRangeMatches(headers, ifRangeHeader)) {
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	}
+
+	const range = parseByteRange(rangeHeader, size);
+	if (range.type === 'ignore') {
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	}
+
+	if (range.type === 'invalid') {
+		response.body?.cancel().catch(() => {});
+		const invalidHeaders = new Headers();
+		invalidHeaders.set('Accept-Ranges', 'bytes');
+		invalidHeaders.set('Content-Range', `bytes */${size}`);
+		const cacheControl = headers.get('Cache-Control');
+		if (cacheControl !== null) invalidHeaders.set('Cache-Control', cacheControl);
+		const vary = headers.get('Vary');
+		if (vary !== null) invalidHeaders.set('Vary', vary);
+		return new Response(null, {
+			status: 416,
+			statusText: 'Range Not Satisfiable',
+			headers: invalidHeaders,
+		});
+	}
+
+	if (range.ranges.length > 1) {
+		if (headers.has('Content-Encoding')) {
+			return new Response(response.body, {
+				status: response.status,
+				statusText: response.statusText,
+				headers,
+			});
+		}
+		const contentType = headers.get('Content-Type') ?? 'application/octet-stream';
+		const boundary = `cfw-fileup-${crypto.randomUUID()}`;
+		headers.set('Content-Type', `multipart/byteranges; boundary=${boundary}`);
+		headers.delete('Content-Disposition');
+		headers.delete('Content-Range');
+		headers.set('Content-Length', String(multipartRangeContentLength(boundary, contentType, range.ranges, size)));
+		return new Response(
+			response.body === null ? null : sliceMultipartRangeStream(response.body, range.ranges, size, boundary, contentType),
+			{
+				status: 206,
+				statusText: 'Partial Content',
+				headers,
+			},
+		);
+	}
+
+	const singleRange = range.ranges[0];
+	const length = singleRange.end - singleRange.start + 1;
+	headers.set('Content-Range', `bytes ${singleRange.start}-${singleRange.end}/${size}`);
+	headers.set('Content-Length', String(length));
+	return new Response(
+		response.body === null ? null : sliceStream(response.body, singleRange),
+		{
+			status: 206,
+			statusText: 'Partial Content',
+			headers,
+		},
+	);
 }
 
 function getTargzEntryHeaders(download: DownloadContext, path: string, mimeType: string): HeadersInit {
@@ -170,6 +394,8 @@ app.get('/d/:fileId', async (c) => {
 	if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
 
 	const download = new DownloadContext(file, c.req.raw);
+	const rangeHeader = c.req.header('Range') ?? null;
+	const ifRangeHeader = c.req.header('If-Range') ?? null;
 	if (download.fileQuery !== null && download.fileQuery.length > MAX_FILE_PATH_LENGTH) {
 		throw new HTTPException(400, { message: `file must be at most ${MAX_FILE_PATH_LENGTH} characters` });
 	}
@@ -205,7 +431,7 @@ app.get('/d/:fileId', async (c) => {
 			}
 		}
 
-		return download.stripInternalCacheHeaders(cached, mode);
+		return applyRangeRequest(download.stripInternalCacheHeaders(cached, mode), rangeHeader, ifRangeHeader);
 	}
 
 	function putDownloadCache(
@@ -258,7 +484,7 @@ app.get('/d/:fileId', async (c) => {
 				}
 				const response = new Response('Forbidden', { status: 403 });
 				if (cacheTarget !== null) putDownloadCache(response, cacheTarget.mode, cacheTarget.entryPath);
-				return response;
+				return applyRangeRequest(response, rangeHeader, ifRangeHeader);
 			}
 			download.useFileToken(fileTokenRecord);
 		} else {
@@ -334,7 +560,7 @@ app.get('/d/:fileId', async (c) => {
 			}),
 		});
 		putDownloadCache(response, 'tar-entry', fileQuery);
-		return response;
+		return applyRangeRequest(response, rangeHeader, ifRangeHeader);
 	}
 
 	if (download.isTargzFileEntry && fileQuery !== null) {
@@ -419,7 +645,7 @@ app.get('/d/:fileId', async (c) => {
 				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', fileQuery);
-			return response;
+			return applyRangeRequest(response, rangeHeader, ifRangeHeader);
 		} catch (error) {
 			console.error('Failed to fetch from R2:', error);
 			throw new HTTPException(500, { message: 'Internal server error' });
@@ -440,7 +666,7 @@ app.get('/d/:fileId', async (c) => {
 		}),
 	});
 	putDownloadCache(response, 'plain');
-	return response;
+	return applyRangeRequest(response, rangeHeader, ifRangeHeader);
 });
 
 export const downloadRoutes = app;

@@ -116,6 +116,154 @@ describe('GET /d/:fileId', () => {
 		expect(await cachedRes.text()).toBe('Hello World');
 	});
 
+	test('serves byte ranges for public files and caches the full response', async () => {
+		const { bucketId, fileId } = await setupPublicFile();
+
+		const firstRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=6-10' },
+		}, env);
+		expect(firstRes.status).toBe(206);
+		expect(firstRes.headers.get('Accept-Ranges')).toBe('bytes');
+		expect(firstRes.headers.get('Content-Range')).toBe('bytes 6-10/11');
+		expect(firstRes.headers.get('Content-Length')).toBe('5');
+		expect(await firstRes.text()).toBe('World');
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await env.R2.delete(`${bucketId}/hello.txt`);
+
+		const cachedRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4' },
+		}, env);
+		expect(cachedRes.status).toBe(206);
+		expect(cachedRes.headers.get('Content-Range')).toBe('bytes 0-4/11');
+		expect(await cachedRes.text()).toBe('Hello');
+	});
+
+	test('returns 416 for unsatisfiable byte ranges', async () => {
+		const { fileId } = await setupPublicFile();
+
+		const res = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=99-100' },
+		}, env);
+		expect(res.status).toBe(416);
+		expect(res.headers.get('Accept-Ranges')).toBe('bytes');
+		expect(res.headers.get('Content-Range')).toBe('bytes */11');
+		expect(await res.text()).toBe('');
+	});
+
+	test('ignores unsupported ranges', async () => {
+		const { fileId } = await setupPublicFile();
+
+		const unsupportedUnitRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'items=0-4' },
+		}, env);
+		expect(unsupportedUnitRes.status).toBe(200);
+		expect(unsupportedUnitRes.headers.get('Accept-Ranges')).toBe('bytes');
+		expect(await unsupportedUnitRes.text()).toBe('Hello World');
+	});
+
+	test('serves multiple byte ranges as multipart response', async () => {
+		const { bucketId, fileId } = await setupPublicFile();
+
+		const multipleRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-0,-1' },
+		}, env);
+		expect(multipleRangeRes.status).toBe(206);
+		expect(multipleRangeRes.headers.get('Accept-Ranges')).toBe('bytes');
+		expect(multipleRangeRes.headers.get('Content-Disposition')).toBeNull();
+		const contentType = multipleRangeRes.headers.get('Content-Type');
+		expect(contentType).toMatch(/^multipart\/byteranges; boundary=cfw-fileup-[0-9a-f-]+$/);
+		const boundary = contentType?.match(/boundary=(.+)$/)?.[1];
+		expect(boundary).toBeTruthy();
+		const body = new TextDecoder().decode(await multipleRangeRes.arrayBuffer());
+		expect(body).toBe([
+			`--${boundary}`,
+			'Content-Type: text/plain',
+			'Content-Range: bytes 0-0/11',
+			'',
+			'H',
+			`--${boundary}`,
+			'Content-Type: text/plain',
+			'Content-Range: bytes 10-10/11',
+			'',
+			'd',
+			`--${boundary}--`,
+			'',
+		].join('\r\n'));
+		expect(multipleRangeRes.headers.get('Content-Length')).toBe(String(new TextEncoder().encode(body).byteLength));
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await env.R2.delete(`${bucketId}/hello.txt`);
+
+		const cachedRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4,6-10' },
+		}, env);
+		expect(cachedRes.status).toBe(206);
+		expect(cachedRes.headers.get('Content-Type')).toMatch(/^multipart\/byteranges; boundary=cfw-fileup-[0-9a-f-]+$/);
+		const cachedBody = new TextDecoder().decode(await cachedRes.arrayBuffer());
+		expect(cachedBody).toContain('Content-Range: bytes 6-10/11\r\n\r\nWorld');
+	});
+
+	test('combines overlapping byte ranges before streaming multipart response', async () => {
+		const { fileId } = await setupPublicFile();
+
+		const res = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4,3-10' },
+		}, env);
+		expect(res.status).toBe(206);
+		expect(res.headers.get('Content-Range')).toBe('bytes 0-10/11');
+		expect(res.headers.get('Content-Length')).toBe('11');
+		expect(await res.text()).toBe('Hello World');
+	});
+
+	test('rejects malformed range sets and ignores non-ascending ranges', async () => {
+		const { fileId } = await setupPublicFile();
+
+		const malformedRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-0,wat' },
+		}, env);
+		expect(malformedRes.status).toBe(416);
+		expect(malformedRes.headers.get('Content-Range')).toBe('bytes */11');
+
+		const nonAscendingRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=6-10,0-4' },
+		}, env);
+		expect(nonAscendingRes.status).toBe(200);
+		expect(await nonAscendingRes.text()).toBe('Hello World');
+	});
+
+	test('serves byte ranges case-insensitively and honors If-Range', async () => {
+		const { fileId } = await setupPublicFile();
+		const lastModified = parseEaidx(fileId).date.toUTCString();
+
+		const caseInsensitiveRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'Bytes=6-' },
+		}, env);
+		expect(caseInsensitiveRes.status).toBe(206);
+		expect(caseInsensitiveRes.headers.get('Content-Range')).toBe('bytes 6-10/11');
+		expect(await caseInsensitiveRes.text()).toBe('World');
+
+		const matchingIfRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4', 'If-Range': lastModified },
+		}, env);
+		expect(matchingIfRangeRes.status).toBe(206);
+		expect(await matchingIfRangeRes.text()).toBe('Hello');
+
+		const staleIfRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4', 'If-Range': new Date(0).toUTCString() },
+		}, env);
+		expect(staleIfRangeRes.status).toBe(200);
+		expect(staleIfRangeRes.headers.get('Content-Range')).toBeNull();
+		expect(await staleIfRangeRes.text()).toBe('Hello World');
+
+		const futureIfRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4', 'If-Range': new Date(Date.now() + 60_000).toUTCString() },
+		}, env);
+		expect(futureIfRangeRes.status).toBe(200);
+		expect(futureIfRangeRes.headers.get('Content-Range')).toBeNull();
+		expect(await futureIfRangeRes.text()).toBe('Hello World');
+	});
+
 	test('deleted file does not return stale public download cache', async () => {
 		const { token, bucketId, fileId } = await setupPublicFile();
 
@@ -505,6 +653,52 @@ describe('GET /d/:fileId?file= (tar individual file)', () => {
 		expect(res.status).toBe(200);
 		const body = await res.arrayBuffer();
 		expect(new Uint8Array(body)).toEqual(fileContent);
+	});
+
+	test('?file= serves byte ranges from a plain tar entry', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'tar_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'archive.tar' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		const fileContent = new TextEncoder().encode('Hello from tar!');
+		const tar = new Uint8Array(512 + fileContent.length);
+		tar.set(fileContent, 512);
+		await env.R2.put(`${bucketId}/archive.tar`, tar);
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'hello.txt', mimeType: 'text/plain', offset: 512, size: fileContent.length }],
+			}),
+		}, env);
+
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+
+		const res = await app.request(`/d/${fileId}?file=hello.txt`, {
+			headers: { Range: 'bytes=6-9' },
+		}, env);
+		expect(res.status).toBe(206);
+		expect(res.headers.get('Content-Range')).toBe(`bytes 6-9/${fileContent.length}`);
+		expect(await res.text()).toBe('from');
 	});
 
 	test('?file= returns 404 for unknown path', async () => {
