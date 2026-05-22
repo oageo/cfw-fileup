@@ -9,6 +9,7 @@ import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest, Do
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
 import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
+import MarkdownPreview from '@/components/markdown-preview.vue';
 
 const props = defineProps<{
 	bucketName: string;
@@ -32,9 +33,9 @@ const isImage = computed(() => {
 	const ext = props.filePath.split('.').pop()?.toLowerCase() ?? '';
 	return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext);
 });
-const isText = computed(() => {
-	const ext = props.filePath.split('.').pop()?.toLowerCase() ?? '';
-	return ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'yaml', 'yml', 'toml', 'sh', 'csv'].includes(ext);
+const isMarkdown = computed(() => {
+	const lower = props.filePath.toLowerCase();
+	return lower.endsWith('.md') || lower.endsWith('.markdown');
 });
 
 const deleteError = ref('');
@@ -168,7 +169,6 @@ onBeforeUnmount(() => {
     <div class="card file-actions">
       <a :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
       <button v-if="isGz" type="button" class="btn btn-secondary" :disabled="downloadProgress != null" @click="startDecompressedDownload">展開してダウンロード</button>
-      <a v-if="isText" :href="downloadUrl" target="_blank" class="btn btn-secondary">ブラウザで開く</a>
       <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="deleteDialog = true">
         <Button.Content>削除</Button.Content>
       </Button.Root>
@@ -177,6 +177,7 @@ onBeforeUnmount(() => {
     <div v-if="isImage" :class="$style.imagePreview">
       <img :src="downloadUrl" :alt="filePath" class="file-preview-image">
     </div>
+    <MarkdownPreview v-else-if="isMarkdown" :url="downloadUrl" :filename="filePath" :class="$style.markdownPreview" />
 
     <div v-if="downloadError" class="alert alert-error mt-3">{{ downloadError }}</div>
     <div v-if="deleteError" class="alert alert-error mt-3">{{ deleteError }}</div>
@@ -195,6 +196,10 @@ onBeforeUnmount(() => {
 
 <style module lang="scss">
 .imagePreview {
+  margin-top: 16px;
+}
+
+.markdownPreview {
   margin-top: 16px;
 }
 </style>

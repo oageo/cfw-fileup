@@ -6,6 +6,7 @@ import BrowseDirectory from './browse.directory.vue';
 import BrowseFile from './browse.file.vue';
 import BrowseFileTokens from './browse.file-tokens.vue';
 import TurnstileWidget from '@/components/turnstile-widget.vue';
+import MarkdownPreview from '@/components/markdown-preview.vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -45,11 +46,11 @@ const isInnerImage = computed(() => {
 	return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext);
 });
 
-const isInnerText = computed(() => {
+const isInnerMarkdown = computed(() => {
 	const mime = innerMeta.value?.mimeType ?? '';
-	if (mime.startsWith('text/')) return true;
-	const ext = entryPath.value?.split('.').pop()?.toLowerCase() ?? '';
-	return ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'yaml', 'yml', 'toml', 'sh', 'csv'].includes(ext);
+	if (mime === 'text/markdown') return true;
+	const lower = entryPath.value?.toLowerCase() ?? '';
+	return lower.endsWith('.md') || lower.endsWith('.markdown');
 });
 
 const breadcrumbs = computed(() => {
@@ -388,11 +389,11 @@ watch(() => [entryPath.value, queryToken.value], () => {
       <template v-if="(isTargz || isTar) && isEntryFile">
         <div class="card file-actions">
           <a :href="innerDownloadUrl" download class="btn btn-primary">ダウンロード</a>
-          <a v-if="isInnerText" :href="innerDownloadUrl" target="_blank" class="btn btn-secondary">ブラウザで開く</a>
         </div>
         <div v-if="isInnerImage" :class="$style.innerImagePreview">
           <img :src="innerDownloadUrl" :alt="entryPath ?? ''" class="file-preview-image">
         </div>
+        <MarkdownPreview v-else-if="isInnerMarkdown" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerMarkdownPreview" />
       </template>
 
       <!-- ファイル・ログイン済み: タブ付きパネル -->
@@ -466,6 +467,10 @@ watch(() => [entryPath.value, queryToken.value], () => {
 }
 
 .innerImagePreview {
+  margin-top: 16px;
+}
+
+.innerMarkdownPreview {
   margin-top: 16px;
 }
 

@@ -12,6 +12,7 @@ import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
+import { inferMimeTypeByExtension } from '../utils/mime-by-extension';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -449,15 +450,15 @@ app.post(
 			try {
 				const r2Slice = await c.env.R2.get(file.r2Key, { range: { offset: 0, length: 4100 } });
 				if (r2Slice && 'bytes' in r2Slice) {
-          await r2Slice.bytes().then(bytes => {
-					detectedMimeType = filetypemime(bytes)[0];
-          });
+					await r2Slice.bytes().then(bytes => {
+						detectedMimeType = filetypemime(bytes)[0];
+					});
 				}
 			} catch {
 				// fall back to client-provided content type
 			}
 		}
-		const mimeType = detectedMimeType ?? r2Object.httpMetadata?.contentType;
+		const mimeType = detectedMimeType ?? inferMimeTypeByExtension(file.path) ?? r2Object.httpMetadata?.contentType;
 
 		await db
 			.update(files)

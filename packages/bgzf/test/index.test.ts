@@ -540,7 +540,7 @@ describe('BgzfTarArchiver', () => {
 		expect(index).toHaveLength(2);
 		for (const [i, f] of files.entries()) {
 			expect(index[i].path).toBe(f.name);
-			expect(index[i].mimeType).toBe('application/octet-stream');
+			expect(index[i].mimeType).toBe('text/plain');
 			// First block and last block are valid, non-empty ranges
 			expect(index[i].aStart).toBeLessThan(index[i].aFirstEnd);
 			expect(index[i].aFinalStart).toBeLessThan(index[i].aEnd);

@@ -58,6 +58,30 @@ interface PreparedEntry {
 	mtime: number;
 }
 
+const mimeTypesByExtension: Record<string, string> = {
+	css: 'text/css',
+	csv: 'text/csv',
+	html: 'text/html',
+	js: 'text/javascript',
+	json: 'application/json',
+	md: 'text/markdown',
+	sh: 'text/x-shellscript',
+	svg: 'image/svg+xml',
+	toml: 'application/toml',
+	ts: 'text/typescript',
+	txt: 'text/plain',
+	xhtml: 'application/xhtml+xml',
+	xml: 'application/xml',
+	yaml: 'application/yaml',
+	yml: 'application/yaml',
+};
+
+function inferMimeTypeByExtension(path: string): string | undefined {
+	const filename = path.split('/').pop() ?? path;
+	const extension = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() : undefined;
+	return extension ? mimeTypesByExtension[extension] : undefined;
+}
+
 class TarArchiverBase<TIdx> {
 	readonly stream: ReadableStream<Uint8Array<ArrayBuffer>>;
 	readonly index: Promise<TIdx[]>;
@@ -88,7 +112,7 @@ class TarArchiverBase<TIdx> {
 			return {
 				path,
 				file,
-				mimeType: mimes[0] ?? (file.type || 'application/octet-stream'),
+				mimeType: mimes[0] ?? inferMimeTypeByExtension(path) ?? (file.type || 'application/octet-stream'),
 				mtime: file.lastModified || now,
 			};
 		}));
@@ -247,4 +271,3 @@ export class BgzfTarArchiver extends TarArchiverBase<TarGzIndex> {
 		return new BgzfTarArchiver(makePullStream(gen, rejectIndex), index);
 	}
 }
-
