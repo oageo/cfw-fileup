@@ -1,7 +1,13 @@
 # File uploader with Cloudflare Workers (仮)
 Cloudflare WorkersおよびR2を使用したファイルアップローダーのプロジェクト
 
-## Install dependencies
+## Development
+### Add `.dev.vars`
+Add `packages/app/.dev.vars`. An example is available as `.dev.vars.example`.
+
+You must add `PASSPHRASE` for first user signup.
+
+### Install dependencies
 ```bash
 pnpm install
 ```
