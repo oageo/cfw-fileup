@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue';
 import { Button } from '@vuetify/v0';
+import { TextCursorInput } from '@lucide/vue';
 import { authHeaders, authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
+import MoveEntryDialog from '@/components/move-entry-dialog.vue';
 import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest, DownloadTransformProgress } from '@/workers/download-transform.worker';
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
@@ -51,6 +53,7 @@ const isTextLike = computed(() => {
 
 const deleteError = ref('');
 const deleteDialog = ref(false);
+const moveDialog = ref(false);
 const downloadError = ref('');
 const downloadProgress = ref<DownloadTransformProgress | null>(null);
 let downloadTransformWorker: Worker | null = null;
@@ -81,6 +84,10 @@ async function executeDelete(): Promise<void> {
 		return;
 	}
 	mainRouter.pushByPath(parentPath.value);
+}
+
+function handleMoved(target: { bucketName: string; path: string }): void {
+	mainRouter.pushByPath(`/v/${target.bucketName}/${target.path}`);
 }
 
 function getDownloadTransformWorker(): Worker {
@@ -180,6 +187,12 @@ onBeforeUnmount(() => {
     <div class="card file-actions">
       <a :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
       <button v-if="isGz" type="button" class="btn btn-secondary" :disabled="downloadProgress != null" @click="startDecompressedDownload">展開してダウンロード</button>
+      <Button.Root v-if="authStore.user && bucketId" class="btn btn-ghost" @click="moveDialog = true">
+        <Button.Content>
+          <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
+          移動/名前変更
+        </Button.Content>
+      </Button.Root>
       <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="deleteDialog = true">
         <Button.Content>削除</Button.Content>
       </Button.Root>
@@ -203,6 +216,16 @@ onBeforeUnmount(() => {
       :danger="true"
       @confirm="executeDelete"
       @cancel="deleteDialog = false"
+    />
+
+    <MoveEntryDialog
+      v-if="authStore.user && bucketId"
+      v-model:open="moveDialog"
+      type="file"
+      :source-bucket-id="bucketId"
+      :source-bucket-name="bucketName"
+      :source-path="filePath"
+      @moved="handleMoved"
     />
   </div>
 </template>

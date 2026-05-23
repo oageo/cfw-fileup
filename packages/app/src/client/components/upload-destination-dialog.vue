@@ -9,11 +9,21 @@ const props = defineProps<{
 	open: boolean;
 	initialBucketName?: string;
 	initialPrefix?: string;
+	title?: string;
+	bucketStepLabel?: string;
+	directoryStepLabel?: string;
+	confirmLabel?: string;
+	confirmDisabled?: boolean;
+	confirmLoading?: boolean;
+	confirmLoadingLabel?: string;
+	closeOnSelect?: boolean;
+	hideCurrentPath?: boolean;
 }>();
 
 const emit = defineEmits<{
 	'update:open': [boolean];
-	select: [{ bucketName: string; prefix: string }];
+	select: [{ bucketId: string; bucketName: string; prefix: string }];
+	change: [{ bucketId: string; bucketName: string; prefix: string }];
 }>();
 
 interface Bucket {
@@ -62,6 +72,11 @@ function usagePercent(usedBytes: number): number {
 
 const selectedBucket = computed(() => buckets.value.find(bucket => bucket.id === selectedBucketId.value) ?? null);
 
+function emitChange(): void {
+	if (!selectedBucketId.value || !selectedBucketName.value) return;
+	emit('change', { bucketId: selectedBucketId.value, bucketName: selectedBucketName.value, prefix: currentPath.value });
+}
+
 async function loadBuckets(): Promise<void> {
 	loadingBuckets.value = true;
 	bucketError.value = '';
@@ -98,6 +113,7 @@ async function initializeSelection(): Promise<void> {
 	currentPath.value = normalizePrefix(props.initialPrefix);
 	step.value = 'directory';
 	await loadDirectory();
+	emitChange();
 }
 
 async function loadDirectory(): Promise<void> {
@@ -113,11 +129,13 @@ async function loadDirectory(): Promise<void> {
 		return;
 	}
 	dirEntries.value = result.data.entries.filter(e => e.type === 'dir');
+	emitChange();
 }
 
 function selectBucket(bucket: Bucket): void {
 	selectedBucketId.value = bucket.id;
 	selectedBucketName.value = bucket.name;
+	emitChange();
 }
 
 async function goToDirectory(): Promise<void> {
@@ -158,8 +176,8 @@ async function createDirectory(): Promise<void> {
 }
 
 function confirmSelect(): void {
-	emit('select', { bucketName: selectedBucketName.value, prefix: currentPath.value });
-	emit('update:open', false);
+	emit('select', { bucketId: selectedBucketId.value, bucketName: selectedBucketName.value, prefix: currentPath.value });
+	if (props.closeOnSelect ?? true) emit('update:open', false);
 }
 
 function close(): void {
@@ -173,7 +191,7 @@ watch(() => props.open, async (val) => {
 		showNewDirInput.value = false;
 		await initializeSelection();
 	}
-});
+}, { immediate: true });
 </script>
 
 <template>
@@ -181,7 +199,7 @@ watch(() => props.open, async (val) => {
     <Dialog.Content :class="$style.dialog">
       <div :class="$style.inner">
         <div :class="$style.header">
-          <Dialog.Title :class="$style.title">アップロード先を選択</Dialog.Title>
+          <Dialog.Title :class="$style.title">{{ title ?? 'アップロード先を選択' }}</Dialog.Title>
           <Dialog.Close class="btn btn-ghost btn-icon" aria-label="閉じる" @click="close">
             <X :size="16" :stroke-width="2" />
           </Dialog.Close>
@@ -189,7 +207,7 @@ watch(() => props.open, async (val) => {
 
         <!-- Step 1: バケット選択 -->
         <template v-if="step === 'bucket'">
-          <p :class="$style.stepLabel">バケットを選択してください</p>
+          <p :class="$style.stepLabel">{{ bucketStepLabel ?? 'バケットを選択してください' }}</p>
           <div v-if="loadingBuckets" :class="$style.loadingText">読み込み中...</div>
           <div v-else-if="bucketError" class="alert alert-error">{{ bucketError }}</div>
           <div v-else :class="$style.bucketList">
@@ -235,7 +253,14 @@ watch(() => props.open, async (val) => {
 
         <!-- Step 2: ディレクトリ選択 -->
         <template v-else>
-          <p :class="$style.stepLabel">ディレクトリを選択してください</p>
+          <div :class="$style.directoryHeader">
+            <button class="btn btn-secondary" @click="step = 'bucket'"><ArrowLeft :size="16" :stroke-width="2" />バケット選択へ</button>
+            <p v-if="selectedBucket" :class="$style.currentBucketUsage">
+              使用量: {{ formatBytes(selectedBucket.usedBytes) }}
+              <template v-if="maxBucketSizeBytes !== null"> / {{ formatBytes(maxBucketSizeBytes) }} ({{ usagePercent(selectedBucket.usedBytes).toFixed(1) }}%)</template>
+            </p>
+          </div>
+          <p :class="$style.stepLabel">{{ directoryStepLabel ?? 'ディレクトリを選択してください' }}</p>
           <div v-if="loadingDir" :class="$style.loadingText">読み込み中...</div>
           <div v-else-if="dirError" class="alert alert-error">{{ dirError }}</div>
           <div v-else :class="$style.directoryList">
@@ -290,17 +315,13 @@ watch(() => props.open, async (val) => {
             <p v-if="mkdirError" :class="$style.mkdirError">{{ mkdirError }}</p>
           </div>
 
-          <p :class="$style.currentPath">
+          <p v-if="!hideCurrentPath" :class="$style.currentPath">
             <span :class="$style.bucketPart">{{ selectedBucketName }}/</span><span>{{ currentPath }}</span>
           </p>
-          <p v-if="selectedBucket" :class="$style.currentBucketUsage">
-            使用量: {{ formatBytes(selectedBucket.usedBytes) }}
-            <template v-if="maxBucketSizeBytes !== null"> / {{ formatBytes(maxBucketSizeBytes) }} ({{ usagePercent(selectedBucket.usedBytes).toFixed(1) }}%)</template>
-          </p>
+          <slot name="directory-extra" :bucket-id="selectedBucketId" :bucket-name="selectedBucketName" :prefix="currentPath" />
 
           <div :class="$style.actions">
-            <button class="btn btn-secondary" @click="step = 'bucket'"><ArrowLeft :size="16" :stroke-width="2" />バケット選択へ</button>
-            <button class="btn btn-primary" @click="confirmSelect"><Check :size="16" :stroke-width="2" />ここを選択</button>
+            <button class="btn btn-primary" :disabled="confirmDisabled || confirmLoading" @click="confirmSelect"><Check :size="16" :stroke-width="2" />{{ confirmLoading ? (confirmLoadingLabel ?? '処理中...') : (confirmLabel ?? 'ここを選択') }}</button>
           </div>
         </template>
       </div>
@@ -364,6 +385,13 @@ watch(() => props.open, async (val) => {
   word-break: break-all;
 }
 
+.directoryHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .bucketPart {
   color: var(--color-text);
 }
@@ -418,6 +446,10 @@ watch(() => props.open, async (val) => {
 .currentBucketUsage {
   color: var(--color-text-muted);
   font-size: 0.75rem;
+}
+
+.currentBucketUsage {
+  margin: 0;
 }
 
 .bucketUsageBar {

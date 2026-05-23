@@ -13,7 +13,8 @@ import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { inferMimeTypeByExtension } from '../utils/mime-by-extension';
-import { isValidFilePath } from '../../shared/name-validation';
+import { isValidDirectoryPath, isValidFilePath } from '../../shared/name-validation';
+import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -700,6 +701,171 @@ app.post(
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/delete')),
+);
+
+app.post(
+	'/move',
+	describeRoute(omitResAndReq(apiDef['/api/files/move'])),
+	validator('json', apiDef['/api/files/move'].req),
+	describeResponse(async (c: JsonCtx<'/api/files/move', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const body = c.req.valid('json');
+
+		if (!body.sourceBucketId || !body.targetBucketId || !body.sourcePath || !body.targetPath) {
+			throw new HTTPException(400, { message: 'sourceBucketId, targetBucketId, sourcePath and targetPath are required' });
+		}
+
+		const [sourceBucket, targetBucket] = await Promise.all([
+			db.select().from(buckets).where(eq(buckets.id, body.sourceBucketId)).get(),
+			db.select().from(buckets).where(eq(buckets.id, body.targetBucketId)).get(),
+		]);
+		if (!sourceBucket || !targetBucket) throw new HTTPException(404, { message: 'Bucket not found' });
+		if ((sourceBucket.userId !== user.id || targetBucket.userId !== user.id) && !user.isAdmin) {
+			throw new HTTPException(403, { message: 'Forbidden' });
+		}
+
+		const normalizedSourcePath = body.type === 'directory'
+			? body.sourcePath.endsWith('/') ? body.sourcePath : `${body.sourcePath}/`
+			: body.sourcePath;
+		const normalizedTargetPath = body.type === 'directory'
+			? body.targetPath.endsWith('/') ? body.targetPath : `${body.targetPath}/`
+			: body.targetPath;
+
+		if (normalizedTargetPath.length > MAX_FILE_PATH_LENGTH) {
+			throw new HTTPException(400, { message: `targetPath must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+		}
+		if (body.type === 'file' && !isValidFilePath(normalizedTargetPath)) {
+			throw new HTTPException(400, { message: 'Invalid file path' });
+		}
+		if (body.type === 'directory') {
+			if (!isValidDirectoryPath(normalizedTargetPath)) {
+				throw new HTTPException(400, { message: 'Invalid directory path' });
+			}
+			const directoryNameError = await validateDirectoryPathForbiddenNames(db, normalizedTargetPath);
+			if (directoryNameError) throw new HTTPException(400, { message: directoryNameError });
+			if (body.sourceBucketId === body.targetBucketId && normalizedTargetPath.startsWith(normalizedSourcePath)) {
+				throw new HTTPException(400, { message: 'Directory cannot be moved into itself' });
+			}
+		}
+
+		if (body.sourceBucketId === body.targetBucketId && normalizedSourcePath === normalizedTargetPath) {
+			return c.json({ ok: true }, 200);
+		}
+
+		const targetFilePath = body.type === 'directory' ? normalizedTargetPath.replace(/\/$/, '') : normalizedTargetPath;
+		const targetDirectoryPath = body.type === 'directory'
+			? normalizedTargetPath
+			: `${normalizedTargetPath}/`;
+		const targetFile = await db
+			.select({ id: files.id })
+			.from(files)
+			.where(and(eq(files.bucketId, targetBucket.id), eq(files.path, targetFilePath)))
+			.get();
+		const targetDirectory = await db
+			.select({ id: directories.id })
+			.from(directories)
+			.where(and(eq(directories.bucketId, targetBucket.id), eq(directories.path, targetDirectoryPath)))
+			.get();
+		const targetVirtualDirectoryFile = body.type === 'directory'
+			? await db
+				.select({ id: files.id })
+				.from(files)
+				.where(and(eq(files.bucketId, targetBucket.id), like(files.path, `${normalizedTargetPath}%`)))
+				.get()
+			: null;
+		if (targetFile || targetDirectory || targetVirtualDirectoryFile) {
+			throw new HTTPException(409, { message: 'Target already exists' });
+		}
+
+		if (body.type === 'file') {
+			const file = await db
+				.select()
+				.from(files)
+				.where(and(eq(files.bucketId, sourceBucket.id), eq(files.path, normalizedSourcePath)))
+				.get();
+			if (!file) throw new HTTPException(404, { message: 'File not found' });
+			if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
+
+			const movedBytes = file.size ?? 0;
+			if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
+				const quota = await getQuotaForUser(c.env, targetBucket.userId);
+				if (quota.maxBucketSizeBytes !== null && targetBucket.usedBytes + movedBytes > quota.maxBucketSizeBytes) {
+					throw new HTTPException(429, { message: 'Target bucket size limit exceeded' });
+				}
+			}
+
+			await db
+				.update(files)
+				.set({ bucketId: targetBucket.id, path: normalizedTargetPath })
+				.where(eq(files.id, file.id));
+
+			if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
+				await db.update(buckets).set({ usedBytes: sql`MAX(0, ${buckets.usedBytes} - ${movedBytes})` }).where(eq(buckets.id, sourceBucket.id));
+				await db.update(buckets).set({ usedBytes: sql`${buckets.usedBytes} + ${movedBytes}` }).where(eq(buckets.id, targetBucket.id));
+			}
+
+			return c.json({ ok: true }, 200);
+		}
+
+		const sourceDirectory = await db
+			.select()
+			.from(directories)
+			.where(and(eq(directories.bucketId, sourceBucket.id), eq(directories.path, normalizedSourcePath)))
+			.get();
+		const childFiles = await db
+			.select()
+			.from(files)
+			.where(and(eq(files.bucketId, sourceBucket.id), like(files.path, `${normalizedSourcePath}%`)));
+		const childDirectories = await db
+			.select()
+			.from(directories)
+			.where(and(eq(directories.bucketId, sourceBucket.id), like(directories.path, `${normalizedSourcePath}%`)));
+		if (!sourceDirectory && childFiles.length === 0 && childDirectories.length === 0) {
+			throw new HTTPException(404, { message: 'Directory not found' });
+		}
+
+		const movedBytes = childFiles.reduce((sum, file) => sum + (file.isClosed && file.size ? file.size : 0), 0);
+		if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
+			const quota = await getQuotaForUser(c.env, targetBucket.userId);
+			if (quota.maxBucketSizeBytes !== null && targetBucket.usedBytes + movedBytes > quota.maxBucketSizeBytes) {
+				throw new HTTPException(429, { message: 'Target bucket size limit exceeded' });
+			}
+		}
+
+		for (const file of childFiles) {
+			await db
+				.update(files)
+				.set({
+					bucketId: targetBucket.id,
+					path: `${normalizedTargetPath}${file.path.slice(normalizedSourcePath.length)}`,
+				})
+				.where(eq(files.id, file.id));
+		}
+		for (const directory of childDirectories) {
+			await db
+				.update(directories)
+				.set({
+					bucketId: targetBucket.id,
+					path: `${normalizedTargetPath}${directory.path.slice(normalizedSourcePath.length)}`,
+				})
+				.where(eq(directories.id, directory.id));
+		}
+		if (!childDirectories.some(directory => directory.path === normalizedSourcePath)) {
+			await db.insert(directories).values({
+				id: genEaidx(Date.now()),
+				bucketId: targetBucket.id,
+				path: normalizedTargetPath,
+			}).onConflictDoNothing();
+		}
+
+		if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
+			await db.update(buckets).set({ usedBytes: sql`MAX(0, ${buckets.usedBytes} - ${movedBytes})` }).where(eq(buckets.id, sourceBucket.id));
+			await db.update(buckets).set({ usedBytes: sql`${buckets.usedBytes} + ${movedBytes}` }).where(eq(buckets.id, targetBucket.id));
+		}
+
+		return c.json({ ok: true }, 200);
+	}, getResponseDefWithAuth('/api/files/move')),
 );
 
 export const fileRoutes = app;

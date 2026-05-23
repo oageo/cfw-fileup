@@ -191,6 +191,24 @@ export const filesApiDef = {
 			404: { description: 'File or bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
 		},
 	},
+	'/api/files/move': {
+		summary: 'Move or rename a file or directory',
+		tags: ['files'],
+		req: v.object({
+			type: v.union([v.literal('file'), v.literal('directory')]),
+			sourceBucketId: IdString,
+			sourcePath: FilePathString,
+			targetBucketId: IdString,
+			targetPath: FilePathString,
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
+			400: { description: 'Bad request (missing fields or invalid path)', content: { 'application/json': { vSchema: ErrorResponse } } },
+			404: { description: 'Bucket, file, or directory not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			409: { description: 'Target already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
+			429: { description: 'Target bucket size limit exceeded', content: { 'application/json': { vSchema: ErrorResponse } } },
+		},
+	},
 	'/api/files/meta': {
 		summary: 'Get file metadata by bucket name and path',
 		tags: ['files'],

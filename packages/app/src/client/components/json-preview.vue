@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import type { Content, JSONEditor } from 'vanilla-jsoneditor';
+import type { Content, JsonEditor } from 'vanilla-jsoneditor';
 import 'vanilla-jsoneditor/themes/jse-theme-dark.css';
 import { authHeaders } from '@/store/auth';
 import ShikiCodePreview from './shiki-code-preview.vue';
@@ -17,7 +17,7 @@ const source = ref('');
 const viewMode = ref<'formatted' | 'raw'>('raw');
 const copied = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-let editor: JSONEditor | null = null;
+let editor: JsonEditor | null = null;
 let editorModulePromise: Promise<typeof import('vanilla-jsoneditor')> | null = null;
 
 const parsedJson = computed<unknown | null>(() => {

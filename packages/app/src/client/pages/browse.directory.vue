@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { Download, FileIcon, Folder, LayoutGrid, List, Trash2 } from '@lucide/vue';
+import { Download, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -11,6 +11,7 @@ import { setPendingUpload } from '@/store/pending-upload';
 import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import InputDialog from '@/components/input-dialog.vue';
+import MoveEntryDialog from '@/components/move-entry-dialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { pathSegmentNameValidation } from '../../shared/name-validation';
 import { UploadTree } from '@/utils/upload-tree';
@@ -85,6 +86,8 @@ const directoryNameSchema = v.pipe(
 const deleteDialog = ref(false);
 const deleteTarget = ref<DisplayEntry | null>(null);
 const archiveDeleteDialog = ref(false);
+const moveDialog = ref(false);
+const moveTarget = ref<DisplayEntry | null>(null);
 
 type ViewMode = 'list' | 'grid';
 const VIEW_MODE_KEY = 'cfw-fileup:dir-view-mode';
@@ -494,6 +497,11 @@ function isEntrySelected(entry: DisplayEntry): boolean {
 	return selectAllMode.value ? !excludedPaths.value.has(entry.fullPath) : selectedPaths.value.has(entry.fullPath);
 }
 
+function stopGridActionEvent(event: Event): void {
+	event.preventDefault();
+	event.stopPropagation();
+}
+
 async function loadBucketId(): Promise<void> {
 	if (!authStore.user) return;
 	const result = await apiPost('/api/buckets/list');
@@ -528,6 +536,17 @@ async function createDirectory(name: string): Promise<void> {
 function requestDeleteEntry(entry: DisplayEntry): void {
 	deleteTarget.value = entry;
 	deleteDialog.value = true;
+}
+
+function requestMoveEntry(entry: DisplayEntry, event?: Event): void {
+	if (event) stopGridActionEvent(event);
+	moveTarget.value = entry;
+	moveDialog.value = true;
+}
+
+async function handleEntryMoved(): Promise<void> {
+	moveTarget.value = null;
+	await load();
 }
 
 async function executeDeleteEntry(): Promise<void> {
@@ -991,6 +1010,9 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </span>
                 </td>
                 <td v-if="!isArchive && authStore.user && bucketId" class="col-actions" :class="$style.actionsCell">
+                  <Button.Root class="btn btn-ghost" @click="requestMoveEntry(entry)">
+                    <Button.Content>移動/名前変更</Button.Content>
+                  </Button.Root>
                   <Button.Root class="btn btn-ghost-danger" @click="requestDeleteEntry(entry)">
                     <Button.Content>削除</Button.Content>
                   </Button.Root>
@@ -1069,10 +1091,10 @@ watch([isPartiallySelected, isAllSelected], async () => {
                 </div>
                 <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
                   <a
-                    v-if="!entry.isDir && entry.fileId"
+                    v-if="!entry.isDir && entry.fileId && entry.visibility === 'public'"
                     :href="`/d/${entry.fileId}`"
                     download
-                    :class="['btn', 'btn-ghost', $style.gridCardActionButton]"
+                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardDownloadButton]"
                     :aria-label="`${entry.name}をダウンロード`"
                     :title="`${entry.name}をダウンロード`"
                   >
@@ -1080,21 +1102,31 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </a>
                   <Button.Root
                     v-else-if="entry.isDir"
-                    :class="['btn', 'btn-ghost', $style.gridCardActionButton]"
+                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardDownloadButton]"
                     :disabled="archiveDownloadProgress != null"
                     :aria-label="`${entry.name}をダウンロード`"
                     :title="`${entry.name}をダウンロード`"
-                    @click="startEntryArchiveDownload(entry)"
+                    @click="(event: Event) => { stopGridActionEvent(event); startEntryArchiveDownload(entry); }"
                   >
                     <Button.Content>
                       <Download :size="16" :stroke-width="2" aria-hidden="true" />
                     </Button.Content>
                   </Button.Root>
                   <Button.Root
-                    :class="['btn', 'btn-ghost-danger', $style.gridCardActionButton]"
+                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardIconButton, !entry.isDir && entry.visibility !== 'public' && 'ms-auto']"
+                    :aria-label="`${entry.name}を移動/名前変更`"
+                    :title="`${entry.name}を移動/名前変更`"
+                    @click="(event: Event) => requestMoveEntry(entry, event)"
+                  >
+                    <Button.Content>
+                      <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+                  <Button.Root
+                    :class="['btn', 'btn-ghost-danger', $style.gridCardActionButton, $style.gridCardIconButton]"
                     :aria-label="`${entry.name}を削除`"
                     :title="`${entry.name}を削除`"
-                    @click="requestDeleteEntry(entry)"
+                    @click="(event: Event) => { stopGridActionEvent(event); requestDeleteEntry(entry); }"
                   >
                     <Button.Content>
                       <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
@@ -1143,6 +1175,16 @@ watch([isPartiallySelected, isAllSelected], async () => {
       :mono="true"
       @submit="createDirectory"
       @cancel="mkdirError = ''"
+    />
+
+    <MoveEntryDialog
+      v-if="authStore.user && moveTarget"
+      v-model:open="moveDialog"
+      :type="moveTarget.isDir ? 'directory' : 'file'"
+      :source-bucket-id="bucketId"
+      :source-bucket-name="bucketName"
+      :source-path="moveTarget.fullPath"
+      @moved="handleEntryMoved"
     />
 
     <!-- 削除確認ダイアログ（アーカイブ） -->
@@ -1473,18 +1515,36 @@ watch([isPartiallySelected, isAllSelected], async () => {
 .gridCardActions {
   position: relative;
   z-index: 3;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  align-items: center;
   gap: 4px;
   margin-top: auto;
   padding-top: 2px;
 }
 
 .gridCardActionButton {
-  width: 100%;
   min-width: 0;
   justify-content: center;
   padding-block: 4px;
   line-height: 1;
+}
+
+.gridCardDownloadButton {
+  flex: 1 1 auto;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  border-color: transparent;
+}
+
+.gridCardDownloadButton:hover {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-color: transparent;
+}
+
+.gridCardIconButton {
+  flex: 0 0 32px;
+  width: 32px;
+  padding-inline: 0;
 }
 </style>
