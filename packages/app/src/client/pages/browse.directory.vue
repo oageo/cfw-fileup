@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { FileIcon, Folder, LayoutGrid, List } from '@lucide/vue';
+import { Download, FileIcon, Folder, LayoutGrid, List, Trash2 } from '@lucide/vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -359,6 +359,41 @@ async function startDirectoryArchiveDownload(format: 'tar' | 'zip'): Promise<voi
 		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
 		downloadTransformWorker?.terminate();
 		downloadTransformWorker = null;
+		const message = err instanceof Error ? err.message : String(err);
+		failDownloadStatus(statusId, message);
+		archiveDownloadError.value = message;
+	}
+}
+
+async function startEntryArchiveDownload(entry: DisplayEntry): Promise<void> {
+	if (!entry.isDir) return;
+	archiveDownloadError.value = '';
+	archiveDownloadProgress.value = null;
+	if (!navigator.storage?.getDirectory) {
+		archiveDownloadError.value = 'このブラウザは OPFS に対応していないため、アーカイブを作成できません。';
+		return;
+	}
+	const filename = `${entry.name}.zip`;
+	const statusId = String(archiveDownloadRequestId + 1);
+	startDownloadStatus(statusId, filename);
+	try {
+		const result = await runArchiveDownloadWorker({
+			mode: 'directory',
+			format: 'zip',
+			bucketName: props.bucketName,
+			basePath: props.filePath,
+			targets: [{ type: 'directory', path: entry.fullPath }],
+			excludePaths: [],
+			authHeaders: authHeaders(),
+			filename,
+		});
+		await downloadOpfsFile(result);
+		completeDownloadStatus(statusId);
+		archiveDownloadProgress.value = null;
+	} catch (err) {
+		await cleanupOpfsFile((err as Error & { opfsName?: string }).opfsName);
+		archiveDownloadWorker?.terminate();
+		archiveDownloadWorker = null;
 		const message = err instanceof Error ? err.message : String(err);
 		failDownloadStatus(statusId, message);
 		archiveDownloadError.value = message;
@@ -1033,8 +1068,37 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </span>
                 </div>
                 <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
-                  <Button.Root :class="['btn', 'btn-ghost-danger', $style.gridCardDeleteButton]" @click="requestDeleteEntry(entry)">
-                    <Button.Content>削除</Button.Content>
+                  <a
+                    v-if="!entry.isDir && entry.fileId"
+                    :href="`/d/${entry.fileId}`"
+                    download
+                    :class="['btn', 'btn-ghost', $style.gridCardActionButton]"
+                    :aria-label="`${entry.name}をダウンロード`"
+                    :title="`${entry.name}をダウンロード`"
+                  >
+                    <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                  </a>
+                  <Button.Root
+                    v-else-if="entry.isDir"
+                    :class="['btn', 'btn-ghost', $style.gridCardActionButton]"
+                    :disabled="archiveDownloadProgress != null"
+                    :aria-label="`${entry.name}をダウンロード`"
+                    :title="`${entry.name}をダウンロード`"
+                    @click="startEntryArchiveDownload(entry)"
+                  >
+                    <Button.Content>
+                      <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+                  <Button.Root
+                    :class="['btn', 'btn-ghost-danger', $style.gridCardActionButton]"
+                    :aria-label="`${entry.name}を削除`"
+                    :title="`${entry.name}を削除`"
+                    @click="requestDeleteEntry(entry)"
+                  >
+                    <Button.Content>
+                      <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
                   </Button.Root>
                 </div>
               </div>
@@ -1409,14 +1473,18 @@ watch([isPartiallySelected, isAllSelected], async () => {
 .gridCardActions {
   position: relative;
   z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
   margin-top: auto;
   padding-top: 2px;
 }
 
-.gridCardDeleteButton {
+.gridCardActionButton {
   width: 100%;
+  min-width: 0;
   justify-content: center;
   padding-block: 4px;
-  font-size: 0.75rem;
+  line-height: 1;
 }
 </style>
