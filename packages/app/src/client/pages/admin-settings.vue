@@ -51,6 +51,9 @@ async function fetchSettings(): Promise<void> {
 				case 'indieauth_blocked_servers':
 					map.indieauth_blocked_servers = s.value;
 					break;
+				case 'reject_mismatched_file_type':
+					map.reject_mismatched_file_type = s.value;
+					break;
 				case 'forbidden_usernames':
 					map.forbidden_usernames = s.value;
 					break;
@@ -156,6 +159,16 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           @save="saveSetting('indieauth_blocked_servers', $event)"
         >
           カンマ区切りで Misskey サーバーのホスト名を指定します。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['reject_mismatched_file_type']"
+          :schema="KNOWN_SETTINGS['reject_mismatched_file_type']"
+          title="拡張子と内容が不一致のファイルを拒否"
+          :saving="saving['reject_mismatched_file_type']"
+          @save="saveSetting('reject_mismatched_file_type', $event)"
+        >
+          有効にすると、ファイルヘッダから推定した種類と拡張子が一致しないアップロードを完了時に拒否します。
         </SettingItem>
 
         <SettingItem

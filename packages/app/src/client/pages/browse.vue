@@ -120,6 +120,10 @@ const isTar = ref(false);
 const fileSize = ref<number | null>(null);
 const fileId = ref<string | null>(null);
 const fileBucketId = ref<string | null>(null);
+const fileMimeType = ref<string | null>(null);
+const fileExtensionMimeType = ref<string | null>(null);
+const hasMimeTypeMismatch = ref(false);
+const hasExecutableContent = ref(false);
 const browseTermsLoading = ref(false);
 const browseTermsUrl = ref('');
 const browseTermsAccepted = ref(false);
@@ -258,6 +262,10 @@ async function fetchMeta(): Promise<void> {
 	if (browseTermsBlocked.value) return;
 	if (isDirectory.value) {
 		isTargz.value = false;
+		fileMimeType.value = null;
+		fileExtensionMimeType.value = null;
+		hasMimeTypeMismatch.value = false;
+		hasExecutableContent.value = false;
 		return;
 	}
 	metaLoading.value = true;
@@ -275,10 +283,25 @@ async function fetchMeta(): Promise<void> {
 			fetch('/api/meta'),
 		]);
 		if (!metaRes.ok) { metaError.value = `取得失敗: ${metaRes.status}`; return; }
-		const data = await metaRes.json() as { isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; size?: number; fileId?: string; bucketId?: string };
+		const data = await metaRes.json() as {
+			isTargz?: boolean;
+			isTar?: boolean;
+			visibility?: FileVisibility;
+			size?: number;
+			mimeType?: string | null;
+			extensionMimeType?: string;
+			hasMimeTypeMismatch?: boolean;
+			hasExecutableContent?: boolean;
+			fileId?: string;
+			bucketId?: string;
+		};
 		isTargz.value = data.isTargz ?? false;
 		isTar.value = data.isTar ?? false;
 		fileSize.value = data.size ?? null;
+		fileMimeType.value = data.mimeType ?? null;
+		fileExtensionMimeType.value = data.extensionMimeType ?? null;
+		hasMimeTypeMismatch.value = data.hasMimeTypeMismatch ?? false;
+		hasExecutableContent.value = data.hasExecutableContent ?? false;
 		fileVisibility.value = data.visibility ?? 'public';
 		fileId.value = data.fileId ?? null;
 		fileBucketId.value = data.bucketId ?? null;
@@ -445,6 +468,10 @@ watch(() => [props.bucketName, props.filePath], () => {
 	passphraseTokenExpiresAt.value = null;
 	fileId.value = null;
 	fileBucketId.value = null;
+	fileMimeType.value = null;
+	fileExtensionMimeType.value = null;
+	hasMimeTypeMismatch.value = false;
+	hasExecutableContent.value = false;
 	clearExpiryTimer();
 	fetchBrowseTerms();
 });
@@ -505,6 +532,12 @@ watch(() => [entryPath.value, queryToken.value], () => {
     </div>
     <div v-else-if="metaError" class="alert alert-error">{{ metaError }}</div>
     <template v-else>
+      <div v-if="!isDirectory && hasMimeTypeMismatch" :class="['alert', 'alert-warning', 'mb-3', $style.fileTypeWarning]">
+        <p :class="$style.fileTypeWarningLine">ファイル名の拡張子と内容が一致していない可能性があります。</p>
+        <p v-if="hasExecutableContent" :class="$style.fileTypeWarningLine">実行可能ファイルとして検出されています。</p>
+        <p v-if="fileMimeType || fileExtensionMimeType" :class="$style.fileTypeWarningLine">内容: {{ fileMimeType ?? '不明' }} / 拡張子: {{ fileExtensionMimeType ?? '不明' }}</p>
+      </div>
+
       <!-- アーカイブ内ファイルビュー (ログイン有無問わず) -->
       <template v-if="(isTargz || isTar) && isEntryFile">
         <div class="card file-actions">
@@ -625,6 +658,18 @@ watch(() => [entryPath.value, queryToken.value], () => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.fileTypeWarning {
+  display: block;
+}
+
+.fileTypeWarningLine {
+  margin: 0;
+}
+
+.fileTypeWarningLine + .fileTypeWarningLine {
+  margin-top: 4px;
 }
 
 .passphraseDesc {

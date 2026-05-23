@@ -30,6 +30,7 @@ export const KNOWN_SETTINGS = {
 	terms_url: v.optional(optionalUrlSettingSchema, ''),
 	terms_updated_at: v.optional(optionalDateSettingSchema, ''),
 	indieauth_blocked_servers: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
+	reject_mismatched_file_type: v.optional(v.picklist(['true', 'false']), 'false'),
 	forbidden_usernames: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_USERNAMES),
 	forbidden_bucket_names: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_BUCKET_NAMES),
 } as const;

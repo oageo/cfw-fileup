@@ -313,6 +313,127 @@ describe('POST /api/files/create/close', () => {
 		}, env);
 		expect(closeRes.status).toBe(200);
 	});
+
+	test('rejects mismatched content type when the setting is enabled', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'reject_mismatched_file_type\', \'true\')').run();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'not-text.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(400);
+		const body = await closeRes.json() as { error: string };
+		expect(body.error).toBe('File content type does not match file extension');
+	});
+
+	test('reports mismatched executable content in file metadata', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'not-an-image.png' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(200);
+
+		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=not-an-image.png', {
+			method: 'GET',
+			headers: authHeaders(token),
+		}, env);
+		expect(metaRes.status).toBe(200);
+		const meta = await metaRes.json() as {
+			mimeType: string;
+			extensionMimeType: string;
+			hasMimeTypeMismatch: boolean;
+			hasExecutableContent: boolean;
+		};
+		expect(meta.mimeType).toBe('application/wasm');
+		expect(meta.extensionMimeType).toBe('image/png');
+		expect(meta.hasMimeTypeMismatch).toBe(true);
+		expect(meta.hasExecutableContent).toBe(true);
+	});
+
+	test('rejects unknown binary content with a text extension when the setting is enabled', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'reject_mismatched_file_type\', \'true\')').run();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'binary.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, new Uint8Array([0xff, 0xfe, 0xfd, 0xfc]));
+
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(400);
+	});
+
+	test('rejects executable signatures even when magic-bytes does not detect a mime type', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'reject_mismatched_file_type\', \'true\')').run();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'program.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, new Uint8Array([0x4d, 0x5a, 0x90, 0x00]));
+
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(400);
+	});
+
+	test('rejects jpeg content with a png extension when the setting is enabled', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'reject_mismatched_file_type\', \'true\')').run();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'photo.png' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]));
+
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(400);
+	});
 });
 
 describe('POST /api/files/create/status', () => {
@@ -506,6 +627,43 @@ describe('GET /api/files/meta', () => {
 		const meta = await metaRes.json() as { fileId?: string; visibility: string };
 		expect(meta.fileId).toBe(fileId);
 		expect(meta.visibility).toBe('passphrase');
+	});
+});
+
+describe('POST /api/files/move', () => {
+	test('rejects rename that creates a content type mismatch when the setting is enabled', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'reject_mismatched_file_type\', \'true\')').run();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'image.png' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(200);
+
+		const moveRes = await app.request('/api/files/move', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				type: 'file',
+				sourceBucketId: bucketId,
+				sourcePath: 'image.png',
+				targetBucketId: bucketId,
+				targetPath: 'image.txt',
+			}),
+		}, env);
+		expect(moveRes.status).toBe(400);
+		const body = await moveRes.json() as { error: string };
+		expect(body.error).toBe('File content type does not match file extension');
 	});
 });
 

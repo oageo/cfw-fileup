@@ -3,7 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, gte, desc, sql, count, like } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
-import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
+import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser } from '../utils/rate-limit';
 import { authMiddleware } from '../middleware/auth';
@@ -12,7 +12,7 @@ import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
-import { inferMimeTypeByExtension } from '../utils/mime-by-extension';
+import { detectExecutableMimeType, hasSuspiciousFileType, inferMimeTypeByExtension, isExecutableMimeType, looksLikeUtf8Text } from '../utils/mime-by-extension';
 import { isValidDirectoryPath, isValidFilePath } from '../../shared/name-validation';
 import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 
@@ -102,6 +102,15 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	return { type: 'directory' as const, entries };
 }
 
+async function shouldRejectMismatchedFileType(db: ReturnType<typeof getDb>): Promise<boolean> {
+	const setting = await db
+		.select({ value: appSettings.value })
+		.from(appSettings)
+		.where(eq(appSettings.key, 'reject_mismatched_file_type'))
+		.get();
+	return setting?.value === 'true';
+}
+
 app.use('/ls', shortGetCache({ maxAgeSeconds: 10 }));
 
 app.get('/ls', async (c) => {
@@ -148,7 +157,17 @@ app.get('/meta', async (c) => {
 		.get();
 	if (!file) throw new HTTPException(404, { message: 'File not found' });
 
-	const base = { visibility: file.visibility, isTargz: file.isTargz, isTar: file.isTar, size: file.size };
+	const hasMimeMismatch = hasSuspiciousFileType(file.path, file.mimeType ?? undefined);
+	const base = {
+		visibility: file.visibility,
+		isTargz: file.isTargz,
+		isTar: file.isTar,
+		size: file.size,
+		mimeType: file.mimeType,
+		extensionMimeType: inferMimeTypeByExtension(file.path),
+		hasMimeTypeMismatch: hasMimeMismatch,
+		hasExecutableContent: hasMimeMismatch && isExecutableMimeType(file.mimeType ?? undefined),
+	};
 	if (file.visibility === 'public' || isOwnerOrAdmin) {
 		return c.json({ ...base, fileId: file.id, bucketId: bucket.id });
 	}
@@ -459,19 +478,30 @@ app.post(
 		const fileSize = r2Object.size;
 
 		let detectedMimeType: string | undefined;
+		let headerBytes: Uint8Array | undefined;
 		if (fileSize > 0) {
 			try {
 				const r2Slice = await c.env.R2.get(file.r2Key, { range: { offset: 0, length: 4100 } });
 				if (r2Slice && 'bytes' in r2Slice) {
-					await r2Slice.bytes().then(bytes => {
-						detectedMimeType = filetypemime(bytes)[0];
-					});
+					headerBytes = await r2Slice.bytes();
+					const magicMimeType = filetypemime(headerBytes)[0] ?? '';
+					const magicLooksLikeText = magicMimeType.startsWith('text/');
+					const usableMagicMimeType = magicMimeType === '' || magicMimeType === 'application/octet-stream' || (magicLooksLikeText && !looksLikeUtf8Text(headerBytes))
+						? undefined
+						: magicMimeType;
+					detectedMimeType = detectExecutableMimeType(headerBytes) ?? usableMagicMimeType;
 				}
 			} catch {
 				// fall back to client-provided content type
 			}
 		}
-		const mimeType = detectedMimeType ?? inferMimeTypeByExtension(file.path) ?? r2Object.httpMetadata?.contentType;
+		const extensionMimeType = inferMimeTypeByExtension(file.path);
+		const isUtf8Text = fileSize === 0 || (headerBytes ? looksLikeUtf8Text(headerBytes) : false);
+		const mimeType = detectedMimeType ?? (isUtf8Text ? extensionMimeType : undefined) ?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined) ?? r2Object.httpMetadata?.contentType;
+		const mismatch = hasSuspiciousFileType(file.path, mimeType);
+		if (mismatch && await shouldRejectMismatchedFileType(db)) {
+			throw new HTTPException(400, { message: 'File content type does not match file extension' });
+		}
 
 		await db
 			.update(files)
@@ -788,6 +818,9 @@ app.post(
 			if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
 
 			const movedBytes = file.size ?? 0;
+			if (hasSuspiciousFileType(normalizedTargetPath, file.mimeType ?? undefined) && await shouldRejectMismatchedFileType(db)) {
+				throw new HTTPException(400, { message: 'File content type does not match file extension' });
+			}
 			if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
 				const quota = await getQuotaForUser(c.env, targetBucket.userId);
 				if (quota.maxBucketSizeBytes !== null && targetBucket.usedBytes + movedBytes > quota.maxBucketSizeBytes) {
