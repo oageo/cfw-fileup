@@ -116,8 +116,8 @@ describe('GET /d/:fileId', () => {
 		expect(await cachedRes.text()).toBe('Hello World');
 	});
 
-	test('serves byte ranges for public files and caches the full response', async () => {
-		const { bucketId, fileId } = await setupPublicFile();
+	test('serves byte ranges for public files', async () => {
+		const { fileId } = await setupPublicFile();
 
 		const firstRes = await app.request(`/d/${fileId}`, {
 			headers: { Range: 'bytes=6-10' },
@@ -127,16 +127,6 @@ describe('GET /d/:fileId', () => {
 		expect(firstRes.headers.get('Content-Range')).toBe('bytes 6-10/11');
 		expect(firstRes.headers.get('Content-Length')).toBe('5');
 		expect(await firstRes.text()).toBe('World');
-
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		await env.R2.delete(`${bucketId}/hello.txt`);
-
-		const cachedRes = await app.request(`/d/${fileId}`, {
-			headers: { Range: 'bytes=0-4' },
-		}, env);
-		expect(cachedRes.status).toBe(206);
-		expect(cachedRes.headers.get('Content-Range')).toBe('bytes 0-4/11');
-		expect(await cachedRes.text()).toBe('Hello');
 	});
 
 	test('returns 416 for unsatisfiable byte ranges', async () => {
@@ -191,6 +181,10 @@ describe('GET /d/:fileId', () => {
 			'',
 		].join('\r\n'));
 		expect(multipleRangeRes.headers.get('Content-Length')).toBe(String(new TextEncoder().encode(body).byteLength));
+
+		const fullRes = await app.request(`/d/${fileId}`, {}, env);
+		expect(fullRes.status).toBe(200);
+		expect(await fullRes.text()).toBe('Hello World');
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await env.R2.delete(`${bucketId}/hello.txt`);
@@ -655,7 +649,7 @@ describe('GET /d/:fileId?file= (tar individual file)', () => {
 		expect(new Uint8Array(body)).toEqual(fileContent);
 	});
 
-	test('?file= serves byte ranges from a plain tar entry', async () => {
+	test('?file= ignores byte ranges for a plain tar entry', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
 
@@ -696,9 +690,10 @@ describe('GET /d/:fileId?file= (tar individual file)', () => {
 		const res = await app.request(`/d/${fileId}?file=hello.txt`, {
 			headers: { Range: 'bytes=6-9' },
 		}, env);
-		expect(res.status).toBe(206);
-		expect(res.headers.get('Content-Range')).toBe(`bytes 6-9/${fileContent.length}`);
-		expect(await res.text()).toBe('from');
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Content-Range')).toBeNull();
+		const body = await res.arrayBuffer();
+		expect(new Uint8Array(body)).toEqual(fileContent);
 	});
 
 	test('?file= returns 404 for unknown path', async () => {
@@ -794,6 +789,13 @@ describe('GET /d/:fileId?file= (tar.gz individual file)', () => {
 		expect(gzipRes.headers.get('Content-Encoding')).toBe('gzip');
 		expect(gzipRes.headers.get('Content-Disposition')).toBe('attachment; filename="hello.txt"; filename*=UTF-8\'\'hello.txt');
 		await gzipRes.arrayBuffer();
+
+		const rangeRes = await app.request(`/d/${fileId}?file=hello.txt`, {
+			headers: { 'Accept-Encoding': 'gzip', Range: 'bytes=0-3' },
+		}, env);
+		expect(rangeRes.status).toBe(200);
+		expect(rangeRes.headers.get('Content-Range')).toBeNull();
+		expect(new Uint8Array(await rangeRes.arrayBuffer())).toEqual(block);
 
 		const ungzipRes = await app.request(`/d/${fileId}?file=hello.txt`, {}, env);
 		expect(ungzipRes.status).toBe(200);

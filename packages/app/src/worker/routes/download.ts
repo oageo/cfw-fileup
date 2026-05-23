@@ -25,6 +25,11 @@ type RangeParseResult =
 
 const maxByteRanges = 16;
 
+type ResolvedRangeRequest =
+	| { type: 'none' }
+	| { type: 'range'; ranges: ByteRange[] }
+	| { type: 'invalid' };
+
 function createMissingFileCacheRequest(fileId: string): Request {
 	const keyUrl = new URL('https://cache.cfw-fileup.local/download-file-not-found');
 	keyUrl.searchParams.set('v', '1');
@@ -173,6 +178,35 @@ function ifRangeMatches(headers: Headers, ifRangeHeader: string | null): boolean
 	return ifRangeHeader.trim() === lastModified;
 }
 
+function resolveRangeRequest(options: {
+	rangeHeader: string | null;
+	ifRangeHeader: string | null;
+	size: number;
+	headers: Headers;
+}): ResolvedRangeRequest {
+	if (options.rangeHeader === null || !ifRangeMatches(options.headers, options.ifRangeHeader)) return { type: 'none' };
+
+	const range = parseByteRange(options.rangeHeader, options.size);
+	if (range.type === 'ignore') return { type: 'none' };
+	if (range.type === 'invalid') return { type: 'invalid' };
+	return { type: 'range', ranges: range.ranges };
+}
+
+function createUnsatisfiableRangeResponse(sourceHeaders: Headers, size: number): Response {
+	const headers = new Headers();
+	headers.set('Accept-Ranges', 'bytes');
+	headers.set('Content-Range', `bytes */${size}`);
+	const cacheControl = sourceHeaders.get('Cache-Control');
+	if (cacheControl !== null) headers.set('Cache-Control', cacheControl);
+	const vary = sourceHeaders.get('Vary');
+	if (vary !== null) headers.set('Vary', vary);
+	return new Response(null, {
+		status: 416,
+		statusText: 'Range Not Satisfiable',
+		headers,
+	});
+}
+
 function applyRangeRequest(response: Response, rangeHeader: string | null, ifRangeHeader: string | null): Response {
 	const headers = new Headers(response.headers);
 	const sizeText = headers.get('Content-Length');
@@ -180,7 +214,7 @@ function applyRangeRequest(response: Response, rangeHeader: string | null, ifRan
 	const canServeRange = response.status === 200 && Number.isSafeInteger(size) && size >= 0;
 	if (canServeRange) headers.set('Accept-Ranges', 'bytes');
 
-	if (!canServeRange || rangeHeader === null || !ifRangeMatches(headers, ifRangeHeader)) {
+	if (!canServeRange || rangeHeader === null) {
 		return new Response(response.body, {
 			status: response.status,
 			statusText: response.statusText,
@@ -188,8 +222,8 @@ function applyRangeRequest(response: Response, rangeHeader: string | null, ifRan
 		});
 	}
 
-	const range = parseByteRange(rangeHeader, size);
-	if (range.type === 'ignore') {
+	const range = resolveRangeRequest({ rangeHeader, ifRangeHeader, size, headers });
+	if (range.type === 'none') {
 		return new Response(response.body, {
 			status: response.status,
 			statusText: response.statusText,
@@ -199,18 +233,7 @@ function applyRangeRequest(response: Response, rangeHeader: string | null, ifRan
 
 	if (range.type === 'invalid') {
 		response.body?.cancel().catch(() => {});
-		const invalidHeaders = new Headers();
-		invalidHeaders.set('Accept-Ranges', 'bytes');
-		invalidHeaders.set('Content-Range', `bytes */${size}`);
-		const cacheControl = headers.get('Cache-Control');
-		if (cacheControl !== null) invalidHeaders.set('Cache-Control', cacheControl);
-		const vary = headers.get('Vary');
-		if (vary !== null) invalidHeaders.set('Vary', vary);
-		return new Response(null, {
-			status: 416,
-			statusText: 'Range Not Satisfiable',
-			headers: invalidHeaders,
-		});
+		return createUnsatisfiableRangeResponse(headers, size);
 	}
 
 	if (range.ranges.length > 1) {
@@ -251,6 +274,46 @@ function applyRangeRequest(response: Response, rangeHeader: string | null, ifRan
 	);
 }
 
+function createMultipartRangeStreamFromR2(options: {
+	r2: R2Bucket;
+	key: string;
+	ranges: ByteRange[];
+	size: number;
+	boundary: string;
+	contentType: string;
+}): ReadableStream<Uint8Array<ArrayBuffer>> {
+	const encoder = new TextEncoder();
+
+	return new ReadableStream<Uint8Array<ArrayBuffer>>({
+		async start(controller) {
+			for (const range of options.ranges) {
+				controller.enqueue(encoder.encode(multipartRangePartHeader(options.boundary, options.contentType, range, options.size)));
+				const object = await options.r2.get(options.key, {
+					range: {
+						offset: range.start,
+						length: range.end - range.start + 1,
+					},
+				});
+				if (!object?.body) throw new Error('Failed to retrieve range from R2');
+				const reader = object.body.getReader();
+				try {
+					// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						controller.enqueue(value);
+					}
+				} finally {
+					reader.releaseLock();
+				}
+				controller.enqueue(encoder.encode('\r\n'));
+			}
+			controller.enqueue(encoder.encode(`--${options.boundary}--\r\n`));
+			controller.close();
+		},
+	});
+}
+
 function getTargzEntryHeaders(download: DownloadContext, path: string, mimeType: string): HeadersInit {
 	const headers = new Headers({
 		'Content-Type': mimeType,
@@ -261,6 +324,24 @@ function getTargzEntryHeaders(download: DownloadContext, path: string, mimeType:
 		headers.set('Content-Encoding', 'gzip');
 	}
 	return download.withDownloadHeaders(headers);
+}
+
+function createPlainFileHeaders(download: DownloadContext): Headers {
+	return new Headers(download.withDownloadHeaders({
+		'Content-Type': download.file.mimeType ?? 'application/octet-stream',
+		'Content-Disposition': download.createContentDisposition(toDownloadBasename(download.file.path)),
+		'Content-Length': String(download.file.size ?? 0),
+	}));
+}
+
+function addAcceptRangesForFullResponse(response: Response): Response {
+	const headers = new Headers(response.headers);
+	headers.set('Accept-Ranges', 'bytes');
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	});
 }
 
 function stripInternalCacheHeaders(cached: Response): Response {
@@ -431,7 +512,10 @@ app.get('/d/:fileId', async (c) => {
 			}
 		}
 
-		return applyRangeRequest(download.stripInternalCacheHeaders(cached, mode), rangeHeader, ifRangeHeader);
+		const response = download.stripInternalCacheHeaders(cached, mode);
+		return mode === 'plain'
+			? applyRangeRequest(response, rangeHeader, ifRangeHeader)
+			: response;
 	}
 
 	function putDownloadCache(
@@ -505,9 +589,24 @@ app.get('/d/:fileId', async (c) => {
 
 	const cacheTarget = download.cacheTarget;
 	if (cacheTarget !== null) {
-		const cached = await matchDownloadCache(cacheTarget.mode, cacheTarget.entryPath);
-		if (cached !== null) {
-			return cached;
+		const plainRange = cacheTarget.mode === 'plain'
+			? resolveRangeRequest({
+				rangeHeader,
+				ifRangeHeader,
+				size: file.size ?? 0,
+				headers: createPlainFileHeaders(download),
+			})
+			: { type: 'none' } satisfies ResolvedRangeRequest;
+		if (plainRange.type === 'invalid') {
+			return createUnsatisfiableRangeResponse(createPlainFileHeaders(download), file.size ?? 0);
+		}
+		// Plain-file ranges are faster from R2 ranged reads than from scanning cached full bodies.
+		const shouldBypassCache = plainRange.type === 'range';
+		if (!shouldBypassCache) {
+			const cached = await matchDownloadCache(cacheTarget.mode, cacheTarget.entryPath);
+			if (cached !== null) {
+				return cached;
+			}
 		}
 	}
 
@@ -560,7 +659,7 @@ app.get('/d/:fileId', async (c) => {
 			}),
 		});
 		putDownloadCache(response, 'tar-entry', fileQuery);
-		return applyRangeRequest(response, rangeHeader, ifRangeHeader);
+		return response;
 	}
 
 	if (download.isTargzFileEntry && fileQuery !== null) {
@@ -645,11 +744,76 @@ app.get('/d/:fileId', async (c) => {
 				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', fileQuery);
-			return applyRangeRequest(response, rangeHeader, ifRangeHeader);
+			return response;
 		} catch (error) {
 			console.error('Failed to fetch from R2:', error);
 			throw new HTTPException(500, { message: 'Internal server error' });
 		}
+	}
+
+	const plainHeaders = createPlainFileHeaders(download);
+	const plainSize = Number(plainHeaders.get('Content-Length'));
+	const plainRange = Number.isSafeInteger(plainSize) && plainSize >= 0
+		? resolveRangeRequest({ rangeHeader, ifRangeHeader, size: plainSize, headers: plainHeaders })
+		: { type: 'none' } satisfies ResolvedRangeRequest;
+
+	if (plainRange.type === 'invalid') {
+		return createUnsatisfiableRangeResponse(plainHeaders, plainSize);
+	}
+
+	if (plainRange.type === 'range') {
+		if (plainRange.ranges.length === 1) {
+			const singleRange = plainRange.ranges[0];
+			const rangeObject = await c.env.R2.get(file.r2Key, {
+				range: {
+					offset: singleRange.start,
+					length: singleRange.end - singleRange.start + 1,
+				},
+			});
+			if (!rangeObject?.body) {
+				const cached = await matchDownloadCache('plain');
+				if (cached !== null) return cached;
+				throw new HTTPException(404, { message: 'File not found in storage' });
+			}
+
+			plainHeaders.set('Accept-Ranges', 'bytes');
+			plainHeaders.set('Content-Range', `bytes ${singleRange.start}-${singleRange.end}/${plainSize}`);
+			plainHeaders.set('Content-Length', String(singleRange.end - singleRange.start + 1));
+
+			return new Response(rangeObject.body, {
+				status: 206,
+				statusText: 'Partial Content',
+				headers: plainHeaders,
+			});
+		}
+
+		const rangeSource = await c.env.R2.head(file.r2Key);
+		if (rangeSource === null) {
+			const cached = await matchDownloadCache('plain');
+			if (cached !== null) return cached;
+			throw new HTTPException(404, { message: 'File not found in storage' });
+		}
+
+		const contentType = plainHeaders.get('Content-Type') ?? 'application/octet-stream';
+		const boundary = `cfw-fileup-${crypto.randomUUID()}`;
+		plainHeaders.set('Accept-Ranges', 'bytes');
+		plainHeaders.set('Content-Type', `multipart/byteranges; boundary=${boundary}`);
+		plainHeaders.delete('Content-Disposition');
+		plainHeaders.delete('Content-Range');
+		plainHeaders.set('Content-Length', String(multipartRangeContentLength(boundary, contentType, plainRange.ranges, plainSize)));
+
+		return new Response(createMultipartRangeStreamFromR2({
+			r2: c.env.R2,
+			key: file.r2Key,
+			ranges: plainRange.ranges,
+			size: plainSize,
+			boundary,
+			contentType,
+		}), {
+			status: 206,
+			statusText: 'Partial Content',
+			headers: plainHeaders,
+		});
 	}
 
 	const r2Object = await c.env.R2.get(file.r2Key);
@@ -659,14 +823,12 @@ app.get('/d/:fileId', async (c) => {
 	}
 
 	const response = new Response(r2Object.body, {
-		headers: download.withDownloadHeaders({
-			'Content-Type': file.mimeType ?? 'application/octet-stream',
-			'Content-Disposition': download.createContentDisposition(toDownloadBasename(file.path)),
-			'Content-Length': String(file.size ?? 0),
-		}),
+		headers: plainHeaders,
 	});
 	putDownloadCache(response, 'plain');
-	return applyRangeRequest(response, rangeHeader, ifRangeHeader);
+	return rangeHeader === null && ifRangeHeader === null
+		? addAcceptRangesForFullResponse(response)
+		: applyRangeRequest(response, rangeHeader, ifRangeHeader);
 });
 
 export const downloadRoutes = app;
