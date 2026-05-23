@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { Download, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
+import { Download, EllipsisVertical, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
 import NirA from '@/components/nira.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -1010,12 +1010,24 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </span>
                 </td>
                 <td v-if="!isArchive && authStore.user && bucketId" class="col-actions" :class="$style.actionsCell">
-                  <Button.Root class="btn btn-ghost" @click="requestMoveEntry(entry)">
-                    <Button.Content>移動/名前変更</Button.Content>
-                  </Button.Root>
-                  <Button.Root class="btn btn-ghost-danger" @click="requestDeleteEntry(entry)">
-                    <Button.Content>削除</Button.Content>
-                  </Button.Root>
+                  <Popover.Root>
+                    <Popover.Activator
+                      :class="['btn', 'btn-ghost', 'btn-icon', $style.entryMenuButton]"
+                      :aria-label="`${entry.name}の操作`"
+                    >
+                      <EllipsisVertical :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Popover.Activator>
+                    <Popover.Content class="action-menu">
+                      <div class="action-menu-inner">
+                        <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestMoveEntry(entry)">
+                          <Button.Content>移動/名前変更</Button.Content>
+                        </Button.Root>
+                        <Button.Root class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestDeleteEntry(entry)">
+                          <Button.Content>削除</Button.Content>
+                        </Button.Root>
+                      </div>
+                    </Popover.Content>
+                  </Popover.Root>
                 </td>
               </tr>
               <tr v-if="entries.length === 0">
@@ -1090,48 +1102,53 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </span>
                 </div>
                 <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
-                  <a
-                    v-if="!entry.isDir && entry.fileId && entry.visibility === 'public'"
-                    :href="`/d/${entry.fileId}`"
-                    download
-                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardDownloadButton]"
-                    :aria-label="`${entry.name}をダウンロード`"
-                    :title="`${entry.name}をダウンロード`"
-                  >
-                    <Download :size="16" :stroke-width="2" aria-hidden="true" />
-                  </a>
-                  <Button.Root
-                    v-else-if="entry.isDir"
-                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardDownloadButton]"
-                    :disabled="archiveDownloadProgress != null"
-                    :aria-label="`${entry.name}をダウンロード`"
-                    :title="`${entry.name}をダウンロード`"
-                    @click="(event: Event) => { stopGridActionEvent(event); startEntryArchiveDownload(entry); }"
-                  >
-                    <Button.Content>
-                      <Download :size="16" :stroke-width="2" aria-hidden="true" />
-                    </Button.Content>
-                  </Button.Root>
-                  <Button.Root
-                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardIconButton, !entry.isDir && entry.visibility !== 'public' && 'ms-auto']"
-                    :aria-label="`${entry.name}を移動/名前変更`"
-                    :title="`${entry.name}を移動/名前変更`"
-                    @click="(event: Event) => requestMoveEntry(entry, event)"
-                  >
-                    <Button.Content>
-                      <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
-                    </Button.Content>
-                  </Button.Root>
-                  <Button.Root
-                    :class="['btn', 'btn-ghost-danger', $style.gridCardActionButton, $style.gridCardIconButton]"
-                    :aria-label="`${entry.name}を削除`"
-                    :title="`${entry.name}を削除`"
-                    @click="(event: Event) => { stopGridActionEvent(event); requestDeleteEntry(entry); }"
-                  >
-                    <Button.Content>
-                      <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
-                    </Button.Content>
-                  </Button.Root>
+                  <Popover.Root>
+                    <Popover.Activator
+                      :class="['btn', 'btn-ghost', 'btn-icon', $style.entryMenuButton]"
+                      :aria-label="`${entry.name}の操作`"
+                      @click="stopGridActionEvent"
+                    >
+                      <EllipsisVertical :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Popover.Activator>
+                    <Popover.Content class="action-menu">
+                      <div class="action-menu-inner">
+                        <a
+                          v-if="!entry.isDir && entry.fileId && entry.visibility === 'public'"
+                          :href="`/d/${entry.fileId}`"
+                          download
+                          :class="['btn', 'btn-ghost', 'w-full', $style.menuItem]"
+                          @click.stop
+                        >
+                          <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                          ダウンロード
+                        </a>
+                        <Button.Root
+                          v-else-if="entry.isDir"
+                          class="btn btn-ghost w-full"
+                          :class="$style.menuItem"
+                          :disabled="archiveDownloadProgress != null"
+                          @click="(event: Event) => { stopGridActionEvent(event); startEntryArchiveDownload(entry); }"
+                        >
+                          <Button.Content>
+                            <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                            ダウンロード
+                          </Button.Content>
+                        </Button.Root>
+                        <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="(event: Event) => requestMoveEntry(entry, event)">
+                          <Button.Content>
+                            <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
+                            移動/名前変更
+                          </Button.Content>
+                        </Button.Root>
+                        <Button.Root class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="(event: Event) => { stopGridActionEvent(event); requestDeleteEntry(entry); }">
+                          <Button.Content>
+                            <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+                            削除
+                          </Button.Content>
+                        </Button.Root>
+                      </div>
+                    </Popover.Content>
+                  </Popover.Root>
                 </div>
               </div>
             </div>
