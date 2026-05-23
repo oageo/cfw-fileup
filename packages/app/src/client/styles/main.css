@@ -461,6 +461,15 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 .card.file-actions {
   padding: var(--space-3);
 }
+.file-actions .btn {
+  min-height: 36px;
+  justify-content: center;
+}
+.file-actions .btn > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* ===== Back link ===== */
 .back-link {
