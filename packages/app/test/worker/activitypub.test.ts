@@ -37,6 +37,17 @@ async function setupPublicFile(path = 'hello.txt', options: { isListed?: boolean
 	return { token, bucketId, fileId };
 }
 
+function envWithAssets(): Env {
+	return {
+		...env,
+		ASSETS: {
+			fetch: () => new Response('<!doctype html><html><head><title>CFW FileUp</title></head><body><div id="app"></div></body></html>', {
+				headers: { 'Content-Type': 'text/html; charset=utf-8' },
+			}),
+		},
+	};
+}
+
 describe('ActivityPub routes', () => {
 	test('serves a bucket actor', async () => {
 		const { bucketId } = await setupPublicFile();
@@ -93,6 +104,27 @@ describe('ActivityPub routes', () => {
 		expect(res.status).toBe(404);
 	});
 
+	test('adds ActivityPub alternate tags to public listed file pages', async () => {
+		const { fileId } = await setupPublicFile('dir/hello #1 & 2.txt');
+
+		const res = await app.request('https://example.test/v/ap_bucket/dir/hello%20%231%20%26%202.txt', {}, envWithAssets());
+		expect(res.status).toBe(200);
+		const href = `https://example.test/a/files/${fileId}`;
+		expect(res.headers.get('Link')).toContain(`<${href}>; rel="alternate"; type="application/activity+json"`);
+		expect(res.headers.get('Cache-Control')).toBe('public, max-age=10800');
+		expect(res.headers.get('X-Cache')).toBe('MISS');
+		expect(await res.text()).toContain(`<link rel="alternate" type="application/activity+json" href="${href}">`);
+	});
+
+	test('does not add ActivityPub alternate tags to unlisted file pages', async () => {
+		await setupPublicFile('hidden.txt', { isListed: false });
+
+		const res = await app.request('https://example.test/v/ap_bucket/hidden.txt', {}, envWithAssets());
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Link')).toBeNull();
+		expect(await res.text()).not.toContain('application/activity+json');
+	});
+
 	test('does not serve listed non-public files as Note', async () => {
 		const { fileId: privateFileId } = await setupPublicFile('private.txt', { visibility: 'private', isListed: true });
 		const { fileId: passphraseFileId } = await setupPublicFile('passphrase.txt', { visibility: 'passphrase', isListed: true, passphrase: 'secret' });
@@ -135,6 +167,26 @@ describe('ActivityPub routes', () => {
 			name: 'entry.txt',
 			url: `https://example.test/d/${fileId}/%3Aentries/${encodedEntryPath}`,
 		}));
+	});
+
+	test('adds ActivityPub alternate tags to public archive entry pages', async () => {
+		const { token, fileId } = await setupPublicFile('archive.tar');
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const href = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
+		const res = await app.request(`https://example.test/v/ap_bucket/archive.tar/%3Aentries/${encodedEntryPath}`, {}, envWithAssets());
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Link')).toContain(`<${href}>; rel="alternate"; type="application/activity+json"`);
+		expect(await res.text()).toContain(`<link rel="alternate" type="application/activity+json" href="${href}">`);
 	});
 
 	test('does not serve entries from an unlisted public archive', async () => {

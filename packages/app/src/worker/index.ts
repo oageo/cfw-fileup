@@ -16,6 +16,7 @@ import { indieAuthRoutes } from './api/indieauth';
 import { activityPubRoutes } from './routes/activitypub';
 import { downloadRoutes } from './routes/download';
 import { uploadRoutes } from './routes/upload';
+import { viewHtmlRoutes } from './routes/view-html';
 import { ApiError, createApiErrorResponse } from './utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -54,6 +55,7 @@ app.route('/api/auth/indieauth', indieAuthRoutes);
 app.route('/', activityPubRoutes);
 app.route('/', downloadRoutes);
 app.route('/', uploadRoutes);
+app.route('/', viewHtmlRoutes);
 
 app.get('/ping', (c) => {
 	return c.text('pong');
