@@ -15,6 +15,7 @@ import { isValidFilePath } from '../../shared/name-validation';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
 import { enqueueUploadJob } from '@/store/upload-worker';
 import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '@/utils/upload-paths';
+import { takeShareTargetPayload } from '../../shared/share-target-store';
 import { readBlobTextPreview } from '@/utils/text-preview';
 import type { ZipExtractWorkerMessage } from '@/workers/zip-extract.worker';
 
@@ -260,6 +261,35 @@ async function addSelectedTreeWithZipPrompts(tree: UploadTree): Promise<void> {
 		rootName: inferUploadRootName(expanded.entries.map(entry => entry.path)),
 	}));
 	zipWarnings.value = expanded.warnings;
+}
+
+async function consumeShareTargetPayload(): Promise<void> {
+	const url = new URL(window.location.href);
+	const shareTargetId = url.searchParams.get('shareTarget');
+	if (!shareTargetId) return;
+
+	url.searchParams.delete('shareTarget');
+	window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+
+	if (shareTargetId === 'empty') {
+		selectionError.value = '共有されたファイルが見つかりませんでした。';
+		return;
+	}
+
+	try {
+		const payload = await takeShareTargetPayload(shareTargetId);
+		if (!payload || payload.files.length === 0) {
+			selectionError.value = '共有されたファイルを読み込めませんでした。もう一度共有してください。';
+			return;
+		}
+		const entries = payload.files.map(entry => ({
+			path: entry.name || entry.file.name,
+			file: entry.file,
+		}));
+		await addSelectedTreeWithZipPrompts(await UploadTree.from({ entries }));
+	} catch (err) {
+		selectionError.value = err instanceof Error ? err.message : String(err);
+	}
 }
 
 async function expandZipEntriesInTree(tree: UploadTree): Promise<{ entries: { path: string; file: File }[]; warnings: string[] }> {
@@ -1198,6 +1228,7 @@ onMounted(async () => {
 		if (pending.tree.entries.length > 0) await addSelectedTreeWithZipPrompts(await UploadTree.from(pending.tree));
 		uploadPrefix.value = pending.prefix;
 	}
+	await consumeShareTargetPayload();
 });
 </script>
 

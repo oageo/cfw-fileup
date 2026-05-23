@@ -42,6 +42,69 @@ export default defineConfig({
 			srcDir: 'src/sw',
 			filename: 'index.ts',
 			injectRegister: 'auto',
+			includeAssets: ['favicon.svg', 'favicon.ico'],
+			manifest: {
+				name: 'CFW FileUp',
+				short_name: 'FileUp',
+				description: 'Upload files to CFW FileUp.',
+				lang: 'ja',
+				start_url: '/my/buckets',
+				scope: '/',
+				display: 'standalone',
+				background_color: '#f1f5f9',
+				theme_color: '#4f46e5',
+				icons: [
+					{
+						src: '/icon.any-192.png',
+						sizes: '192x192',
+						type: 'image/png',
+						purpose: 'any',
+					},
+					{
+						src: '/icon.any-512.png',
+						sizes: '512x512',
+						type: 'image/png',
+						purpose: 'any',
+					},
+					{
+						src: '/icon.any-1200.png',
+						sizes: '1200x1200',
+						type: 'image/png',
+						purpose: 'any',
+					},
+					{
+						src: '/icon.maskable-192.png',
+						sizes: '192x192',
+						type: 'image/png',
+						purpose: 'maskable',
+					},
+					{
+						src: '/icon.maskable-512.png',
+						sizes: '512x512',
+						type: 'image/png',
+						purpose: 'maskable',
+					},
+					{
+						src: '/icon.maskable-1200.png',
+						sizes: '1200x1200',
+						type: 'image/png',
+						purpose: 'maskable',
+					},
+				],
+				share_target: {
+					action: '/share-target',
+					method: 'POST',
+					enctype: 'multipart/form-data',
+					params: {
+						files: [
+							{
+								name: 'files',
+								accept: ['*/*'],
+							},
+						],
+					},
+				},
+			},
 			devOptions: {
 				enabled: true,
 				type: 'module',
