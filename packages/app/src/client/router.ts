@@ -15,37 +15,58 @@ export function createRouter(fullPath: string, loggedIn: boolean = false): Route
 	return new Nirax(ROUTE_DEF, fullPath, loggedIn, page(() => import('@/pages/not-found.vue')));
 }
 
-export const mainRouter = createRouter(window.location.pathname + window.location.search + window.location.hash);
+interface RouterGlobalState {
+	mainRouter?: Router;
+	listenersInitialized?: boolean;
+}
 
-window.addEventListener('popstate', (event) => {
+const routerGlobalState = globalThis as typeof globalThis & { __cfwFileupRouter?: RouterGlobalState };
+const routerState = routerGlobalState.__cfwFileupRouter ??= {};
+
+// Keep one router across component HMR so stale page modules cannot update only history.
+// If this module itself changes, reload below because routes/listeners are part of app wiring.
+export const mainRouter = routerState.mainRouter ??= createRouter(window.location.pathname + window.location.search + window.location.hash);
+
+if (!routerState.listenersInitialized) {
+	window.addEventListener('popstate', (event) => {
+		mainRouter.replaceByPath(window.location.pathname + window.location.search + window.location.hash);
+	});
+
+	mainRouter.addListener('push', ctx => {
+		window.history.pushState({ }, '', ctx.fullPath);
+	});
+
+	mainRouter.addListener('replace', ctx => {
+		window.history.replaceState({ }, '', ctx.fullPath);
+	});
+
+	mainRouter.addListener('forceReplace', ctx => {
+		window.location.replace(ctx.fullPath);
+	});
+
+	mainRouter.addListener('forcePush', ctx => {
+		window.location.href = ctx.fullPath;
+	});
+
+	mainRouter.addListener('change', ctx => {
+		//if (_DEV_) console.log('mainRouter: change', ctx.fullPath);
+		//analytics.page({
+		//	path: ctx.fullPath,
+		//	title: ctx.fullPath,
+		//});
+	});
+
+	mainRouter.init();
+	routerState.listenersInitialized = true;
+} else {
 	mainRouter.replaceByPath(window.location.pathname + window.location.search + window.location.hash);
-});
+}
 
-mainRouter.addListener('push', ctx => {
-	window.history.pushState({ }, '', ctx.fullPath);
-});
-
-mainRouter.addListener('replace', ctx => {
-	window.history.replaceState({ }, '', ctx.fullPath);
-});
-
-mainRouter.addListener('forceReplace', ctx => {
-	window.location.replace(ctx.fullPath);
-});
-
-mainRouter.addListener('forcePush', ctx => {
-	window.location.href = ctx.fullPath;
-});
-
-mainRouter.addListener('change', ctx => {
-	//if (_DEV_) console.log('mainRouter: change', ctx.fullPath);
-	//analytics.page({
-	//	path: ctx.fullPath,
-	//	title: ctx.fullPath,
-	//});
-});
-
-mainRouter.init();
+if (import.meta.hot) {
+	import.meta.hot.accept(() => {
+		window.location.reload();
+	});
+}
 
 const ROUTER_SYMBOL = Symbol();
 
