@@ -8,6 +8,7 @@ import { genEaidx } from '../../shared/eaid-x';
 import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
 import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
+import { recordModerationEvent } from '../utils/moderation';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MISSKEY_OAUTH_SCOPE = 'read:account';
@@ -512,6 +513,7 @@ app.get('/callback', async (c) => {
 		userId: user.id,
 		token: tokenValue,
 	});
+	await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'indieauth' }, user.id, tokenId);
 
 	return c.redirect(`/signin?indieauth_token=${encodeURIComponent(tokenValue)}`, 302);
 });
@@ -526,7 +528,7 @@ app.post('/complete', async (c) => {
 
 	const db = getDb(c.env);
 	const tokenRecord = await db.select().from(tokens).where(eq(tokens.token, body.indieauthToken)).get();
-	if (!tokenRecord) {
+	if (!tokenRecord || tokenRecord.isRevoked) {
 		throw apiError(401, 'INVALID_TOKEN');
 	}
 

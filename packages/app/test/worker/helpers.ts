@@ -8,6 +8,7 @@ import migration0004 from '../../migrations/0004_parched_hairball.sql?raw';
 import migration0005 from '../../migrations/0005_flashy_inhumans.sql?raw';
 import migration0006 from '../../migrations/0006_easy_scream.sql?raw';
 import migration0007 from '../../migrations/0007_famous_vermin.sql?raw';
+import migration0008 from '../../migrations/0008_slim_terror.sql?raw';
 
 export { env, app };
 
@@ -20,6 +21,7 @@ const migrations = [
 	migration0005,
 	migration0006,
 	migration0007,
+	migration0008,
 ] as const;
 
 const tables = [
@@ -27,6 +29,8 @@ const tables = [
 	'targz_files',
 	'tar_files',
 	'file_access_tokens',
+	'ip_bans',
+	'moderation_events',
 	'passkeys_challenges',
 	'backup_codes',
 	'passkeys',
@@ -79,6 +83,8 @@ export async function clearDb(): Promise<void> {
 		env.DB.prepare('DELETE FROM targz_files'),
 		env.DB.prepare('DELETE FROM tar_files'),
 		env.DB.prepare('DELETE FROM file_access_tokens'),
+		env.DB.prepare('DELETE FROM ip_bans'),
+		env.DB.prepare('DELETE FROM moderation_events'),
 		env.DB.prepare('DELETE FROM passkeys_challenges'),
 		env.DB.prepare('DELETE FROM backup_codes'),
 		env.DB.prepare('DELETE FROM passkeys'),

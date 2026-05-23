@@ -127,6 +127,9 @@ function toggleTheme(): void {
                   <Button.Root :as="NirA" to="/my/passkeys" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>パスキー</Button.Content>
                   </Button.Root>
+                  <Button.Root :as="NirA" to="/my/tokens" class="btn btn-ghost w-full" @click="closeAppNav">
+                    <Button.Content>アクセストークン</Button.Content>
+                  </Button.Root>
                   <Button.Root class="btn btn-ghost w-full" @click="logout">
                     <Button.Content>ログアウト</Button.Content>
                   </Button.Root>

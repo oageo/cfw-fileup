@@ -15,6 +15,7 @@ export const tokens = sqliteTable('tokens', {
 	id: text('id').primaryKey(),
 	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	token: text('token').notNull().unique(),
+	isRevoked: integer('is_revoked', { mode: 'boolean' }).notNull().default(false),
 });
 
 export const oauthStates = sqliteTable('oauth_states', {

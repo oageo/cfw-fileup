@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import * as v from 'valibot';
-import { genEaidx } from '../../shared/eaid-x';
+import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { apiError } from '../utils/api-error';
-import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments } from '../scheme/index';
+import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments, ipBans } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser, getGlobalQuota } from '../utils/rate-limit';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
@@ -14,6 +14,7 @@ import { omitResAndReq } from '../utils/omit';
 import { bumpWorkerCacheVersion } from '../utils/cache-names';
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
+import { isValidCidr } from '../utils/cidr';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -91,6 +92,84 @@ app.post(
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/make-admin')),
+);
+
+app.post(
+	'/list-ip-bans',
+	describeRoute(omitResAndReq(apiDef['/api/admin/list-ip-bans'])),
+	validator('json', apiDef['/api/admin/list-ip-bans'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/list-ip-bans', Env>) => {
+		const db = getDb(c.env);
+		const rows = await db
+			.select({
+				id: ipBans.id,
+				cidr: ipBans.cidr,
+				reason: ipBans.reason,
+				sourceEventId: ipBans.sourceEventId,
+				createdBy: ipBans.createdBy,
+				createdByUsername: users.username,
+				expiresAt: ipBans.expiresAt,
+			})
+			.from(ipBans)
+			.leftJoin(users, eq(ipBans.createdBy, users.id))
+			.orderBy(desc(ipBans.id));
+
+		return c.json(rows.map(row => ({
+			id: row.id,
+			cidr: row.cidr,
+			reason: row.reason,
+			sourceEventId: row.sourceEventId,
+			createdBy: row.createdBy,
+			createdByUsername: row.createdByUsername,
+			expiresAt: row.expiresAt,
+			createdAt: parseEaidx(row.id).date.getTime(),
+		})), 200);
+	}, getResponseDefWithAuth('/api/admin/list-ip-bans')),
+);
+
+app.post(
+	'/create-ip-ban',
+	describeRoute(omitResAndReq(apiDef['/api/admin/create-ip-ban'])),
+	validator('json', apiDef['/api/admin/create-ip-ban'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/create-ip-ban', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const body = c.req.valid('json');
+		const cidr = body.cidr.trim();
+
+		if (!isValidCidr(cidr)) {
+			throw apiError(400, 'INVALID_CIDR');
+		}
+
+		const id = genEaidx(Date.now());
+		const row = {
+			id,
+			cidr,
+			reason: body.reason ?? null,
+			sourceEventId: body.sourceEventId ?? null,
+			createdBy: user.id,
+			expiresAt: body.expiresAt ?? null,
+		};
+		await db.insert(ipBans).values(row);
+
+		return c.json({
+			...row,
+			createdByUsername: user.username,
+			createdAt: parseEaidx(id).date.getTime(),
+		}, 200);
+	}, getResponseDefWithAuth('/api/admin/create-ip-ban')),
+);
+
+app.post(
+	'/delete-ip-ban',
+	describeRoute(omitResAndReq(apiDef['/api/admin/delete-ip-ban'])),
+	validator('json', apiDef['/api/admin/delete-ip-ban'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/delete-ip-ban', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+		await db.delete(ipBans).where(eq(ipBans.id, body.banId));
+		return c.json({ ok: true }, 200);
+	}, getResponseDefWithAuth('/api/admin/delete-ip-ban')),
 );
 
 app.post(

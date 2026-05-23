@@ -10,6 +10,7 @@ import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { verifyTurnstile } from '../utils/turnstile';
 import { apiError } from '../utils/api-error';
+import { recordModerationEvent } from '../utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -45,6 +46,15 @@ app.post(
 		const expiresAt = body.expiresIn != null ? Date.now() + body.expiresIn * 1000 : null;
 
 		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token, expiresAt });
+		await recordModerationEvent(c, 'file_token_created', {
+			tokenId: id,
+			fileId: file.id,
+			bucketId: bucket.id,
+			bucketName: bucket.name,
+			filePath: file.path,
+			expiresAt,
+			method: 'authenticated',
+		}, user.id, user.tokenId);
 
 		return c.json({ id, token, expiresAt }, 200);
 	}, getResponseDefWithAuth('/api/file-tokens/create')),
@@ -154,6 +164,15 @@ app.post(
 		const expiresAt = Date.now() + 3600 * 1000;
 
 		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token, expiresAt });
+		await recordModerationEvent(c, 'file_token_created', {
+			tokenId: id,
+			fileId: file.id,
+			bucketId: bucket.id,
+			bucketName: bucket.name,
+			filePath: file.path,
+			expiresAt,
+			method: 'passphrase',
+		});
 
 		return c.json({ id, token, expiresAt, fileId: file.id }, 200);
 	}, apiDef['/api/file-tokens/create-by-passphrase'].res),

@@ -577,12 +577,12 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			if (!authorization?.startsWith('Bearer ')) throw apiError(403, 'FORBIDDEN');
 			const token = authorization.slice(7);
 			const tokenRecord = await db
-				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended })
+				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
 				.where(eq(tokens.token, token))
 				.get();
-			if (!tokenRecord || tokenRecord.isSuspended || (!tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId)) {
+			if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended || (!tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId)) {
 				throw apiError(403, 'FORBIDDEN');
 			}
 		}

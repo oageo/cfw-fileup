@@ -18,8 +18,29 @@ import { downloadRoutes } from './routes/download';
 import { uploadRoutes } from './routes/upload';
 import { viewHtmlRoutes } from './routes/view-html';
 import { ApiError, createApiErrorResponse } from './utils/api-error';
+import { rejectIpBan } from './utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use('/api/*', async (c, next) => {
+	await rejectIpBan(c);
+	await next();
+});
+
+app.use('/upload/*', async (c, next) => {
+	await rejectIpBan(c);
+	await next();
+});
+
+app.use('/v/*', async (c, next) => {
+	await rejectIpBan(c);
+	await next();
+});
+
+app.use('/d/*', async (c, next) => {
+	await rejectIpBan(c);
+	await next();
+});
 
 app.onError((err, c) => {
 	console.error('Error:', err);

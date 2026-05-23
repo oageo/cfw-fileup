@@ -50,6 +50,19 @@ const UserPlanAssignmentResponse = v.pipe(
 	v.metadata({ ref: 'UserPlanAssignment' }),
 );
 const NullableUserPlanAssignmentResponse = v.nullable(UserPlanAssignmentResponse);
+const IpBanResponse = v.pipe(
+	v.object({
+		id: IdString,
+		cidr: v.string(),
+		reason: v.nullable(v.string()),
+		sourceEventId: v.nullable(v.string()),
+		createdBy: v.nullable(v.string()),
+		createdByUsername: v.nullable(v.string()),
+		expiresAt: v.nullable(v.number()),
+		createdAt: v.number(),
+	}),
+	v.metadata({ ref: 'IpBan' }),
+);
 
 const OkResponse = { 200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } } };
 const WorkerCachePurgeResponse = v.pipe(
@@ -157,6 +170,29 @@ export const adminApiDef = {
 		tags: ['admin'],
 		req: v.object({}),
 		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: KnownSettingListSchema } } }, ...AdminErrors },
+	},
+	'/api/admin/list-ip-bans': {
+		summary: 'List IP bans',
+		tags: ['admin'],
+		req: v.object({}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(IpBanResponse) } } }, ...AdminErrors },
+	},
+	'/api/admin/create-ip-ban': {
+		summary: 'Create an IP ban',
+		tags: ['admin'],
+		req: v.object({
+			cidr: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(128)),
+			reason: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(500)))),
+			sourceEventId: v.optional(v.nullable(IdString)),
+			expiresAt: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0)))),
+		}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: IpBanResponse } } }, ...AdminErrors, 400: errorResponse('Bad request (invalid CIDR)', ['INVALID_CIDR']) },
+	},
+	'/api/admin/delete-ip-ban': {
+		summary: 'Delete an IP ban',
+		tags: ['admin'],
+		req: v.object({ banId: IdString }),
+		res: { ...OkResponse, ...AdminErrors },
 	},
 	'/api/admin/list-plans': {
 		summary: 'List plans',

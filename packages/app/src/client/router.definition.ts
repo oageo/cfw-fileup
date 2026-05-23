@@ -53,6 +53,11 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/my/passkeys.vue')),
 	},
 	{
+		path: '/my/tokens',
+		name: 'my-tokens',
+		component: page(() => import('@/pages/my/tokens.vue')),
+	},
+	{
 		path: '/uploader',
 		name: 'upload',
 		component: page(() => import('@/pages/upload.vue')),
@@ -76,6 +81,11 @@ export const ROUTE_DEF = [
 		path: '/admin/users',
 		name: 'admin-users',
 		component: page(() => import('@/pages/admin/users/index.vue')),
+	},
+	{
+		path: '/admin/ip-bans',
+		name: 'admin-ip-bans',
+		component: page(() => import('@/pages/admin/ip-bans.vue')),
 	},
 	{
 		path: '/admin/global-quota',

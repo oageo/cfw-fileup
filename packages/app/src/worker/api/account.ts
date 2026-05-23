@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq } from 'drizzle-orm';
-import { users, usedUsernames } from '../scheme/index';
+import { and, count, eq, inArray, sql } from 'drizzle-orm';
+import { users, usedUsernames, tokens, moderationEvents } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { hashPassword, verifyPassword } from '../utils/crypto';
@@ -9,6 +9,7 @@ import { validateUsername } from '../utils/name-validation';
 import { apiDef, getResponseDefWithAuth } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { apiError } from '../utils/api-error';
+import { parseEaidx } from '../../shared/eaid-x';
 import type { JsonCtx } from '../../shared/api';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -106,6 +107,78 @@ app.post(
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/account/update')),
+);
+
+app.post(
+	'/tokens',
+	describeRoute(omitResAndReq(apiDef['/api/account/tokens'])),
+	validator('json', apiDef['/api/account/tokens'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/tokens', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const rows = await db
+			.select({
+				id: tokens.id,
+				isRevoked: tokens.isRevoked,
+			})
+			.from(tokens)
+			.where(eq(tokens.userId, user.id));
+		const tokenIds = rows.map(token => token.id);
+		const latestEventIds = tokenIds.length === 0
+			? []
+			: await db
+				.select({
+					id: sql<string>`max(${moderationEvents.id})`,
+				})
+				.from(moderationEvents)
+				.where(inArray(moderationEvents.userTokenId, tokenIds))
+				.groupBy(moderationEvents.userTokenId);
+		const latestEvents = latestEventIds.length === 0
+			? []
+			: await db
+				.select({
+					userTokenId: moderationEvents.userTokenId,
+					ipAddress: moderationEvents.ipAddress,
+				})
+				.from(moderationEvents)
+				.where(inArray(moderationEvents.id, latestEventIds.map(event => event.id)));
+		const lastIpByTokenId = new Map<string, string | null>();
+		for (const event of latestEvents) {
+			if (event.userTokenId === null || lastIpByTokenId.has(event.userTokenId)) continue;
+			lastIpByTokenId.set(event.userTokenId, event.ipAddress);
+		}
+
+		return c.json({
+			tokens: rows.map(token => ({
+				id: token.id,
+				createdAt: parseEaidx(token.id).date.getTime(),
+				lastIpAddress: lastIpByTokenId.get(token.id) ?? null,
+				isCurrent: token.id === user.tokenId,
+				isRevoked: token.isRevoked,
+			})),
+		}, 200);
+	}, getResponseDefWithAuth('/api/account/tokens')),
+);
+
+app.post(
+	'/tokens/revoke-all',
+	describeRoute(omitResAndReq(apiDef['/api/account/tokens/revoke-all'])),
+	validator('json', apiDef['/api/account/tokens/revoke-all'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/tokens/revoke-all', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const [{ revokedCount }] = await db
+			.select({ revokedCount: count() })
+			.from(tokens)
+			.where(and(eq(tokens.userId, user.id), eq(tokens.isRevoked, false)));
+
+		await db
+			.update(tokens)
+			.set({ isRevoked: true })
+			.where(and(eq(tokens.userId, user.id), eq(tokens.isRevoked, false)));
+
+		return c.json({ ok: true, revokedCount }, 200);
+	}, getResponseDefWithAuth('/api/account/tokens/revoke-all')),
 );
 
 export const accountRoutes = app;

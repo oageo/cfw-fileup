@@ -18,6 +18,7 @@ import { validateUsername } from '../utils/name-validation';
 import { verifyTurnstile } from '../utils/turnstile';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
+import { recordModerationEvent } from '../utils/moderation';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -309,6 +310,7 @@ app.post(
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
 		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenValue });
+		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey' }, user.id, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/passkey/authenticate/finish'].res),
@@ -459,6 +461,7 @@ app.post(
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
 		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenValue });
+		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'backup_code' }, user.id, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/passkey/backup-codes/use'].res),
@@ -637,6 +640,7 @@ app.post(
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
 		await db.insert(tokens).values({ id: tokenId, userId, token: tokenValue });
+		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey_signup' }, userId, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/passkey/signup/finish'].res),

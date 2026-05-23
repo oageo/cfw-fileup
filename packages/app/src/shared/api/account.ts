@@ -36,4 +36,20 @@ export const accountApiDef = {
 			409: errorResponse('Username already exists', ['USERNAME_ALREADY_EXISTS']),
 		},
 	},
+	'/api/account/tokens': {
+		summary: 'List account access tokens',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ tokens: v.array(v.object({ id: v.string(), createdAt: v.number(), lastIpAddress: v.nullable(v.string()), isCurrent: v.boolean(), isRevoked: v.boolean() })) }) } } },
+		},
+	},
+	'/api/account/tokens/revoke-all': {
+		summary: 'Revoke all account access tokens',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true), revokedCount: v.number() }) } } },
+		},
+	},
 } as const satisfies ApiEndpointDefinitionRecord;

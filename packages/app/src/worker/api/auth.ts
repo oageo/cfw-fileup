@@ -10,6 +10,7 @@ import { verifyTurnstile } from '../utils/turnstile';
 import { validateUsername } from '../utils/name-validation';
 import { apiDef, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
+import { recordModerationEvent } from '../utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -113,6 +114,7 @@ app.post(
 			userId,
 			token: tokenValue,
 		});
+		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'signup' }, userId, tokenId);
 
 		return c.json({ userId, token: tokenValue }, 200);
 	}, apiDef['/api/signup'].res),
@@ -196,6 +198,7 @@ app.post(
 			userId: user.id,
 			token: tokenValue,
 		});
+		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'signin' }, user.id, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/signin'].res),

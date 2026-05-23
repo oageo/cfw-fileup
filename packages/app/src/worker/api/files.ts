@@ -18,6 +18,7 @@ import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, hasFileDirectoryConflictForFile } from '../utils/path-conflicts';
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
+import { recordModerationEvent } from '../utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -33,12 +34,12 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		if (authorization?.startsWith('Bearer ')) {
 			const token = authorization.slice(7);
 			const tokenRecord = await db
-				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended })
+				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
 				.where(eq(tokens.token, token))
 				.get();
-			isOwnerOrAdmin = !!tokenRecord && !tokenRecord.isSuspended && (tokenRecord.isAdmin || tokenRecord.userId === bucket.userId);
+			isOwnerOrAdmin = !!tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended && (tokenRecord.isAdmin || tokenRecord.userId === bucket.userId);
 		}
 	}
 
@@ -149,12 +150,12 @@ app.get('/meta', async (c) => {
 	if (authorization?.startsWith('Bearer ')) {
 		const token = authorization.slice(7);
 		const tokenRecord = await db
-			.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended })
+			.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 			.from(tokens)
 			.innerJoin(users, eq(tokens.userId, users.id))
 			.where(eq(tokens.token, token))
 			.get();
-		if (tokenRecord && !tokenRecord.isSuspended) {
+		if (tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended) {
 			isOwnerOrAdmin = tokenRecord.isAdmin || tokenRecord.userId === bucket.userId;
 		}
 	}
@@ -533,6 +534,14 @@ app.post(
 			.update(buckets)
 			.set({ usedBytes: sql`${buckets.usedBytes} + ${fileSize}` })
 			.where(eq(buckets.id, bucket.id));
+		await recordModerationEvent(c, 'file_uploaded', {
+			fileId: file.id,
+			bucketId: bucket.id,
+			bucketName: bucket.name,
+			path: file.path,
+			size: fileSize,
+			mimeType,
+		}, user.id, user.tokenId);
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/create/close')),
@@ -881,6 +890,12 @@ app.post(
 			bucket: { id: bucket.id, name: bucket.name },
 			files: purgeFiles,
 		});
+		await recordModerationEvent(c, 'file_deleted', {
+			bucketId: bucket.id,
+			bucketName: bucket.name,
+			targets,
+			fileIds: Array.from(filesToDelete.keys()),
+		}, user.id, user.tokenId);
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/delete')),
@@ -1005,6 +1020,13 @@ app.post(
 				targetBucket: { id: targetBucket.id, name: targetBucket.name },
 				files: [{ ...await toFileMutationReference(db, { ...file, path: normalizedSourcePath }), nextPath: normalizedTargetPath }],
 			});
+			await recordModerationEvent(c, 'file_renamed', {
+				fileId: file.id,
+				sourceBucketId: sourceBucket.id,
+				targetBucketId: targetBucket.id,
+				sourcePath: normalizedSourcePath,
+				targetPath: normalizedTargetPath,
+			}, user.id, user.tokenId);
 
 			return c.json({ ok: true }, 200);
 		}

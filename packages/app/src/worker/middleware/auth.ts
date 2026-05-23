@@ -10,6 +10,7 @@ export type AuthUser = {
 	isAdmin: boolean;
 	isSuspended: boolean;
 	termsAgreedAt: number | null;
+	tokenId: string;
 };
 
 declare module 'hono' {
@@ -29,11 +30,13 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 
 	const tokenRecord = await db
 		.select({
+			tokenId: tokens.id,
 			userId: tokens.userId,
 			username: users.username,
 			isAdmin: users.isAdmin,
 			isSuspended: users.isSuspended,
 			termsAgreedAt: users.termsAgreedAt,
+			isRevoked: tokens.isRevoked,
 		})
 		.from(tokens)
 		.innerJoin(users, eq(tokens.userId, users.id))
@@ -41,6 +44,10 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 		.get();
 
 	if (!tokenRecord) {
+		throw apiError(401, 'UNAUTHORIZED');
+	}
+
+	if (tokenRecord.isRevoked) {
 		throw apiError(401, 'UNAUTHORIZED');
 	}
 
@@ -54,6 +61,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 		isAdmin: tokenRecord.isAdmin,
 		isSuspended: tokenRecord.isSuspended,
 		termsAgreedAt: tokenRecord.termsAgreedAt,
+		tokenId: tokenRecord.tokenId,
 	});
 
 	await next();
