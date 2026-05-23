@@ -197,7 +197,7 @@ describe('POST /api/signin', () => {
 		}, env);
 
 		const { status } = await signin('user1', 'password123');
-		expect(status).toBe(401);
+		expect(status).toBe(403);
 	});
 
 	test('unauthenticated request to protected endpoint returns 401', async () => {

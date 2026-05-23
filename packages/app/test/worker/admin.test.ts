@@ -88,7 +88,7 @@ describe('POST /api/admin/suspend-user', () => {
 
 		// Suspended user cannot sign in
 		const { status } = await signin('user1', 'password123');
-		expect(status).toBe(401);
+		expect(status).toBe(403);
 	});
 
 	test('nonexistent user returns 404', async () => {

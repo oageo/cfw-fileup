@@ -333,8 +333,11 @@ describe('POST /api/files/create/close', () => {
 			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
 		expect(closeRes.status).toBe(400);
-		const body = await closeRes.json() as { error: string };
-		expect(body.error).toBe('File content type does not match file extension');
+		const body = await closeRes.json() as { error: string; message: string };
+		expect(body).toEqual({
+			error: 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION',
+			message: 'File content type does not match file extension',
+		});
 	});
 
 	test('reports mismatched executable content in file metadata', async () => {
@@ -552,8 +555,11 @@ describe('POST /api/files/update', () => {
 			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'public.txt', visibility: 'passphrase', passphrase: 'secret' }),
 		}, env);
 		expect(updateRes.status).toBe(400);
-		const body = await updateRes.json() as { error: string };
-		expect(body.error).toBe('Public files cannot change visibility');
+		const body = await updateRes.json() as { error: string; message: string };
+		expect(body).toEqual({
+			error: 'PUBLIC_FILES_CANNOT_CHANGE_VISIBILITY',
+			message: 'Public files cannot change visibility',
+		});
 
 		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=public.txt', {}, env);
 		expect(metaRes.status).toBe(200);
@@ -662,8 +668,11 @@ describe('POST /api/files/move', () => {
 			}),
 		}, env);
 		expect(moveRes.status).toBe(400);
-		const body = await moveRes.json() as { error: string };
-		expect(body.error).toBe('File content type does not match file extension');
+		const body = await moveRes.json() as { error: string; message: string };
+		expect(body).toEqual({
+			error: 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION',
+			message: 'File content type does not match file extension',
+		});
 	});
 });
 
