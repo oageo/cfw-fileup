@@ -19,15 +19,6 @@ function activityJson(c: AppContext, value: unknown): Response {
 	return c.json(value, 200, { 'Content-Type': activityJsonContentType });
 }
 
-function htmlEscape(value: string): string {
-	return value
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
-}
-
 function basename(path: string): string {
 	return path.replace(/\/$/, '').split('/').pop() ?? path;
 }
@@ -41,6 +32,14 @@ function documentTypeForMime(mimeType: string | null): 'Audio' | 'Document' | 'I
 	if (mimeType?.startsWith('video/')) return 'Video';
 	if (mimeType?.startsWith('audio/')) return 'Audio';
 	return 'Document';
+}
+
+function ActivityPubFileContent(props: { name: string }) {
+	return <p>{props.name}</p>;
+}
+
+function renderActivityPubContent(name: string): string {
+	return String(<ActivityPubFileContent name={name} />);
 }
 
 function bucketActor(origin: string, bucket: typeof buckets.$inferSelect) {
@@ -102,7 +101,7 @@ function fileNote(options: {
 		cc: [`${actorId}/followers`],
 		published: parseEaidx(options.file.id).date.toISOString(),
 		name,
-		content: `<p>${htmlEscape(name)}</p>`,
+		content: renderActivityPubContent(name),
 		url: viewUrl,
 		attachment: [{
 			type: documentTypeForMime(mimeType),

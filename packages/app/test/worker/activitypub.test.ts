@@ -104,12 +104,13 @@ describe('ActivityPub routes', () => {
 	});
 
 	test('encodes file paths in public Note URLs', async () => {
-		const { fileId } = await setupPublicFile('dir/hello #1.txt');
+		const { fileId } = await setupPublicFile('dir/hello #1 & 2.txt');
 
 		const res = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
 		expect(res.status).toBe(200);
-		const note = await res.json() as { url: string };
-		expect(note.url).toBe('https://example.test/v/ap_bucket/dir/hello%20%231.txt');
+		const note = await res.json() as { content: string; url: string };
+		expect(note.url).toBe('https://example.test/v/ap_bucket/dir/hello%20%231%20%26%202.txt');
+		expect(note.content).toBe('<p>hello #1 &amp; 2.txt</p>');
 	});
 
 	test('serves a public tar entry as its own Note', async () => {
