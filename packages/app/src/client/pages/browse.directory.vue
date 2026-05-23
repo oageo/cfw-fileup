@@ -978,7 +978,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="entry in entries" :key="entry.key">
+              <tr v-for="entry in entries" :key="entry.key" :class="entry.isDir && $style.directoryRow">
                 <!-- チェックボックスセル -->
                 <td v-if="!isArchive" :class="$style.checkboxCell">
                   <input
@@ -1037,7 +1037,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
             <div
               v-for="entry in entries"
               :key="entry.key"
-              :class="[$style.gridCard, isEntrySelected(entry) && $style.gridCardSelected]"
+              :class="[$style.gridCard, entry.isDir && $style.directoryGridCard, isEntrySelected(entry) && $style.gridCardSelected]"
             >
               <button
                 v-if="isArchive && entry.isDir"
@@ -1208,22 +1208,22 @@ watch([isPartiallySelected, isAllSelected], async () => {
 
 .selectAllButton {
   background: transparent;
-  color: #15803d;
+  color: var(--color-success);
   border-color: transparent;
 }
 
 .selectAllButton:hover {
   color: #fff;
-  background: #16a34a;
+  background: var(--color-success);
 }
 
 :global([data-theme="dark"]) .selectAllButton {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 :global([data-theme="dark"]) .selectAllButton:hover {
-  color: #052e16;
-  background: #86efac;
+  color: var(--color-directory-surface);
+  background: var(--color-success);
 }
 
 .selectionButton {
@@ -1300,7 +1300,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
 }
 
 .checkboxSelectAll {
-  accent-color: #16a34a;
+  accent-color: var(--color-success-muted);
 }
 
 .upButton {
@@ -1390,6 +1390,14 @@ watch([isPartiallySelected, isAllSelected], async () => {
   white-space: nowrap;
 }
 
+.directoryRow {
+  background: var(--color-directory-surface);
+}
+
+.directoryRow:hover {
+  background: var(--color-directory-surface-hover);
+}
+
 .gridView {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -1405,6 +1413,11 @@ watch([isPartiallySelected, isAllSelected], async () => {
   background: var(--color-surface, #fff);
   border: 1px solid var(--color-border, #e0e0e0);
   border-radius: 8px;
+}
+
+.directoryGridCard {
+  background: var(--color-directory-surface);
+  border-color: var(--color-directory-border);
 }
 
 .gridCardSelected {
@@ -1455,6 +1468,10 @@ watch([isPartiallySelected, isAllSelected], async () => {
   color: var(--color-text-muted);
   text-decoration: none;
   background: var(--color-bg);
+}
+
+.directoryGridCard .gridCardPreview {
+  background: var(--color-directory-surface-hover);
 }
 
 .gridCardPreviewButton {
