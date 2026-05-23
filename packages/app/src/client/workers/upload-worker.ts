@@ -136,6 +136,7 @@ async function closeUpload(fileId: string, request: UploadJobRequest): Promise<v
 	await apiPost('/api/files/create/close', {
 		fileId,
 		visibility: request.visibility,
+		isListed: request.isListed,
 		passphrase: request.passphrase || undefined,
 	}, request.authToken);
 }

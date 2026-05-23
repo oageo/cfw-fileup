@@ -6,6 +6,7 @@ import migration0002 from '../../migrations/0002_pretty_talos.sql?raw';
 import migration0003 from '../../migrations/0003_overjoyed_pyro.sql?raw';
 import migration0004 from '../../migrations/0004_parched_hairball.sql?raw';
 import migration0005 from '../../migrations/0005_flashy_inhumans.sql?raw';
+import migration0006 from '../../migrations/0006_easy_scream.sql?raw';
 
 export { env, app };
 
@@ -16,6 +17,7 @@ const migrations = [
 	migration0003,
 	migration0004,
 	migration0005,
+	migration0006,
 ] as const;
 
 const tables = [

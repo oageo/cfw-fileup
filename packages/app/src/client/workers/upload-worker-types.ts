@@ -15,6 +15,7 @@ export interface UploadJobRequest {
 	mode: UploadJobMode;
 	archiveBaseName: string;
 	visibility: FileVisibility;
+	isListed: boolean;
 	passphrase?: string;
 	files: UploadWorkerFileEntry[];
 	totalBytes: number;

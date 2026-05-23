@@ -10,6 +10,7 @@ import { TarArchiver, BgzfTarArchiver, type TarIndex, type TarGzIndex, type Arch
 import { takePendingUpload } from '@/store/pending-upload';
 import UploadDestinationDialog from '@/components/UploadDestinationDialog.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import FileVisibilitySettings from '@/components/FileVisibilitySettings.vue';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { isValidFilePath } from '../../shared/name-validation';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
@@ -48,6 +49,7 @@ const uploadPrefix = ref('');
 const archiveMode = ref<ArchiveMode>('individual');
 const libraryName = ref('');
 const visibility = ref<FileVisibility>('public');
+const isListed = ref(true);
 const passphrase = ref('');
 const isDragOver = ref(false);
 const selectionError = ref('');
@@ -861,7 +863,7 @@ async function openUpload(path: string): Promise<OpenUploadResult | null> {
 }
 
 async function closeUpload(fileId: string): Promise<boolean> {
-	const result = await apiPost('/api/files/create/close', { fileId, visibility: visibility.value, passphrase: passphrase.value || undefined });
+	const result = await apiPost('/api/files/create/close', { fileId, visibility: visibility.value, isListed: isListed.value, passphrase: passphrase.value || undefined });
 	if (!result.ok) {
 		uploadError.value = result.data.message;
 		return false;
@@ -1206,6 +1208,7 @@ async function executeUpload(): Promise<void> {
 		mode: archiveMode.value,
 		archiveBaseName: archiveUploadBaseName.value,
 		visibility: visibility.value,
+		isListed: isListed.value,
 		passphrase: passphrase.value || undefined,
 		files,
 		totalBytes: tree.totalSize,
@@ -1462,33 +1465,12 @@ onMounted(async () => {
       <!-- オプション -->
       <div class="card">
         <p class="card-title">オプション</p>
-        <div :class="$style.optionsList">
-          <label class="radio-label">
-            <input v-model="visibility" type="radio" value="public" :class="$style.radioInput">
-            公開
-          </label>
-          <label class="radio-label">
-            <input v-model="visibility" type="radio" value="private" :class="$style.radioInput">
-            非公開
-          </label>
-          <label class="radio-label">
-            <input v-model="visibility" type="radio" value="passphrase" :class="$style.radioInput">
-            合言葉で保護
-          </label>
-          <div v-if="visibility === 'public'" class="form-hint">
-            一度公開したファイルは非公開に戻せません。
-          </div>
-          <div v-if="visibility === 'passphrase'" :class="[$style.passphraseGroup, 'form-group']">
-            <label class="form-label" for="upload-passphrase">合言葉</label>
-            <input
-              id="upload-passphrase"
-              v-model="passphrase"
-              class="form-input"
-              type="text"
-              placeholder="アクセス用の合言葉"
-            >
-          </div>
-        </div>
+        <FileVisibilitySettings
+          v-model:visibility="visibility"
+          v-model:isListed="isListed"
+          v-model:passphrase="passphrase"
+          passphrase-autocomplete="off"
+        />
       </div>
 
       <!-- 開始ボタン -->
@@ -1959,16 +1941,6 @@ onMounted(async () => {
 
 .radioInput {
   accent-color: var(--color-primary);
-}
-
-.optionsList {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.passphraseGroup {
-  max-width: 320px;
 }
 
 .doneLink {

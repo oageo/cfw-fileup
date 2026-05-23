@@ -9,7 +9,7 @@ beforeEach(async () => {
 	await clearDb();
 });
 
-async function setupPublicFile(path = 'hello.txt') {
+async function setupPublicFile(path = 'hello.txt', options: { isListed?: boolean; visibility?: 'public' | 'private' | 'passphrase'; passphrase?: string } = {}) {
 	const { data } = await signup('user1');
 	const token = String(data.token);
 
@@ -31,7 +31,7 @@ async function setupPublicFile(path = 'hello.txt') {
 	await app.request('/api/files/create/close', {
 		method: 'POST',
 		headers: authHeaders(token),
-		body: JSON.stringify({ fileId, visibility: 'public' }),
+		body: JSON.stringify({ fileId, visibility: options.visibility ?? 'public', isListed: options.isListed, passphrase: options.passphrase }),
 	}, env);
 
 	return { token, bucketId, fileId };
@@ -86,6 +86,23 @@ describe('ActivityPub routes', () => {
 		}));
 	});
 
+	test('does not serve an unlisted public file as Note', async () => {
+		const { fileId } = await setupPublicFile('hidden.txt', { isListed: false });
+
+		const res = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		expect(res.status).toBe(404);
+	});
+
+	test('does not serve listed non-public files as Note', async () => {
+		const { fileId: privateFileId } = await setupPublicFile('private.txt', { visibility: 'private', isListed: true });
+		const { fileId: passphraseFileId } = await setupPublicFile('passphrase.txt', { visibility: 'passphrase', isListed: true, passphrase: 'secret' });
+
+		const privateRes = await app.request(`https://example.test/a/files/${privateFileId}`, {}, env);
+		expect(privateRes.status).toBe(404);
+		const passphraseRes = await app.request(`https://example.test/a/files/${passphraseFileId}`, {}, env);
+		expect(passphraseRes.status).toBe(404);
+	});
+
 	test('encodes file paths in public Note URLs', async () => {
 		const { fileId } = await setupPublicFile('dir/hello #1.txt');
 
@@ -117,5 +134,22 @@ describe('ActivityPub routes', () => {
 			name: 'entry.txt',
 			url: `https://example.test/d/${fileId}/%3Aentries/${encodedEntryPath}`,
 		}));
+	});
+
+	test('does not serve entries from an unlisted public archive', async () => {
+		const { token, fileId } = await setupPublicFile('hidden-archive.tar', { isListed: false });
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const res = await app.request(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`, {}, env);
+		expect(res.status).toBe(404);
 	});
 });

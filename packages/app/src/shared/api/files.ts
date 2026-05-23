@@ -26,6 +26,7 @@ const UploadingFileResponse = v.pipe(
 		size: v.nullable(v.number()),
 		isClosed: v.boolean(),
 		visibility: fileVisibilitySchema,
+		isListed: v.boolean(),
 		uploadExpiresAt: v.number(),
 		isTargz: v.boolean(),
 		isTar: v.boolean(),
@@ -44,6 +45,7 @@ const FileListEntry = v.pipe(
 		isTargz: v.optional(v.boolean()),
 		isTar: v.optional(v.boolean()),
 		visibility: v.optional(fileVisibilitySchema),
+		isListed: v.optional(v.boolean()),
 	}),
 	v.metadata({ ref: 'FileListEntry' }),
 );
@@ -113,6 +115,7 @@ export const filesApiDef = {
 		req: v.object({
 			fileId: IdString,
 			visibility: fileVisibilitySchema,
+			isListed: v.optional(v.boolean()),
 			passphrase: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
 		}),
 		res: {
@@ -157,12 +160,31 @@ export const filesApiDef = {
 			bucketName: BucketNameString,
 			filePath: FilePathString,
 			visibility: fileVisibilitySchema,
+			isListed: v.optional(v.boolean()),
 			passphrase: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
 			400: { description: 'Bad request (missing fields, file not closed, or public file cannot be made private)', content: { 'application/json': { vSchema: ErrorResponse } } },
 			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+		},
+	},
+	'/api/files/update-listing': {
+		summary: 'Update file listing visibility',
+		tags: ['files'],
+		req: v.object({
+			bucketId: IdString,
+			isListed: v.boolean(),
+			targets: v.pipe(v.array(v.object({
+				type: v.union([v.literal('file'), v.literal('directory')]),
+				path: FilePathString,
+				excludePaths: v.optional(v.pipe(v.array(FilePathString), v.maxLength(MAX_DELETE_TARGETS))),
+			})), v.maxLength(MAX_DELETE_TARGETS)),
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true), updatedCount: v.number() }) } } },
+			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
+			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
 		},
 	},
 	'/api/files/uploadings': {
@@ -223,6 +245,7 @@ export const filesApiDef = {
 				extensionMimeType: v.optional(MimeTypeString),
 				hasMimeTypeMismatch: v.boolean(),
 				hasExecutableContent: v.boolean(),
+				isListed: v.optional(v.boolean()),
 				fileId: v.optional(v.string()),
 				bucketId: v.optional(v.string()),
 			}) } } },

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { Button, Popover } from '@vuetify/v0';
 import { EllipsisVertical } from '@lucide/vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import FileVisibilitySettings from '@/components/FileVisibilitySettings.vue';
 import { apiPost } from '@/utils/api';
 import type { FileVisibility } from '../../shared/file-visibility';
 
@@ -10,10 +11,12 @@ const props = defineProps<{
 	bucketName: string;
 	filePath: string;
 	fileVisibility: FileVisibility;
+	isListed: boolean;
 	autoTokenId?: string | null;
 }>();
 const emit = defineEmits<{
 	(e: 'update:fileVisibility', value: FileVisibility): void;
+	(e: 'update:isListed', value: boolean): void;
 	(e: 'tokenDeleted', tokenId: string): void;
 }>();
 
@@ -43,6 +46,7 @@ const deletingId = ref('');
 const deleteError = ref('');
 
 const editVisibility = ref<FileVisibility>(props.fileVisibility);
+const editIsListed = ref(props.isListed);
 const editPassphrase = ref('');
 const visibilitySaving = ref(false);
 const visibilityError = ref('');
@@ -164,6 +168,7 @@ async function saveVisibility(): Promise<void> {
 			bucketName: props.bucketName,
 			filePath: props.filePath,
 			visibility: editVisibility.value,
+			isListed: editIsListed.value,
 			passphrase: editPassphrase.value || undefined,
 		});
 		if (!result.ok) {
@@ -171,12 +176,20 @@ async function saveVisibility(): Promise<void> {
 			return;
 		}
 		emit('update:fileVisibility', editVisibility.value);
+		emit('update:isListed', editIsListed.value);
 	} catch (e) {
 		visibilityError.value = String(e);
 	} finally {
 		visibilitySaving.value = false;
 	}
 }
+
+watch(() => props.fileVisibility, (value) => {
+	editVisibility.value = value;
+});
+watch(() => props.isListed, (value) => {
+	editIsListed.value = value;
+});
 
 onMounted(loadTokens);
 </script>
@@ -185,37 +198,19 @@ onMounted(loadTokens);
   <div>
     <!-- 公開設定 -->
     <div :class="[$style.sectionCard, 'card', 'mb-3']">
-      <div :class="[$style.sectionHeading, 'text-muted', 'mb-2']">公開設定</div>
-      <div v-if="fileVisibility === 'public'" :class="['text-muted', $style.smallText]">
-        公開ファイルの設定は変更できません。
+      <div :class="$style.visibilitySettings">
+        <FileVisibilitySettings
+          v-model:visibility="editVisibility"
+          v-model:isListed="editIsListed"
+          v-model:passphrase="editPassphrase"
+          :lock-visibility="fileVisibility === 'public'"
+          passphrase-autocomplete="off"
+        />
+        <Button.Root class="btn btn-primary" :disabled="visibilitySaving" @click="saveVisibility">
+          <Button.Content>保存</Button.Content>
+        </Button.Root>
       </div>
-      <template v-else>
-        <div class="flex items-center gap-3 mt-2 flex-wrap">
-          <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
-            <input type="radio" v-model="editVisibility" value="public"> 公開
-          </label>
-          <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
-            <input type="radio" v-model="editVisibility" value="private"> 非公開
-          </label>
-          <label :class="[$style.radioLabel, 'flex', 'items-center', 'gap-2']">
-            <input type="radio" v-model="editVisibility" value="passphrase"> 合言葉で保護
-          </label>
-          <input
-            v-if="editVisibility === 'passphrase'"
-            v-model="editPassphrase"
-            :class="[$style.passphraseInput, 'form-input', 'form-input-mono']"
-            type="text"
-            placeholder="合言葉"
-          >
-          <Button.Root class="btn btn-primary" :disabled="visibilitySaving" @click="saveVisibility">
-            <Button.Content>保存</Button.Content>
-          </Button.Root>
-        </div>
-        <div v-if="editVisibility === 'public'" :class="['text-muted', $style.smallText, 'mt-1']">
-          一度公開したファイルは非公開に戻せません。
-        </div>
-        <div v-if="visibilityError" :class="[$style.visibilityError, 'mt-1']">{{ visibilityError }}</div>
-      </template>
+      <div v-if="visibilityError" :class="[$style.visibilityError, 'mt-1']">{{ visibilityError }}</div>
     </div>
 
     <!-- 発行フォーム -->
@@ -355,12 +350,11 @@ onMounted(loadTokens);
   font-size: 0.875rem;
 }
 
-.radioLabel {
-  cursor: pointer;
-}
-
-.passphraseInput {
-  width: 200px;
+.visibilitySettings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .visibilityError {

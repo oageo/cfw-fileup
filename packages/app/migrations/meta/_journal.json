@@ -43,6 +43,13 @@
       "when": 1779518254266,
       "tag": "0005_flashy_inhumans",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1779554229611,
+      "tag": "0006_easy_scream",
+      "breakpoints": true
     }
   ]
 }

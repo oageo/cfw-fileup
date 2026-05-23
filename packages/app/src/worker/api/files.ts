@@ -48,7 +48,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		if (!dirExists) {
 			const hasFileCondition = isOwnerOrAdmin
 				? and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true))
-				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'));
+				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true));
 			const hasFile = await db.select({ path: files.path }).from(files).where(hasFileCondition).get();
 			if (!hasFile) throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		}
@@ -56,7 +56,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 
 	const fileCondition = isOwnerOrAdmin
 		? and(eq(files.bucketId, bucket.id), eq(files.isClosed, true))
-		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.visibility, 'public'));
+		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true));
 	const allFiles = await db
 		.select({
 			id: files.id,
@@ -66,12 +66,13 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			isTargz: files.isTargz,
 			isTar: files.isTar,
 			visibility: files.visibility,
+			isListed: files.isListed,
 		})
 		.from(files)
 		.where(fileCondition);
 	const allDirs = await db.select({ path: directories.path }).from(directories).where(eq(directories.bucketId, bucket.id));
 
-	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase' }> = [];
+	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean }> = [];
 	const seenDirs = new Set<string>();
 	for (const d of allDirs) {
 		if (!d.path.startsWith(normalizedPath)) continue;
@@ -90,7 +91,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const rest = f.path.slice(normalizedPath.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
-			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility });
+			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility, ...(isOwnerOrAdmin ? { isListed: f.isListed } : {}) });
 		} else {
 			const dirName = rest.slice(0, slashIdx);
 			if (!seenDirs.has(dirName)) {
@@ -170,7 +171,7 @@ app.get('/meta', async (c) => {
 		hasExecutableContent: hasMimeMismatch && isExecutableMimeType(file.mimeType ?? undefined),
 	};
 	if (file.visibility === 'public' || isOwnerOrAdmin) {
-		return c.json({ ...base, fileId: file.id, bucketId: bucket.id });
+		return c.json({ ...base, fileId: file.id, bucketId: bucket.id, ...(isOwnerOrAdmin ? { isListed: file.isListed } : {}) });
 	}
 	if (fileToken) {
 		const fileTokenRecord = await db
@@ -514,6 +515,7 @@ app.post(
 			.set({
 				isClosed: true,
 				visibility: body.visibility,
+				isListed: body.isListed ?? true,
 				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
 				size: fileSize,
 				mimeType,
@@ -594,12 +596,68 @@ app.post(
 			.update(files)
 			.set({
 				visibility: body.visibility,
+				isListed: body.isListed ?? file.isListed,
 				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
 			})
 			.where(eq(files.id, file.id));
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/update')),
+);
+
+app.post(
+	'/update-listing',
+	describeRoute(omitResAndReq(apiDef['/api/files/update-listing'])),
+	validator('json', apiDef['/api/files/update-listing'].req),
+	describeResponse(async (c: JsonCtx<'/api/files/update-listing', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const body = c.req.valid('json');
+
+		if (!body.bucketId || body.targets.length === 0) {
+			throw apiError(400, 'BUCKET_NOT_FOUND', 'bucketId and targets are required');
+		}
+
+		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
+
+		let matchedCount = 0;
+		for (const target of body.targets) {
+			const whereClauses = ['bucket_id = ?', 'is_closed = 1'];
+			const params: Array<string | number> = [bucket.id];
+			if (target.type === 'file') {
+				whereClauses.push('path = ?');
+				params.push(target.path);
+			} else {
+				const prefix = target.path === '' || target.path.endsWith('/') ? target.path : `${target.path}/`;
+				whereClauses.push('path LIKE ?');
+				params.push(`${prefix}%`);
+				for (const excludedPath of target.excludePaths ?? []) {
+					const excludedPrefix = excludedPath === '' || excludedPath.endsWith('/') ? excludedPath : `${excludedPath}/`;
+					whereClauses.push('path != ?', 'path NOT LIKE ?');
+					params.push(excludedPath, `${excludedPrefix}%`);
+				}
+			}
+
+			const whereSql = whereClauses.join(' AND ');
+			const countRow = await c.env.DB
+				.prepare(`SELECT COUNT(*) AS count FROM files WHERE ${whereSql}`)
+				.bind(...params)
+				.first<{ count: number }>();
+			const countForTarget = countRow?.count ?? 0;
+			if (countForTarget === 0) continue;
+			matchedCount += countForTarget;
+			await c.env.DB
+				.prepare(`UPDATE files SET is_listed = ? WHERE ${whereSql}`)
+				.bind(body.isListed ? 1 : 0, ...params)
+				.run();
+		}
+
+		if (matchedCount === 0) throw apiError(404, 'FILE_NOT_FOUND');
+
+		return c.json({ ok: true, updatedCount: matchedCount }, 200);
+	}, getResponseDefWithAuth('/api/files/update-listing')),
 );
 
 app.post(
@@ -619,6 +677,7 @@ app.post(
 				size: files.size,
 				isClosed: files.isClosed,
 				visibility: files.visibility,
+				isListed: files.isListed,
 				uploadExpiresAt: files.uploadExpiresAt,
 				isTargz: files.isTargz,
 				isTar: files.isTar,

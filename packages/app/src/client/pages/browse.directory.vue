@@ -45,6 +45,7 @@ interface DisplayEntry {
 	fileId?: string;
 	label: string;
 	visibility?: FileVisibility;
+	isListed?: boolean;
 	previewUrl?: string;
 }
 
@@ -127,6 +128,7 @@ const downloadTransformRequests = new Map<string, {
 const selectableEntries = computed(() => entries.value);
 const canSelectEntries = computed(() => !isArchive.value);
 const canDeleteSelectedEntries = computed(() => !isArchive.value && authStore.user != null && bucketId.value != null);
+const canUpdateSelectedListing = computed(() => !isArchive.value && authStore.user != null && bucketId.value != null);
 
 const selectedCount = computed(() => {
 	if (selectAllMode.value) return Math.max(0, selectableEntries.value.length - excludedPaths.value.size);
@@ -605,6 +607,33 @@ async function executeBulkDelete(): Promise<void> {
 	await load();
 }
 
+async function executeBulkUpdateListing(isListed: boolean): Promise<void> {
+	deleteError.value = '';
+	if (!bucketId.value) {
+		deleteError.value = '更新できません（バケットIDが不明）';
+		return;
+	}
+
+	const targets = selectAllMode.value
+		? [{ type: 'directory' as const, path: props.filePath, excludePaths: Array.from(excludedPaths.value) }]
+		: Array.from(selectedPaths.value).map((path) => {
+			const entry = entries.value.find(e => e.fullPath === path);
+			return { type: entry?.isDir ? 'directory' as const : 'file' as const, path };
+		});
+
+	const result = await apiPost('/api/files/update-listing', { bucketId: bucketId.value, targets, isListed });
+	if (!result.ok) {
+		deleteError.value = result.data.message ?? '更新失敗';
+		return;
+	}
+
+	selectedPaths.value.clear();
+	excludedPaths.value.clear();
+	selectAllMode.value = false;
+	selectionPopoverOpen.value = false;
+	await load();
+}
+
 function buildArchiveEntries(): void {
 	const seenDirs = new Set<string>();
 	const result: DisplayEntry[] = [];
@@ -717,6 +746,7 @@ async function load(): Promise<void> {
 					fileId: e.fileId,
 					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : mime,
 					visibility: e.visibility,
+					isListed: e.isListed,
 					previewUrl,
 				};
 			});
@@ -804,7 +834,7 @@ async function executeDeleteArchive(): Promise<void> {
 async function fetchPublicDirectoryEntries(): Promise<{
 	entries: Array<{
 		type: 'dir' | 'file'; name: string; path?: string;
-		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
+		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean;
 	}>;
 } | null> {
 	const lsUrl = `/api/files/ls?bucketName=${encodeURIComponent(props.bucketName)}&path=${encodeURIComponent(props.filePath)}`;
@@ -816,7 +846,7 @@ async function fetchPublicDirectoryEntries(): Promise<{
 	return await res.json() as {
 		entries: Array<{
 			type: 'dir' | 'file'; name: string; path?: string;
-			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility;
+			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean;
 		}>;
 	};
 }
@@ -893,6 +923,12 @@ watch([isPartiallySelected, isAllSelected], async () => {
             <div class="action-menu-inner">
               <Button.Root v-if="canDeleteSelectedEntries" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkDelete">
                 <Button.Content>まとめて削除</Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(true)">
+                <Button.Content>一覧に表示</Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(false)">
+                <Button.Content>一覧から非表示</Button.Content>
               </Button.Root>
               <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" :disabled="archiveDownloadProgress != null" @click="startDirectoryArchiveDownload('tar')">
                 <Button.Content>tarとしてダウンロード</Button.Content>
@@ -1005,9 +1041,14 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
                 </td>
                 <td v-if="!isArchive && authStore.user" :class="$style.publicCell">
-                  <span v-if="!entry.isDir && entry.visibility != null" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
-                    {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
-                  </span>
+                  <div v-if="!entry.isDir" :class="$style.publicBadges">
+                    <span v-if="entry.visibility != null" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
+                      {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
+                    </span>
+                    <span v-if="entry.isListed != null" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
+                      {{ entry.isListed ? '表示' : '非表示' }}
+                    </span>
+                  </div>
                 </td>
                 <td v-if="!isArchive && authStore.user && bucketId" class="col-actions" :class="$style.actionsCell">
                   <Popover.Root>
@@ -1099,6 +1140,9 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
                   <span v-if="!entry.isDir && entry.visibility != null && !isArchive" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
                     {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
+                  </span>
+                  <span v-if="!entry.isDir && entry.isListed != null && !isArchive" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
+                    {{ entry.isListed ? '表示' : '非表示' }}
                   </span>
                 </div>
                 <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
@@ -1401,6 +1445,13 @@ watch([isPartiallySelected, isAllSelected], async () => {
 
 .publicCell {
   white-space: nowrap;
+}
+
+.publicBadges {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .actionsCell {

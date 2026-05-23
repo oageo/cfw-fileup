@@ -156,6 +156,7 @@ const browseTermsError = ref('');
 const metaLoading = ref(false);
 const metaError = ref('');
 const fileVisibility = ref<FileVisibility>('public');
+const fileIsListed = ref(true);
 
 const activeTab = ref<'info' | 'tokens'>('info');
 const autoToken = ref<string | null>(null);
@@ -317,6 +318,7 @@ async function fetchMeta(): Promise<void> {
 			extensionMimeType?: string;
 			hasMimeTypeMismatch?: boolean;
 			hasExecutableContent?: boolean;
+			isListed?: boolean;
 			fileId?: string;
 			bucketId?: string;
 		};
@@ -328,6 +330,7 @@ async function fetchMeta(): Promise<void> {
 		hasMimeTypeMismatch.value = data.hasMimeTypeMismatch ?? false;
 		hasExecutableContent.value = data.hasExecutableContent ?? false;
 		fileVisibility.value = data.visibility ?? 'public';
+		fileIsListed.value = data.isListed ?? true;
 		fileId.value = data.fileId ?? null;
 		fileBucketId.value = data.bucketId ?? null;
 
@@ -476,6 +479,10 @@ function fileVisibilityChanged(v: FileVisibility) {
 	if (v !== 'public' && authStore.user) issueAutoToken();
 }
 
+function fileIsListedChanged(v: boolean) {
+	fileIsListed.value = v;
+}
+
 function tokenDeleted(tokenId: string) {
 	if (autoTokenId.value !== tokenId) return;
 	autoToken.value = null;
@@ -526,6 +533,12 @@ watch(() => [entryPath.value, queryToken.value], () => {
         :class="fileVisibility === 'public' ? 'badge badge-success' : fileVisibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'"
       >
         {{ fileVisibility === 'public' ? '公開' : fileVisibility === 'passphrase' ? '合言葉' : '非公開' }}
+      </span>
+      <span
+        v-if="authStore.user && !isDirectory && !metaLoading && !metaError"
+        :class="fileIsListed ? 'badge badge-info' : 'badge badge-muted'"
+      >
+        {{ fileIsListed ? '表示' : '非表示' }}
       </span>
       <span
         v-if="!isDirectory && !metaLoading && !metaError && (isEntryFile ? innerMeta?.size != null : fileSize != null)"
@@ -595,8 +608,10 @@ watch(() => [entryPath.value, queryToken.value], () => {
           :bucketName="bucketName"
           :filePath="baseFilePath"
           :fileVisibility="fileVisibility"
+          :isListed="fileIsListed"
           :autoTokenId="autoTokenId"
           @update:fileVisibility="fileVisibilityChanged"
+          @update:isListed="fileIsListedChanged"
           @tokenDeleted="tokenDeleted"
         />
       </template>

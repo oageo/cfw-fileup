@@ -23,6 +23,34 @@ async function setupUserAndBucket() {
 	return { token, bucketId };
 }
 
+async function createClosedFile(options: {
+	token: string;
+	bucketId: string;
+	path: string;
+	visibility?: 'public' | 'private' | 'passphrase';
+	isListed?: boolean;
+	passphrase?: string;
+}) {
+	const openRes = await app.request('/api/files/create/open', {
+		method: 'POST',
+		headers: authHeaders(options.token),
+		body: JSON.stringify({ bucketId: options.bucketId, path: options.path }),
+	}, env);
+	const { fileId } = await openRes.json() as { fileId: string };
+	await env.R2.put(fileId, `Content for ${options.path}`);
+	await app.request('/api/files/create/close', {
+		method: 'POST',
+		headers: authHeaders(options.token),
+		body: JSON.stringify({
+			fileId,
+			visibility: options.visibility ?? 'public',
+			isListed: options.isListed,
+			passphrase: options.passphrase,
+		}),
+	}, env);
+	return fileId;
+}
+
 describe('POST /api/files/create/open', () => {
 	test('creates file record and returns fileId + uploadExpiry', async () => {
 		const { token, bucketId } = await setupUserAndBucket();
@@ -176,6 +204,31 @@ describe('POST /api/files/ls', () => {
 		expect(res.status).toBe(200);
 		const body = await res.json() as { entries: Array<{ name: string; fileId?: string }> };
 		expect(body.entries).toContainEqual(expect.objectContaining({ name: 'hello.txt', fileId }));
+	});
+
+	test('public listing only includes listed public files for anonymous users', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		const listedFileId = await createClosedFile({ token, bucketId, path: 'listed.txt', visibility: 'public', isListed: true });
+		const unlistedFileId = await createClosedFile({ token, bucketId, path: 'unlisted.txt', visibility: 'public', isListed: false });
+		await createClosedFile({ token, bucketId, path: 'private.txt', visibility: 'private', isListed: true });
+		await createClosedFile({ token, bucketId, path: 'passphrase.txt', visibility: 'passphrase', isListed: true, passphrase: 'secret' });
+
+		const publicRes = await app.request('/api/files/ls?bucketName=test_bucket&path=', {}, env);
+		expect(publicRes.status).toBe(200);
+		const publicBody = await publicRes.json() as { entries: Array<{ name: string; fileId?: string }> };
+		expect(publicBody.entries).toContainEqual(expect.objectContaining({ name: 'listed.txt', fileId: listedFileId }));
+		expect(publicBody.entries).not.toContainEqual(expect.objectContaining({ name: 'unlisted.txt', fileId: unlistedFileId }));
+		expect(publicBody.entries.map(entry => entry.name)).not.toContain('private.txt');
+		expect(publicBody.entries.map(entry => entry.name)).not.toContain('passphrase.txt');
+
+		const ownerRes = await app.request('/api/files/ls', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', path: '' }),
+		}, env);
+		expect(ownerRes.status).toBe(200);
+		const ownerBody = await ownerRes.json() as { entries: Array<{ name: string; fileId?: string; isListed?: boolean }> };
+		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'unlisted.txt', fileId: unlistedFileId, isListed: false }));
 	});
 });
 
@@ -654,6 +707,137 @@ describe('POST /api/files/update', () => {
 		const downloadRes = await app.request(`/d/${fileId}`, {}, env);
 		expect(downloadRes.status).toBe(200);
 		expect(await downloadRes.text()).toBe('Private Content');
+	});
+
+	test('can update listed setting', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await createClosedFile({ token, bucketId, path: 'listed-setting.txt', visibility: 'public' });
+
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', filePath: 'listed-setting.txt', visibility: 'public', isListed: false }),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const publicRes = await app.request('/api/files/ls?bucketName=test_bucket&path=', {}, env);
+		expect(publicRes.status).toBe(200);
+		const publicBody = await publicRes.json() as { entries: Array<{ name: string }> };
+		expect(publicBody.entries.map(entry => entry.name)).not.toContain('listed-setting.txt');
+
+		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=listed-setting.txt', {
+			headers: authHeaders(token),
+		}, env);
+		expect(metaRes.status).toBe(200);
+		const meta = await metaRes.json() as { isListed?: boolean };
+		expect(meta.isListed).toBe(false);
+	});
+
+	test('can update listed setting for a directory target', async () => {
+		const { data } = await signup('directorylistinguser');
+		const token = String(data.token);
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'directory_listing_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+		await createClosedFile({ token, bucketId, path: 'docs/a.txt', visibility: 'public' });
+		await createClosedFile({ token, bucketId, path: 'docs/nested/b.txt', visibility: 'public' });
+		await createClosedFile({ token, bucketId, path: 'outside.txt', visibility: 'public' });
+
+		const updateRes = await app.request('/api/files/update-listing', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketId,
+				isListed: false,
+				targets: [{ type: 'directory', path: 'docs/' }],
+			}),
+		}, env);
+		expect(updateRes.status).toBe(200);
+		const updateBody = await updateRes.json() as { updatedCount: number };
+		expect(updateBody.updatedCount).toBe(2);
+
+		const rootRes = await app.request('/api/files/ls?bucketName=directory_listing_bucket&path=', {}, env);
+		expect(rootRes.status).toBe(200);
+		const rootBody = await rootRes.json() as { entries: Array<{ name: string }> };
+		expect(rootBody.entries.map(entry => entry.name)).toEqual(['outside.txt']);
+
+		const ownerRes = await app.request('/api/files/ls', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'directory_listing_bucket', path: 'docs/' }),
+		}, env);
+		expect(ownerRes.status).toBe(200);
+		const ownerBody = await ownerRes.json() as { entries: Array<{ name: string; isListed?: boolean }> };
+		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'a.txt', isListed: false }));
+		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'nested' }));
+	});
+
+	test('cannot update listed setting in another user bucket', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await createClosedFile({ token, bucketId, path: 'owner.txt', visibility: 'public' });
+		const { data } = await signup('listingattacker');
+		const attackerToken = String(data.token);
+
+		const updateRes = await app.request('/api/files/update-listing', {
+			method: 'POST',
+			headers: authHeaders(attackerToken),
+			body: JSON.stringify({
+				bucketId,
+				isListed: false,
+				targets: [{ type: 'file', path: 'owner.txt' }],
+			}),
+		}, env);
+		expect(updateRes.status).toBe(403);
+	});
+
+	test('update listed setting respects excludePaths', async () => {
+		const { data } = await signup('listingexcludeuser');
+		const token = String(data.token);
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'listing_exclude_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+		await createClosedFile({ token, bucketId, path: 'docs/a.txt', visibility: 'public' });
+		await createClosedFile({ token, bucketId, path: 'docs/keep.txt', visibility: 'public' });
+		await createClosedFile({ token, bucketId, path: 'docs/keep-dir/b.txt', visibility: 'public' });
+
+		const updateRes = await app.request('/api/files/update-listing', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketId,
+				isListed: false,
+				targets: [{ type: 'directory', path: 'docs/', excludePaths: ['docs/keep.txt', 'docs/keep-dir/'] }],
+			}),
+		}, env);
+		expect(updateRes.status).toBe(200);
+		const updateBody = await updateRes.json() as { updatedCount: number };
+		expect(updateBody.updatedCount).toBe(1);
+
+		const publicRes = await app.request('/api/files/ls?bucketName=listing_exclude_bucket&path=docs/', {}, env);
+		expect(publicRes.status).toBe(200);
+		const publicBody = await publicRes.json() as { entries: Array<{ name: string }> };
+		expect(publicBody.entries.map(entry => entry.name)).toEqual(['keep-dir', 'keep.txt']);
+	});
+
+	test('update listed setting returns 404 when no files match', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const updateRes = await app.request('/api/files/update-listing', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketId,
+				isListed: false,
+				targets: [{ type: 'file', path: 'missing.txt' }],
+			}),
+		}, env);
+		expect(updateRes.status).toBe(404);
 	});
 });
 
