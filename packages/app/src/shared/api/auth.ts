@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse } from '../api.schemas.js';
+import { errorResponse } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
@@ -16,9 +16,9 @@ export const authApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ userId: v.string(), token: v.string() }) } } },
-			400: { description: 'Bad request (missing fields, invalid username/password, or Turnstile failure)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			403: { description: 'Forbidden (invalid passphrase or registration closed)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'Username already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields, invalid username/password, or Turnstile failure)', ['INVALID_USERNAME_FORMAT', 'INVALID_PASSWORD', 'PASSPHRASE_TOO_LONG', 'TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED']),
+			403: errorResponse('Forbidden (invalid passphrase or registration closed)', ['INVALID_PASSPHRASE', 'REGISTRATION_IS_CLOSED', 'ONLY_GOOGLE_ACCOUNT_REGISTRATION_IS_ALLOWED']),
+			409: errorResponse('Username already exists', ['USERNAME_ALREADY_EXISTS']),
 		},
 	},
 	'/api/signin': {
@@ -32,8 +32,8 @@ export const authApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ token: v.string() }) } } },
-			400: { description: 'Bad request (missing fields or Turnstile failure)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			401: { description: 'Invalid credentials or account suspended', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields or Turnstile failure)', ['TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED', 'BACKUP_CODE_REQUIRED']),
+			401: errorResponse('Invalid credentials or account suspended', ['INVALID_CREDENTIALS', 'INVALID_CREDENTIALS_OR_CODE', 'ACCOUNT_IS_SUSPENDED', 'ONLY_GOOGLE_ACCOUNT_SIGN_IN_IS_ALLOWED']),
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

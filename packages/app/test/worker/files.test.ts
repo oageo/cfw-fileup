@@ -449,7 +449,7 @@ describe('POST /api/files/create/close', () => {
 		const body = await closeRes.json() as { error: string; message: string };
 		expect(body).toEqual({
 			error: 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION',
-			message: 'File content type does not match file extension',
+			message: 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION',
 		});
 	});
 
@@ -671,7 +671,7 @@ describe('POST /api/files/update', () => {
 		const body = await updateRes.json() as { error: string; message: string };
 		expect(body).toEqual({
 			error: 'PUBLIC_FILES_CANNOT_CHANGE_VISIBILITY',
-			message: 'Public files cannot change visibility',
+			message: 'PUBLIC_FILES_CANNOT_CHANGE_VISIBILITY',
 		});
 
 		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=public.txt', {}, env);
@@ -928,7 +928,7 @@ describe('POST /api/files/move', () => {
 		const body = await moveRes.json() as { error: string; message: string };
 		expect(body).toEqual({
 			error: 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION',
-			message: 'File content type does not match file extension',
+			message: 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION',
 		});
 	});
 });

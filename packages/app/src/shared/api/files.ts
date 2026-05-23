@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString } from '../api.schemas.js';
 import { fileVisibilitySchema } from '../file-visibility.js';
 import { filePathValidation } from '../name-validation.js';
 import {
@@ -61,10 +61,10 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ fileId: v.string(), uploadExpiry: v.number(), partSize: v.number() }) } } },
-			400: { description: 'Bad request (missing fields or invalid partSize)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'File already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
-			429: { description: 'File or upload limit exceeded', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields or invalid partSize)', ['INVALID_FILE_PATH']),
+			404: errorResponse('Bucket not found', ['BUCKET_NOT_FOUND']),
+			409: errorResponse('File already exists', ['FILE_ALREADY_EXISTS']),
+			429: errorResponse('File or upload limit exceeded', ['FILE_LIMIT_EXCEEDED', 'DAILY_UPLOAD_LIMIT_EXCEEDED']),
 		},
 	},
 	'/api/files/create/targz-index': {
@@ -85,9 +85,9 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'File not found', content: { 'application/json': { vSchema: ErrorResponse } } },
-			410: { description: 'Upload expired', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields)', ['INVALID_FILE_PATH']),
+			404: errorResponse('File not found', ['FILE_NOT_FOUND', 'BUCKET_NOT_FOUND']),
+			410: errorResponse('Upload expired', ['UPLOAD_EXPIRED']),
 		},
 	},
 	'/api/files/create/tar-index': {
@@ -104,9 +104,9 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'File not found', content: { 'application/json': { vSchema: ErrorResponse } } },
-			410: { description: 'Upload expired', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields)', ['INVALID_FILE_PATH']),
+			404: errorResponse('File not found', ['FILE_NOT_FOUND', 'BUCKET_NOT_FOUND']),
+			410: errorResponse('Upload expired', ['UPLOAD_EXPIRED']),
 		},
 	},
 	'/api/files/create/close': {
@@ -120,10 +120,10 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fileId, upload incomplete, or finalization failure)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'File not found', content: { 'application/json': { vSchema: ErrorResponse } } },
-			410: { description: 'Upload expired', content: { 'application/json': { vSchema: ErrorResponse } } },
-			429: { description: 'Bucket size limit exceeded', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fileId, upload incomplete, or finalization failure)', ['FILE_ID_IS_REQUIRED', 'UPLOAD_HAS_NOT_BEEN_COMPLETED', 'FAILED_TO_FINALIZE_UPLOAD', 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION']),
+			404: errorResponse('File not found', ['FILE_NOT_FOUND', 'BUCKET_NOT_FOUND']),
+			410: errorResponse('Upload expired', ['UPLOAD_EXPIRED']),
+			429: errorResponse('Bucket size limit exceeded', ['BUCKET_LIMIT_EXCEEDED']),
 		},
 	},
 	'/api/files/create/status': {
@@ -134,8 +134,8 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ partCount: v.number(), offset: v.number(), partSize: v.number() }) } } },
-			400: { description: 'Bad request (missing fileId)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'File not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fileId)', ['FILE_ID_IS_REQUIRED']),
+			404: errorResponse('File not found', ['FILE_NOT_FOUND']),
 		},
 	},
 	'/api/files/ls': {
@@ -150,7 +150,7 @@ export const filesApiDef = {
 				type: v.literal('directory'),
 				entries: v.array(FileListEntry),
 			}) } } },
-			404: { description: 'Bucket or directory not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			404: errorResponse('Bucket or directory not found', ['BUCKET_NOT_FOUND', 'DIRECTORY_NOT_FOUND']),
 		},
 	},
 	'/api/files/update': {
@@ -165,8 +165,8 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fields, file not closed, or public file cannot be made private)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields, file not closed, or public file cannot be made private)', ['BUCKET_NAME_IS_REQUIRED', 'FILE_IS_NOT_CLOSED', 'PUBLIC_FILES_CANNOT_CHANGE_VISIBILITY']),
+			404: errorResponse('Bucket or file not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},
 	},
 	'/api/files/update-listing': {
@@ -183,8 +183,8 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true), updatedCount: v.number() }) } } },
-			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields)', ['BUCKET_NOT_FOUND']),
+			404: errorResponse('Bucket not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},
 	},
 	'/api/files/uploadings': {
@@ -209,8 +209,8 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'File or bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields)', ['BUCKET_NOT_FOUND', 'PATH_OR_TARGETS_ARE_REQUIRED']),
+			404: errorResponse('File or bucket not found', ['FILE_NOT_FOUND', 'BUCKET_NOT_FOUND']),
 		},
 	},
 	'/api/files/move': {
@@ -225,10 +225,10 @@ export const filesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing fields or invalid path)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket, file, or directory not found', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'Target already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
-			429: { description: 'Target bucket size limit exceeded', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields or invalid path)', ['SOURCE_AND_TARGET_PATHS_ARE_REQUIRED', 'INVALID_FILE_PATH', 'INVALID_DIRECTORY_PATH', 'DIRECTORY_CANNOT_BE_MOVED_INTO_ITSELF', 'FILE_IS_NOT_CLOSED', 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION']),
+			404: errorResponse('Bucket, file, or directory not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND', 'DIRECTORY_NOT_FOUND']),
+			409: errorResponse('Target already exists', ['TARGET_ALREADY_EXISTS']),
+			429: errorResponse('Target bucket size limit exceeded', ['TARGET_BUCKET_SIZE_LIMIT_EXCEEDED']),
 		},
 	},
 	'/api/files/meta': {
@@ -249,7 +249,7 @@ export const filesApiDef = {
 				fileId: v.optional(v.string()),
 				bucketId: v.optional(v.string()),
 			}) } } },
-			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			404: errorResponse('Bucket or file not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

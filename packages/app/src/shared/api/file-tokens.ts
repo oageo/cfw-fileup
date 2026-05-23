@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString } from '../api.schemas.js';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
@@ -17,8 +17,8 @@ export const fileTokensApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ id: v.string(), token: v.string(), expiresAt: v.nullable(v.number()) }) } } },
-			400: { description: 'Bad request (invalid expiresIn, file not closed, or file is public)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (invalid expiresIn, file not closed, or file is public)', ['FILE_IS_NOT_CLOSED', 'CANNOT_CREATE_TOKEN_FOR_PUBLIC_FILE']),
+			404: errorResponse('Bucket or file not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},
 	},
 	'/api/file-tokens/list': {
@@ -32,8 +32,8 @@ export const fileTokensApiDef = {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
 				tokens: v.array(v.object({ id: v.string(), expiresAt: v.nullable(v.number()), createdAt: v.number() })),
 			}) } } },
-			400: { description: 'Bad request (missing fields)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields)', ['BUCKET_NAME_IS_REQUIRED']),
+			404: errorResponse('Bucket or file not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},
 	},
 	'/api/file-tokens/delete': {
@@ -44,8 +44,8 @@ export const fileTokensApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing tokenId)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Token not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing tokenId)', ['TOKEN_IS_REQUIRED']),
+			404: errorResponse('Token not found', ['TOKEN_NOT_FOUND']),
 		},
 	},
 	'/api/file-tokens/create-by-passphrase': {
@@ -59,9 +59,9 @@ export const fileTokensApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ id: v.string(), token: v.string(), expiresAt: v.number(), fileId: v.string() }) } } },
-			400: { description: 'Bad request (missing fields, Turnstile verification failed, file not closed, or file is public)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			403: { description: 'Forbidden (no passphrase set or invalid passphrase)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket or file not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing fields, Turnstile verification failed, file not closed, or file is public)', ['TOKEN_IS_REQUIRED', 'TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED', 'FILE_IS_NOT_CLOSED', 'CANNOT_CREATE_TOKEN_FOR_PUBLIC_FILE']),
+			403: errorResponse('Forbidden (no passphrase set or invalid passphrase)', ['NO_PASSPHRASE_SET_FOR_THIS_FILE', 'INVALID_PASSPHRASE']),
+			404: errorResponse('Bucket or file not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

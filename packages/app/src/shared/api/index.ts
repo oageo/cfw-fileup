@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse } from '../api.schemas.js';
+import { errorResponse } from '../api.schemas.js';
 import { authApiDef } from './auth.js';
 import { accountApiDef } from './account.js';
 import { bucketsApiDef } from './buckets.js';
@@ -51,8 +51,8 @@ export type JsonCtx<T extends keyof ApiDef, B extends object = object> = Context
 >;
 
 const authErrorResponses = {
-	401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
-	403: { description: 'Forbidden', content: { 'application/json': { vSchema: ErrorResponse } } },
+	401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
+	403: errorResponse('Forbidden', ['FORBIDDEN', 'ACCOUNT_IS_SUSPENDED']),
 } as const satisfies ApiEndpointResponseType;
 
 export function getResponseDefWithAuth<T extends keyof ApiDef>(

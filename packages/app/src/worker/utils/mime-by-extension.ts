@@ -13,8 +13,7 @@ const executableMimeTypes = new Set([
 const executableExtensions = new Set(['bat', 'cmd', 'com', 'exe', 'msi', 'ps1', 'sh', 'wasm']);
 
 export function inferMimeTypeByExtension(path: string): string | undefined {
-	const mimeType = lookup(path);
-	return mimeType === false ? undefined : mimeType;
+	return lookup(path);
 }
 
 function normalizeMimeType(mimeType: string): string {

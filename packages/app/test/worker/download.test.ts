@@ -281,7 +281,7 @@ describe('GET /d/:fileId', () => {
 	test('invalid access key returns 400', async () => {
 		const res = await app.request('/d/nonexistent_access_key_xyz', {}, env);
 		expect(res.status).toBe(400);
-		expect(await res.json()).toEqual({ error: 'INVALID_FILE_ID', message: 'Invalid file ID' });
+		expect(await res.json()).toEqual({ error: 'INVALID_FILE_ID', message: 'INVALID_FILE_ID' });
 	});
 
 	test('missing past EAID-X file is cached as 404 before file lookup', async () => {
@@ -290,7 +290,7 @@ describe('GET /d/:fileId', () => {
 		const firstRes = await app.request(`/d/${fileId}`, {}, env);
 		expect(firstRes.status).toBe(404);
 		expect(firstRes.headers.get('Cache-Control')).toBe('public, max-age=315360000');
-		expect(await firstRes.json()).toEqual({ error: 'FILE_NOT_FOUND', message: 'File not found' });
+		expect(await firstRes.json()).toEqual({ error: 'FILE_NOT_FOUND', message: 'FILE_NOT_FOUND' });
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -306,7 +306,7 @@ describe('GET /d/:fileId', () => {
 		const cachedRes = await app.request(`/d/${fileId}`, {}, env);
 		expect(cachedRes.status).toBe(404);
 		expect(cachedRes.headers.get('Cache-Control')).toBe('public, max-age=315360000');
-		expect(await cachedRes.json()).toEqual({ error: 'FILE_NOT_FOUND', message: 'File not found' });
+		expect(await cachedRes.json()).toEqual({ error: 'FILE_NOT_FOUND', message: 'FILE_NOT_FOUND' });
 	});
 
 	test('missing future EAID-X file is cached until the ID timestamp', async () => {

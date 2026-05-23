@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString } from '../api.schemas.js';
 import { KnownSettingListSchema, KnownSettingRecordSchema } from '../app-settings.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
@@ -60,37 +60,40 @@ const WorkerCachePurgeResponse = v.pipe(
 	v.metadata({ ref: 'WorkerCachePurgeResponse' }),
 );
 const AdminErrors = {};
+const MissingUserId = errorResponse('Bad request (missing userId)', ['USER_ID_IS_REQUIRED']);
+const UserNotFound = errorResponse('User not found', ['USER_NOT_FOUND']);
+const PlanNotFound = errorResponse('Plan not found', ['PLAN_NOT_FOUND']);
 
 export const adminApiDef = {
 	'/api/admin/suspend-user': {
 		summary: 'Suspend a user',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (missing userId)', content: { 'application/json': { vSchema: ErrorResponse } } }, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 400: MissingUserId, 404: UserNotFound },
 	},
 	'/api/admin/unsuspend-user': {
 		summary: 'Unsuspend a user',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (missing userId)', content: { 'application/json': { vSchema: ErrorResponse } } }, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 400: MissingUserId, 404: UserNotFound },
 	},
 	'/api/admin/make-admin': {
 		summary: 'Make a user an admin',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (missing userId)', content: { 'application/json': { vSchema: ErrorResponse } } }, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 400: MissingUserId, 404: UserNotFound },
 	},
 	'/api/admin/delete-file': {
 		summary: 'Delete a file',
 		tags: ['admin'],
 		req: v.object({ fileId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (missing fileId)', content: { 'application/json': { vSchema: ErrorResponse } } }, 404: { description: 'File not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 400: errorResponse('Bad request (missing fileId)', ['FILE_ID_IS_REQUIRED']), 404: errorResponse('File not found', ['FILE_NOT_FOUND']) },
 	},
 	'/api/admin/delete-bucket': {
 		summary: 'Delete a bucket',
 		tags: ['admin'],
 		req: v.object({ bucketId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (missing bucketId)', content: { 'application/json': { vSchema: ErrorResponse } } }, 404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 400: errorResponse('Bad request (missing bucketId)', ['BUCKET_NOT_FOUND']), 404: errorResponse('Bucket not found', ['BUCKET_NOT_FOUND']) },
 	},
 	'/api/admin/purge-worker-cache': {
 		summary: 'Purge Worker cache',
@@ -105,7 +108,7 @@ export const adminApiDef = {
 			userId: IdString,
 			...QuotaInput,
 		}),
-		res: { ...OkResponse, ...AdminErrors, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 404: UserNotFound },
 	},
 	'/api/admin/set-global-quota': {
 		summary: 'Set global quota',
@@ -117,13 +120,13 @@ export const adminApiDef = {
 		summary: 'Get quota for a user',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: QuotaResponse } } }, ...AdminErrors, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: QuotaResponse } } }, ...AdminErrors, 404: UserNotFound },
 	},
 	'/api/admin/get-user-custom-quota': {
 		summary: 'Get custom quota for a user',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: UserCustomQuotaResponse } } }, ...AdminErrors, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: UserCustomQuotaResponse } } }, ...AdminErrors, 404: UserNotFound },
 	},
 	'/api/admin/get-global-quota': {
 		summary: 'Get global quota',
@@ -135,7 +138,7 @@ export const adminApiDef = {
 		summary: 'Delete user quota (reset to global)',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 404: UserNotFound },
 	},
 	'/api/admin/list-users': {
 		summary: 'List all users',
@@ -147,7 +150,7 @@ export const adminApiDef = {
 		summary: 'Update app setting',
 		tags: ['admin'],
 		req: KnownSettingRecordSchema,
-		res: { ...OkResponse, ...AdminErrors, 400: { description: 'Bad request (unknown setting key or invalid value)', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 400: errorResponse('Bad request (unknown setting key or invalid value)', ['INVALID_FILE_PATH']) },
 	},
 	'/api/admin/get-settings': {
 		summary: 'Get all app settings',
@@ -178,13 +181,13 @@ export const adminApiDef = {
 			name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100)),
 			...QuotaInput,
 		}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PlanResponse } } }, ...AdminErrors, 404: { description: 'Plan not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PlanResponse } } }, ...AdminErrors, 404: PlanNotFound },
 	},
 	'/api/admin/delete-plan': {
 		summary: 'Delete plan',
 		tags: ['admin'],
 		req: v.object({ planId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 404: { description: 'Plan not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 404: PlanNotFound },
 	},
 	'/api/admin/assign-user-plan': {
 		summary: 'Assign plan to user',
@@ -194,18 +197,18 @@ export const adminApiDef = {
 			planId: IdString,
 			expiresAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
 		}),
-		res: { ...OkResponse, ...AdminErrors, 404: { description: 'User or plan not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 404: errorResponse('User or plan not found', ['USER_NOT_FOUND', 'PLAN_NOT_FOUND']) },
 	},
 	'/api/admin/get-user-plan': {
 		summary: 'Get user plan assignment',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: NullableUserPlanAssignmentResponse } } }, ...AdminErrors, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: NullableUserPlanAssignmentResponse } } }, ...AdminErrors, 404: UserNotFound },
 	},
 	'/api/admin/delete-user-plan': {
 		summary: 'Delete user plan assignment',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
-		res: { ...OkResponse, ...AdminErrors, 404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } } },
+		res: { ...OkResponse, ...AdminErrors, 404: UserNotFound },
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

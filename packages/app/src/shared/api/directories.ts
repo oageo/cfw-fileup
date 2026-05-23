@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString } from '../api.schemas.js';
 import { MAX_FILE_PATH_LENGTH } from '../const.js';
 import { directoryPathValidation } from '../name-validation.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
@@ -14,8 +14,8 @@ export const directoriesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing bucketId or path)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing bucketId or path)', ['INVALID_DIRECTORY_PATH']),
+			404: errorResponse('Bucket not found', ['BUCKET_NOT_FOUND']),
 		},
 	},
 	'/api/directories/delete': {
@@ -27,8 +27,8 @@ export const directoriesApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing bucketId or path)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing bucketId or path)', ['INVALID_DIRECTORY_PATH']),
+			404: errorResponse('Bucket not found', ['BUCKET_NOT_FOUND']),
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

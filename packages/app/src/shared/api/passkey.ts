@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString } from '../api.schemas.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH, MAX_USERNAME_LENGTH, MAX_WEBAUTHN_FIELD_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
@@ -105,7 +105,7 @@ export const passkeyApiDef = {
 		req: v.object({}),
 		res: {
 			200: { description: 'Registration options', content: { 'application/json': { vSchema: v.object({ challengeId: v.string(), options: PublicKeyCredentialCreationOptionsJSON }) } } },
-			401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
+			401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
 		},
 	},
 	'/api/passkey/register/finish': {
@@ -118,8 +118,8 @@ export const passkeyApiDef = {
 		}),
 		res: {
 			200: { description: 'Registration successful', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request or verification failed', content: { 'application/json': { vSchema: ErrorResponse } } },
-			401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request or verification failed', ['INVALID_CHALLENGE_DATA', 'INVALID_OR_EXPIRED_CHALLENGE', 'VERIFICATION_FAILED']),
+			401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
 		},
 	},
 	'/api/passkey/authenticate/begin': {
@@ -139,8 +139,8 @@ export const passkeyApiDef = {
 		}),
 		res: {
 			200: { description: 'Authentication successful', content: { 'application/json': { vSchema: v.object({ token: v.string() }) } } },
-			400: { description: 'Bad request or invalid challenge', content: { 'application/json': { vSchema: ErrorResponse } } },
-			401: { description: 'Authentication failed', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request or invalid challenge', ['INVALID_CHALLENGE_DATA', 'INVALID_OR_EXPIRED_CHALLENGE']),
+			401: errorResponse('Authentication failed', ['AUTHENTICATION_FAILED', 'ACCOUNT_IS_SUSPENDED']),
 		},
 	},
 	'/api/passkey/list': {
@@ -149,7 +149,7 @@ export const passkeyApiDef = {
 		req: v.object({}),
 		res: {
 			200: { description: 'Passkey list', content: { 'application/json': { vSchema: v.array(PasskeyItem) } } },
-			401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
+			401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
 		},
 	},
 	'/api/passkey/delete': {
@@ -160,8 +160,8 @@ export const passkeyApiDef = {
 		}),
 		res: {
 			200: { description: 'Deleted', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
+			404: errorResponse('Not found', ['PASSKEY_NOT_FOUND']),
 		},
 	},
 	'/api/passkey/backup-codes/generate': {
@@ -170,7 +170,7 @@ export const passkeyApiDef = {
 		req: v.object({}),
 		res: {
 			200: { description: 'Backup codes generated', content: { 'application/json': { vSchema: v.object({ codes: v.array(v.string()) }) } } },
-			401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
+			401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
 		},
 	},
 	'/api/passkey/backup-codes/status': {
@@ -179,7 +179,7 @@ export const passkeyApiDef = {
 		req: v.object({}),
 		res: {
 			200: { description: 'Backup code status', content: { 'application/json': { vSchema: BackupCodeStatus } } },
-			401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
+			401: errorResponse('Unauthorized', ['UNAUTHORIZED']),
 		},
 	},
 	'/api/passkey/backup-codes/use': {
@@ -192,8 +192,8 @@ export const passkeyApiDef = {
 		}),
 		res: {
 			200: { description: 'Login successful', content: { 'application/json': { vSchema: v.object({ token: v.string() }) } } },
-			400: { description: 'Bad request', content: { 'application/json': { vSchema: ErrorResponse } } },
-			401: { description: 'Invalid credentials or code', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request', ['INVALID_CREDENTIALS_OR_CODE']),
+			401: errorResponse('Invalid credentials or code', ['INVALID_CREDENTIALS_OR_CODE', 'ACCOUNT_IS_SUSPENDED']),
 		},
 	},
 	'/api/passkey/signup/begin': {
@@ -206,9 +206,9 @@ export const passkeyApiDef = {
 		}),
 		res: {
 			200: { description: 'Signup options', content: { 'application/json': { vSchema: v.object({ challengeId: v.string(), options: PublicKeyCredentialCreationOptionsJSON }) } } },
-			400: { description: 'Bad request or invalid username', content: { 'application/json': { vSchema: ErrorResponse } } },
-			403: { description: 'Forbidden (invalid passphrase or registration closed)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'Username already taken', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request or invalid username', ['INVALID_USERNAME_FORMAT', 'PASSPHRASE_TOO_LONG', 'TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED']),
+			403: errorResponse('Forbidden (invalid passphrase or registration closed)', ['INVALID_PASSPHRASE', 'REGISTRATION_IS_CLOSED']),
+			409: errorResponse('Username already taken', ['USERNAME_ALREADY_TAKEN']),
 		},
 	},
 	'/api/passkey/signup/finish': {
@@ -221,8 +221,8 @@ export const passkeyApiDef = {
 		}),
 		res: {
 			200: { description: 'Account created and token issued', content: { 'application/json': { vSchema: v.object({ token: v.string() }) } } },
-			400: { description: 'Bad request or verification failed', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'Username already taken', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request or verification failed', ['INVALID_CHALLENGE_DATA', 'INVALID_OR_EXPIRED_CHALLENGE', 'VERIFICATION_FAILED']),
+			409: errorResponse('Username already taken', ['USERNAME_ALREADY_TAKEN']),
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse } from '../api.schemas.js';
+import { errorResponse } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
@@ -31,9 +31,9 @@ export const accountApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing currentPassword or password too short)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'User not found', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'Username already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing currentPassword or password too short)', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'INVALID_USERNAME_FORMAT']),
+			404: errorResponse('User not found', ['USER_NOT_FOUND']),
+			409: errorResponse('Username already exists', ['USERNAME_ALREADY_EXISTS']),
 		},
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

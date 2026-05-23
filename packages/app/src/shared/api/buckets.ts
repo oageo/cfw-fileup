@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ErrorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_BUCKET_NAME_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
@@ -13,9 +13,9 @@ export const bucketsApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ bucketId: v.string() }) } } },
-			400: { description: 'Bad request (invalid bucket name)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			409: { description: 'Bucket name already exists', content: { 'application/json': { vSchema: ErrorResponse } } },
-			429: { description: 'Bucket limit exceeded', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (invalid bucket name)', ['BUCKET_NAME_IS_REQUIRED', 'INVALID_FILE_PATH']),
+			409: errorResponse('Bucket name already exists', ['BUCKET_NAME_ALREADY_EXISTS']),
+			429: errorResponse('Bucket limit exceeded', ['BUCKET_LIMIT_EXCEEDED']),
 		},
 	},
 	'/api/buckets/delete': {
@@ -26,8 +26,8 @@ export const bucketsApiDef = {
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: { description: 'Bad request (missing bucketId)', content: { 'application/json': { vSchema: ErrorResponse } } },
-			404: { description: 'Bucket not found', content: { 'application/json': { vSchema: ErrorResponse } } },
+			400: errorResponse('Bad request (missing bucketId)', ['BUCKET_NOT_FOUND']),
+			404: errorResponse('Bucket not found', ['BUCKET_NOT_FOUND']),
 		},
 	},
 	'/api/buckets/list': {
