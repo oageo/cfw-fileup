@@ -113,6 +113,8 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           :schema="KNOWN_SETTINGS['registration_mode']"
           title="登録モード"
           :saving="saving['registration_mode']"
+          :show-save-button="true"
+          :save-on-change="false"
           :option-labels="{ closed: '非公開', passphrase: '合言葉必須', open: '公開' }"
           @save="saveSetting('registration_mode', $event)"
         >
@@ -124,6 +126,8 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           :schema="KNOWN_SETTINGS['google_required']"
           title="Googleアカウント登録必須"
           :saving="saving['google_required']"
+          :show-save-button="true"
+          :save-on-change="false"
           @save="saveSetting('google_required', $event)"
         >
           有効にすると Google アカウントによる登録・サインインのみが許可されます。
@@ -134,6 +138,7 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           :schema="KNOWN_SETTINGS['terms_url']"
           title="利用規約URL"
           :saving="saving['terms_url']"
+          :show-save-button="true"
           @save="saveSetting('terms_url', $event)"
         >
           サインアップ時に表示する利用規約ページのURLです。空欄の場合は同意チェックを表示しません。
@@ -145,6 +150,7 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           title="利用規約更新日"
           :saving="saving['terms_updated_at']"
           input-type="date"
+          :show-save-button="true"
           @save="saveSetting('terms_updated_at', $event)"
         >
           YYYY-MM-DD 形式で指定します。この日付より古い同意は再確認されます。空欄の場合はURL設定時点の同意だけを確認します。
@@ -156,6 +162,7 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           title="IndieAuth ブロックサーバー"
           :saving="saving['indieauth_blocked_servers']"
           multiline
+          :show-save-button="true"
           @save="saveSetting('indieauth_blocked_servers', $event)"
         >
           カンマ区切りで Misskey サーバーのホスト名を指定します。
@@ -166,6 +173,8 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           :schema="KNOWN_SETTINGS['reject_mismatched_file_type']"
           title="拡張子と内容が不一致のファイルを拒否"
           :saving="saving['reject_mismatched_file_type']"
+          :show-save-button="true"
+          :save-on-change="false"
           @save="saveSetting('reject_mismatched_file_type', $event)"
         >
           有効にすると、ファイルヘッダから推定した種類と拡張子が一致しないアップロードを完了時に拒否します。
@@ -177,6 +186,7 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           title="禁止ユーザー名"
           :saving="saving['forbidden_usernames']"
           multiline
+          :show-save-button="true"
           @save="saveSetting('forbidden_usernames', $event)"
         >
           カンマ区切りで禁止するユーザー名を指定します（大文字小文字を区別しない）。
@@ -188,6 +198,7 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           title="禁止バケット名"
           :saving="saving['forbidden_bucket_names']"
           multiline
+          :show-save-button="true"
           @save="saveSetting('forbidden_bucket_names', $event)"
         >
           カンマ区切りで禁止するバケット名を指定します（大文字小文字を区別しない）。

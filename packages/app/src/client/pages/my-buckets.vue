@@ -6,6 +6,7 @@ import { authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
+import { formatBytes } from '@/utils/byte-size';
 import { isValidNameFormat, NAME_FORMAT_ERROR } from '../../shared/name-validation';
 
 interface Bucket {
@@ -28,13 +29,6 @@ const bucketNameFormatError = computed(() => {
 	if (!isValidNameFormat(newBucketName.value)) return NAME_FORMAT_ERROR;
 	return '';
 });
-
-function formatBytes(bytes: number): string {
-	if (bytes === 0) return '0 B';
-	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-	const i = Math.floor(Math.log(bytes) / Math.log(1024));
-	return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
-}
 
 function usagePercent(usedBytes: number): number {
 	if (!maxBucketSizeBytes.value) return 0;

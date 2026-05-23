@@ -14,6 +14,7 @@ import { authStore, authHeaders, updateTermsAgreedAt } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
 import { Nirax, type RouteDef } from '@/nirax';
+import { formatBytes } from '@/utils/byte-size';
 
 const props = withDefaults(defineProps<{
 	bucketName: string;
@@ -137,12 +138,7 @@ const breadcrumbs = computed(() => {
 
 const isDirectory = computed(() => entryPath.value === null && (baseFilePath.value === '' || baseFilePath.value.endsWith('/')));
 
-function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+const formatSize = formatBytes;
 
 const isTargz = ref(false);
 const isTar = ref(false);

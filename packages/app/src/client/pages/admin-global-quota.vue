@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import { authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
+import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
 import SettingItem from '@/components/SettingItem.vue';
 
 interface QuotaForm {
@@ -91,29 +92,37 @@ async function saveQuota(): Promise<void> {
           :schema="quotaValueSchema"
           title="バケット数上限"
           :saving="saving"
-          @save="saveQuota"
+          :show-save-button="false"
+          :save-on-change="false"
         />
-        <SettingItem
+        <ByteSizeSettingItem
           v-model="quota.maxBucketSizeBytes"
           :schema="quotaValueSchema"
-          title="バケットサイズ上限 (bytes)"
+          title="バケットサイズ上限"
           :saving="saving"
-          @save="saveQuota"
+          :show-save-button="false"
         />
         <SettingItem
           v-model="quota.maxFilesPerBucket"
           :schema="quotaValueSchema"
           title="バケットあたりファイル数上限"
           :saving="saving"
-          @save="saveQuota"
+          :show-save-button="false"
+          :save-on-change="false"
         />
         <SettingItem
           v-model="quota.maxDailyUploads"
           :schema="quotaValueSchema"
           title="1日あたりアップロード数上限"
           :saving="saving"
-          @save="saveQuota"
+          :show-save-button="false"
+          :save-on-change="false"
         />
+        <div :class="$style.actions">
+          <button type="button" class="btn btn-primary" :disabled="saving" @click="saveQuota">
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
+        </div>
       </div>
     </template>
   </div>
@@ -129,5 +138,10 @@ async function saveQuota(): Promise<void> {
   flex-direction: column;
   gap: 12px;
   max-width: 700px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

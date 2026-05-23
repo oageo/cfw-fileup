@@ -7,6 +7,7 @@ import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import { connectUploadWorker, uploadWorkerJobs } from '@/store/upload-worker';
+import { formatBytes } from '@/utils/byte-size';
 
 interface UploadEntry {
 	id: string;
@@ -29,12 +30,6 @@ const activeTab = ref<'server' | 'browser'>('server');
 
 const deleteDialog = ref(false);
 const deleteTarget = ref<UploadEntry | null>(null);
-
-function formatBytes(n: number): string {
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 
 function fileLabel(e: UploadEntry): string {
 	if (e.isTargz) return 'tar.gz';

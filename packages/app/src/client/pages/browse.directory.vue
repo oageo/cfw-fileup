@@ -20,6 +20,7 @@ import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest } f
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
 import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
+import { formatBytes } from '@/utils/byte-size';
 import type { DistributiveOmit } from '../../shared/type-hack';
 
 const props = defineProps<{
@@ -67,12 +68,7 @@ type RawArchiveEntry = { id: string; path: string; mimeType: string; size?: numb
 const allArchiveEntries = ref<RawArchiveEntry[]>([]);
 const archivePath = ref('');
 
-function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+const formatSize = formatBytes;
 
 const bucketId = ref<string | null>(null);
 const newDirName = ref('');

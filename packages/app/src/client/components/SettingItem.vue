@@ -13,16 +13,21 @@ type SchemaLike = v.GenericSchema<unknown, string | number | null> & {
 	options?: readonly string[];
 };
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
 	modelValue: TValue;
 	schema: v.GenericSchema<unknown, TValue>;
 	title: string;
 	saving?: boolean;
 	multiline?: boolean;
 	inputType?: 'date';
+	showSaveButton?: boolean;
+	saveOnChange?: boolean;
 	/** selectの選択肢に表示するラベル。未指定時はvalue値をそのまま表示 */
 	optionLabels?: Record<string, string>;
-}>();
+}>(), {
+	showSaveButton: true,
+	saveOnChange: true,
+});
 
 const emit = defineEmits<{
 	'update:modelValue': [value: TValue];
@@ -70,13 +75,13 @@ const validationError = computed(() => {
 function onCheckboxChange(e: Event) {
 	const value = (e.target as HTMLInputElement).checked ? 'true' : 'false';
 	emit('update:modelValue', value as TValue);
-	emit('save', value as TValue);
+	if (props.saveOnChange) emit('save', value as TValue);
 }
 
 function onSelectChange(e: Event) {
 	const value = (e.target as HTMLSelectElement).value;
 	emit('update:modelValue', value as TValue);
-	emit('save', value as TValue);
+	if (props.saveOnChange) emit('save', value as TValue);
 }
 
 function onTextInput(e: Event) {
@@ -108,6 +113,7 @@ function onSave() {
           </div>
         </div>
         <button
+          v-if="props.showSaveButton"
           type="button"
           class="btn btn-primary"
           :disabled="saving"
@@ -135,13 +141,29 @@ function onSave() {
         </div>
       </div>
       <div :class="$style.settingRowControl">
-        <input
-          type="checkbox"
-          :checked="modelValue === 'true'"
-          :disabled="saving"
-          :class="$style.checkbox"
-          @change="onCheckboxChange"
-        >
+        <div class="flex gap-2 items-center">
+          <label :class="[$style.switch, { [$style.switchDisabled]: saving }]">
+            <input
+              type="checkbox"
+              :checked="modelValue === 'true'"
+              :disabled="saving"
+              :class="$style.switchInput"
+              @change="onCheckboxChange"
+            >
+            <span :class="$style.switchTrack">
+              <span :class="$style.switchThumb" />
+            </span>
+          </label>
+          <button
+            v-if="props.showSaveButton"
+            type="button"
+            class="btn btn-primary"
+            :disabled="saving || validationError != null"
+            @click="onSave"
+          >
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
+        </div>
       </div>
     </template>
 
@@ -154,15 +176,26 @@ function onSave() {
         </div>
       </div>
       <div :class="$style.settingRowControl">
-        <select
-          :value="(modelValue as string)"
-          :disabled="saving"
-          class="form-input"
-          :class="$style.select"
-          @change="onSelectChange"
-        >
-          <option v-for="opt in picklistOptions" :key="opt" :value="opt">{{ optionLabels?.[opt] ?? opt }}</option>
-        </select>
+        <div class="flex gap-2">
+          <select
+            :value="(modelValue as string)"
+            :disabled="saving"
+            class="form-input"
+            :class="$style.select"
+            @change="onSelectChange"
+          >
+            <option v-for="opt in picklistOptions" :key="opt" :value="opt">{{ optionLabels?.[opt] ?? opt }}</option>
+          </select>
+          <button
+            v-if="props.showSaveButton"
+            type="button"
+            class="btn btn-primary"
+            :disabled="saving || validationError != null"
+            @click="onSave"
+          >
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
+        </div>
       </div>
     </template>
 
@@ -187,6 +220,7 @@ function onSave() {
             @input="onNumberInput"
           >
           <button
+            v-if="props.showSaveButton"
             type="button"
             class="btn btn-primary"
             :disabled="saving || validationError != null"
@@ -218,6 +252,7 @@ function onSave() {
             @input="onTextInput"
           >
           <button
+            v-if="props.showSaveButton"
             type="button"
             class="btn btn-primary"
             :disabled="saving || validationError != null"
@@ -275,13 +310,6 @@ function onSave() {
   font-family: monospace;
 }
 
-.checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--color-primary);
-}
-
 .textInput {
   width: 160px;
 }
@@ -308,5 +336,65 @@ function onSave() {
   margin: 4px 0 0;
   color: var(--color-danger);
   font-size: 0.8125rem;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.switchDisabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.switchInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.switchTrack {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-border);
+  border: 1px solid var(--color-border);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.switchThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s;
+}
+
+.switchInput:checked + .switchTrack {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.switchInput:checked + .switchTrack .switchThumb {
+  transform: translateX(18px);
+}
+
+.switchInput:focus-visible + .switchTrack {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 </style>

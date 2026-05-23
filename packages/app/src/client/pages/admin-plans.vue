@@ -6,6 +6,7 @@ import { authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
+import { BYTE_SIZE_UNITS, byteSizeUnitMultiplier, formatBytes, pickByteSizeUnit, type ByteSizeUnit } from '@/utils/byte-size';
 
 interface Plan {
 	id: string;
@@ -29,6 +30,8 @@ const nameSchema = v.pipe(v.string(), v.trim(), v.minLength(1, 'プラン名を�
 
 const plans = ref<Plan[]>([]);
 const form = ref<PlanForm>(emptyForm());
+const bucketSizeAmount = ref<number | null>(null);
+const bucketSizeUnit = ref<ByteSizeUnit>('MiB');
 const editingPlanId = ref<string | null>(null);
 const loading = ref(true);
 const saving = ref(false);
@@ -75,8 +78,38 @@ function onNumberInput(key: keyof Omit<PlanForm, 'name'>, e: Event): void {
 	form.value[key] = raw === '' ? null : Number(raw);
 }
 
-function formatQuota(value: number | null): string {
-	return value == null ? '無制限' : String(value);
+function syncBucketSizeInput(value: number | null): void {
+	bucketSizeUnit.value = pickByteSizeUnit(value);
+	bucketSizeAmount.value = value == null ? null : value / byteSizeUnitMultiplier(bucketSizeUnit.value);
+}
+
+function updateBucketSizeBytes(): void {
+	if (bucketSizeAmount.value == null) {
+		form.value.maxBucketSizeBytes = null;
+		return;
+	}
+	const bytes = bucketSizeAmount.value * byteSizeUnitMultiplier(bucketSizeUnit.value);
+	if (!Number.isFinite(bytes)) return;
+	form.value.maxBucketSizeBytes = bytes;
+}
+
+function onBucketSizeAmountInput(e: Event): void {
+	const raw = (e.target as HTMLInputElement).value;
+	bucketSizeAmount.value = raw === '' ? null : Number(raw);
+	updateBucketSizeBytes();
+}
+
+function onBucketSizeUnitChange(e: Event): void {
+	bucketSizeUnit.value = (e.target as HTMLSelectElement).value as ByteSizeUnit;
+	updateBucketSizeBytes();
+}
+
+function formatQuota(value: number | null, formatter: (value: number) => string = String): string {
+	return value == null ? '無制限' : formatter(value);
+}
+
+function formatBucketSizePreview(value: number | null): string {
+	return value == null ? '無制限' : `${value.toLocaleString()} bytes (${formatBytes(value)})`;
 }
 
 async function fetchPlans(): Promise<void> {
@@ -102,6 +135,7 @@ function startEdit(plan: Plan): void {
 		maxFilesPerBucket: plan.maxFilesPerBucket,
 		maxDailyUploads: plan.maxDailyUploads,
 	};
+	syncBucketSizeInput(plan.maxBucketSizeBytes);
 	success.value = '';
 	error.value = '';
 }
@@ -109,6 +143,7 @@ function startEdit(plan: Plan): void {
 function resetForm(): void {
 	editingPlanId.value = null;
 	form.value = emptyForm();
+	syncBucketSizeInput(null);
 }
 
 async function savePlan(): Promise<void> {
@@ -189,8 +224,14 @@ async function executeDelete(): Promise<void> {
               <input :value="form.maxBuckets ?? ''" class="form-input" type="number" min="0" placeholder="無制限" @input="onNumberInput('maxBuckets', $event)">
             </label>
             <label :class="$style.field">
-              <span>バケットサイズ上限 (bytes)</span>
-              <input :value="form.maxBucketSizeBytes ?? ''" class="form-input" type="number" min="0" placeholder="無制限" @input="onNumberInput('maxBucketSizeBytes', $event)">
+              <span>バケットサイズ上限</span>
+              <div :class="$style.byteSizeControls">
+                <input :value="bucketSizeAmount ?? ''" class="form-input" type="number" min="0" step="any" placeholder="無制限" @input="onBucketSizeAmountInput">
+                <select :value="bucketSizeUnit" class="form-input" :class="$style.byteSizeUnit" @change="onBucketSizeUnitChange">
+                  <option v-for="sizeUnit in BYTE_SIZE_UNITS" :key="sizeUnit" :value="sizeUnit">{{ sizeUnit }}</option>
+                </select>
+              </div>
+              <span :class="$style.fieldHint">{{ formatBucketSizePreview(form.maxBucketSizeBytes) }}</span>
             </label>
             <label :class="$style.field">
               <span>バケットあたりファイル数上限</span>
@@ -231,7 +272,7 @@ async function executeDelete(): Promise<void> {
                 <tr v-for="plan in plans" :key="plan.id">
                   <td :class="$style.nameCell">{{ plan.name }}</td>
                   <td>{{ formatQuota(plan.maxBuckets) }}</td>
-                  <td>{{ formatQuota(plan.maxBucketSizeBytes) }}</td>
+                  <td>{{ formatQuota(plan.maxBucketSizeBytes, formatBytes) }}</td>
                   <td>{{ formatQuota(plan.maxFilesPerBucket) }}</td>
                   <td>{{ formatQuota(plan.maxDailyUploads) }}</td>
                   <td class="col-actions">
@@ -297,6 +338,21 @@ async function executeDelete(): Promise<void> {
   gap: 6px;
   font-size: 0.875rem;
   font-weight: 500;
+}
+
+.byteSizeControls {
+  display: flex;
+  gap: 8px;
+}
+
+.byteSizeUnit {
+  width: 88px;
+}
+
+.fieldHint {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
 }
 
 .validationError {

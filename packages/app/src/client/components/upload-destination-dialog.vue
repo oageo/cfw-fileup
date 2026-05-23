@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { Dialog } from '@vuetify/v0';
 import { ArrowLeft, ArrowRight, Check, Folder, FolderPlus, X } from '@lucide/vue';
 import { apiPost } from '../utils/api';
+import { formatBytes } from '@/utils/byte-size';
 import { isValidPathSegmentName } from '../../shared/name-validation';
 
 const props = defineProps<{
@@ -56,13 +57,6 @@ const showNewDirInput = ref(false);
 function normalizePrefix(prefix: string | undefined): string {
 	if (!prefix) return '';
 	return prefix.endsWith('/') ? prefix : `${prefix}/`;
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes === 0) return '0 B';
-	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-	const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-	return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
 function usagePercent(usedBytes: number): number {

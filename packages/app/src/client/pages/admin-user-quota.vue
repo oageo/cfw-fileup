@@ -5,6 +5,7 @@ import { Button } from '@vuetify/v0';
 import { authStore } from '../store/auth';
 import { apiPost } from '../utils/api';
 import NirA from '@/components/nira.vue';
+import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
 import ConfirmDialog from '@/components/confirm-dialog.vue';
 import SettingItem from '@/components/SettingItem.vue';
 
@@ -288,29 +289,38 @@ async function executeReset(): Promise<void> {
             :schema="quotaValueSchema"
             title="バケット数上限"
             :saving="saving"
-            @save="saveQuota"
+            :show-save-button="false"
+            :save-on-change="false"
           />
-          <SettingItem
+          <ByteSizeSettingItem
             v-model="quota.maxBucketSizeBytes"
             :schema="quotaValueSchema"
-            title="バケットサイズ上限 (bytes)"
+            title="バケットサイズ上限"
             :saving="saving"
-            @save="saveQuota"
+            :show-save-button="false"
           />
           <SettingItem
             v-model="quota.maxFilesPerBucket"
             :schema="quotaValueSchema"
             title="バケットあたりファイル数上限"
             :saving="saving"
-            @save="saveQuota"
+            :show-save-button="false"
+            :save-on-change="false"
           />
           <SettingItem
             v-model="quota.maxDailyUploads"
             :schema="quotaValueSchema"
             title="1日あたりアップロード数上限"
             :saving="saving"
-            @save="saveQuota"
+            :show-save-button="false"
+            :save-on-change="false"
           />
+          <div :class="$style.actions">
+            <Button.Root type="button" class="btn btn-primary" :loading="saving" @click="saveQuota">
+              <Button.Loading>保存中...</Button.Loading>
+              <Button.Content>保存</Button.Content>
+            </Button.Root>
+          </div>
         </div>
 
         <div v-else :class="[$style.panel, 'card']">
@@ -408,6 +418,11 @@ async function executeReset(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .panelTitle {

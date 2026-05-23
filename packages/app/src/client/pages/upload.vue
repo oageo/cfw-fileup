@@ -17,6 +17,7 @@ import { enqueueUploadJob } from '@/store/upload-worker';
 import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '@/utils/upload-paths';
 import { takeShareTargetPayload } from '../../shared/share-target-store';
 import { readBlobTextPreview } from '@/utils/text-preview';
+import { formatBytes } from '@/utils/byte-size';
 import type { ZipExtractWorkerMessage } from '@/workers/zip-extract.worker';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
@@ -89,13 +90,6 @@ interface ZipExtractDoneResult {
 	entries: { path: string; file: File }[];
 	warnings: string[];
 	needsPassword: boolean;
-}
-
-function formatBytes(n: number): string {
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-	return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function getUploadPaths(): string[] {
