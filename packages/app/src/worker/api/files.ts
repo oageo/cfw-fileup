@@ -16,6 +16,8 @@ import { detectExecutableMimeType, hasSuspiciousFileType, inferMimeTypeByExtensi
 import { isValidDirectoryPath, isValidFilePath } from '../../shared/name-validation';
 import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, hasFileDirectoryConflictForFile } from '../utils/path-conflicts';
+import { fileMutationEvents } from '../events/file-mutations';
+import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -606,6 +608,14 @@ app.post(
 			})
 			.where(eq(files.id, file.id));
 
+		fileMutationEvents.emit('file:updated', {
+			env: c.env,
+			origin: new URL(c.req.url).origin,
+			waitUntil: promise => c.executionCtx.waitUntil(promise),
+			bucket: { id: bucket.id, name: bucket.name },
+			files: [await toFileMutationReference(db, file)],
+		});
+
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/update')),
 );
@@ -628,8 +638,13 @@ app.post(
 		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		let matchedCount = 0;
+		const filesToPurge = new Map<string, typeof files.$inferSelect>();
 		for (const target of body.targets) {
 			if (target.type === 'file') {
+				const targetFiles = await db
+					.select()
+					.from(files)
+					.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.path, target.path)));
 				const whereClauses = ['bucket_id = ?', 'is_closed = 1', 'path = ?'];
 				const params: Array<string | number> = [bucket.id, target.path];
 				const whereSql = whereClauses.join(' AND ');
@@ -640,6 +655,7 @@ app.post(
 				const countForTarget = countRow?.count ?? 0;
 				if (countForTarget === 0) continue;
 				matchedCount += countForTarget;
+				for (const file of targetFiles) filesToPurge.set(file.id, file);
 				await c.env.DB
 					.prepare(`UPDATE files SET is_listed = ? WHERE ${whereSql}`)
 					.bind(body.isListed ? 1 : 0, ...params)
@@ -649,6 +665,10 @@ app.post(
 
 			const prefix = target.path === '' || target.path.endsWith('/') ? target.path : `${target.path}/`;
 			const excludePaths = target.excludePaths ?? [];
+			const childFiles = await db
+				.select()
+				.from(files)
+				.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), like(files.path, `${prefix}%`)));
 			const whereClauses = ['bucket_id = ?', 'path LIKE ?'];
 			const params: Array<string | number> = [bucket.id, `${prefix}%`];
 			for (const excludedPath of excludePaths) {
@@ -685,6 +705,13 @@ app.post(
 			}
 			if (countForTarget === 0) continue;
 			matchedCount += countForTarget;
+			for (const file of childFiles) {
+				if (excludePaths.some((excludePath) => {
+					const normalizedExcludedPath = excludePath.endsWith('/') ? excludePath : `${excludePath}/`;
+					return file.path === normalizedExcludedPath || file.path.startsWith(normalizedExcludedPath);
+				})) continue;
+				filesToPurge.set(file.id, file);
+			}
 			await c.env.DB
 				.prepare(`UPDATE directories SET is_listed = ? WHERE ${whereSql}`)
 				.bind(body.isListed ? 1 : 0, ...params)
@@ -692,6 +719,17 @@ app.post(
 		}
 
 		if (matchedCount === 0) throw apiError(404, 'FILE_NOT_FOUND');
+
+		const purgeFiles = await toFileMutationReferences(db, Array.from(filesToPurge.values()));
+		if (purgeFiles.length > 0) {
+			fileMutationEvents.emit('file:updated', {
+				env: c.env,
+				origin: new URL(c.req.url).origin,
+				waitUntil: promise => c.executionCtx.waitUntil(promise),
+				bucket: { id: bucket.id, name: bucket.name },
+				files: purgeFiles,
+			});
+		}
 
 		return c.json({ ok: true, updatedCount: matchedCount }, 200);
 	}, getResponseDefWithAuth('/api/files/update-listing')),
@@ -761,6 +799,9 @@ app.post(
 			r2Key: string;
 			isClosed: boolean;
 			size: number | null;
+			path: string;
+			isTar: boolean;
+			isTargz: boolean;
 		}>();
 		const directoryPrefixes = new Set<string>();
 
@@ -779,7 +820,7 @@ app.post(
 			const prefix = target.path === '' ? '' : target.path.endsWith('/') ? target.path : `${target.path}/`;
 			const excludePaths = target.excludePaths ?? [];
 			const childFiles = await db
-				.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size, path: files.path })
+				.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size, path: files.path, isTar: files.isTar, isTargz: files.isTargz })
 				.from(files)
 				.where(and(eq(files.bucketId, bucket.id), like(files.path, `${prefix}%`)));
 
@@ -807,6 +848,8 @@ app.post(
 			}
 		}
 
+		const purgeFiles = await toFileMutationReferences(db, Array.from(filesToDelete.values()));
+
 		for (const file of filesToDelete.values()) {
 			try {
 				await c.env.R2.delete(file.r2Key);
@@ -830,6 +873,14 @@ app.post(
 		for (const prefix of directoryPrefixes) {
 			await db.delete(directories).where(and(eq(directories.bucketId, bucket.id), like(directories.path, `${prefix}%`)));
 		}
+
+		fileMutationEvents.emit('file:deleted', {
+			env: c.env,
+			origin: new URL(c.req.url).origin,
+			waitUntil: promise => c.executionCtx.waitUntil(promise),
+			bucket: { id: bucket.id, name: bucket.name },
+			files: purgeFiles,
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/delete')),
@@ -946,6 +997,15 @@ app.post(
 				await db.update(buckets).set({ usedBytes: sql`${buckets.usedBytes} + ${movedBytes}` }).where(eq(buckets.id, targetBucket.id));
 			}
 
+			fileMutationEvents.emit('file:moved', {
+				env: c.env,
+				origin: new URL(c.req.url).origin,
+				waitUntil: promise => c.executionCtx.waitUntil(promise),
+				sourceBucket: { id: sourceBucket.id, name: sourceBucket.name },
+				targetBucket: { id: targetBucket.id, name: targetBucket.name },
+				files: [{ ...await toFileMutationReference(db, { ...file, path: normalizedSourcePath }), nextPath: normalizedTargetPath }],
+			});
+
 			return c.json({ ok: true }, 200);
 		}
 
@@ -1005,6 +1065,20 @@ app.post(
 			await db.update(buckets).set({ usedBytes: sql`MAX(0, ${buckets.usedBytes} - ${movedBytes})` }).where(eq(buckets.id, sourceBucket.id));
 			await db.update(buckets).set({ usedBytes: sql`${buckets.usedBytes} + ${movedBytes}` }).where(eq(buckets.id, targetBucket.id));
 		}
+
+		fileMutationEvents.emit('directory:moved', {
+			env: c.env,
+			origin: new URL(c.req.url).origin,
+			waitUntil: promise => c.executionCtx.waitUntil(promise),
+			sourceBucket: { id: sourceBucket.id, name: sourceBucket.name },
+			targetBucket: { id: targetBucket.id, name: targetBucket.name },
+			sourcePrefix: normalizedSourcePath,
+			targetPrefix: normalizedTargetPath,
+			files: (await toFileMutationReferences(db, childFiles)).map(file => ({
+				...file,
+				nextPath: `${normalizedTargetPath}${file.path.slice(normalizedSourcePath.length)}`,
+			})),
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/move')),

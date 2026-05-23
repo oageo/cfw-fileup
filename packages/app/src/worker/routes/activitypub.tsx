@@ -4,12 +4,16 @@ import { parseEaidx } from '../../shared/eaid-x';
 import { buckets, files, tarFiles, targzFiles } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { apiError } from '../utils/api-error';
+import { deleteResolveRouteCache, resolveRouteCache } from '../middleware/resolve-route-cache';
+import { fileMutationEvents, runMutationTask, type FileReference } from '../events/file-mutations';
 
 const app = new Hono<{ Bindings: Env }>();
 type AppContext = Context<{ Bindings: Env }>;
 
 const activityJsonContentType = 'application/activity+json; charset=utf-8';
 const publicAddress = 'https://www.w3.org/ns/activitystreams#Public';
+const activityPubCacheMaxAgeSeconds = 5 * 60;
+let activityPubCachePurgeListenersRegistered = false;
 
 function originFromRequest(request: Request): string {
 	return new URL(request.url).origin;
@@ -126,6 +130,65 @@ async function getBucket(db: ReturnType<typeof getDb>, bucketId: string) {
 	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 	return bucket;
 }
+
+function getActivityPubFileCachePath(fileId: string): string {
+	return `/a/files/${encodeURIComponent(fileId)}`;
+}
+
+function getActivityPubEntryCachePath(fileId: string, entryPath: string): string {
+	return `${getActivityPubFileCachePath(fileId)}/${encodeURIComponent(':entries')}/${encodeURIComponent(entryPath)}`;
+}
+
+function purgeActivityPubFileCache(env: Env, origin: string, file: FileReference): Promise<Array<PromiseSettledResult<boolean>>> {
+	return Promise.allSettled([
+		deleteResolveRouteCache(env, getActivityPubFileCachePath(file.id), origin),
+		...(file.entryPaths ?? []).map(entryPath => deleteResolveRouteCache(env, getActivityPubEntryCachePath(file.id, entryPath), origin)),
+	]);
+}
+
+function registerActivityPubCachePurgeListeners(): void {
+	if (activityPubCachePurgeListenersRegistered) return;
+	activityPubCachePurgeListenersRegistered = true;
+
+	fileMutationEvents.on('file:deleted', ({ env, origin, waitUntil, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeActivityPubFileCache(env, origin, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /a deleted file cache:');
+	});
+
+	fileMutationEvents.on('file:updated', ({ env, origin, waitUntil, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeActivityPubFileCache(env, origin, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /a updated file cache:');
+	});
+
+	fileMutationEvents.on('file:moved', ({ env, origin, waitUntil, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeActivityPubFileCache(env, origin, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /a moved file cache:');
+	});
+
+	fileMutationEvents.on('directory:deleted', ({ env, origin, waitUntil, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeActivityPubFileCache(env, origin, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /a deleted directory cache:');
+	});
+
+	fileMutationEvents.on('directory:moved', ({ env, origin, waitUntil, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeActivityPubFileCache(env, origin, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /a moved directory cache:');
+	});
+
+	fileMutationEvents.on('bucket:deleted', ({ env, origin, waitUntil, bucket, files }) => {
+		const promise = Promise.allSettled([
+			deleteResolveRouteCache(env, `/a/buckets/${encodeURIComponent(bucket.id)}`, origin),
+			deleteResolveRouteCache(env, `/a/buckets/${encodeURIComponent(bucket.id)}/outbox`, origin),
+			deleteResolveRouteCache(env, `/a/buckets/${encodeURIComponent(bucket.id)}/followers`, origin),
+			...files.map(file => purgeActivityPubFileCache(env, origin, file)),
+		]).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /a deleted bucket cache:');
+	});
+}
+
+registerActivityPubCachePurgeListeners();
+
+app.use('/a/*', resolveRouteCache({ externalMaxAgeSeconds: activityPubCacheMaxAgeSeconds }));
 
 app.get('/a/buckets/:bucketId', async (c) => {
 	const db = getDb(c.env);

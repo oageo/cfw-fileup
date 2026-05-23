@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
-import { env, app, setupDb, clearDb, signup, authHeaders } from './helpers';
+import { env, app, setupDb, clearDb, signup, authHeaders, createAdminUser } from './helpers';
 
 beforeAll(async () => {
 	await setupDb();
@@ -116,6 +116,208 @@ describe('ActivityPub routes', () => {
 		expect(await res.text()).toContain(`<link rel="alternate" type="application/activity+json" href="${href}">`);
 	});
 
+	test('serves /v file pages from resolve route cache while keeping short external cache headers', async () => {
+		const { fileId } = await setupPublicFile('cached-view.txt');
+		const requestUrl = 'https://example.test/v/ap_bucket/cached-view.txt';
+
+		const firstRes = await app.request(requestUrl, {}, envWithAssets());
+		expect(firstRes.status).toBe(200);
+		expect(firstRes.headers.get('X-Cache')).toBe('MISS');
+		expect(firstRes.headers.get('Cache-Control')).toBe('public, max-age=10800');
+		expect(await firstRes.text()).toContain(`/a/files/${fileId}`);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const secondRes = await app.request(requestUrl, {}, envWithAssets());
+		expect(secondRes.status).toBe(200);
+		expect(secondRes.headers.get('X-Cache')).toBe('HIT');
+		expect(secondRes.headers.get('Cache-Control')).toBe('public, max-age=10800');
+		expect(await secondRes.text()).toContain(`/a/files/${fileId}`);
+	});
+
+	test('normalizes resolve route cache keys by ignoring query strings', async () => {
+		const { fileId } = await setupPublicFile('query-cache.txt');
+		const requestUrl = 'https://example.test/v/ap_bucket/query-cache.txt';
+
+		const firstRes = await app.request(`${requestUrl}?utm_source=first`, {}, envWithAssets());
+		expect(firstRes.status).toBe(200);
+		expect(firstRes.headers.get('X-Cache')).toBe('MISS');
+		expect(await firstRes.text()).toContain(`/a/files/${fileId}`);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const secondRes = await app.request(`${requestUrl}?utm_source=second`, {}, envWithAssets());
+		expect(secondRes.status).toBe(200);
+		expect(secondRes.headers.get('X-Cache')).toBe('HIT');
+		expect(await secondRes.text()).toContain(`/a/files/${fileId}`);
+	});
+
+	test('keeps resolve route cache scoped by origin', async () => {
+		const { fileId } = await setupPublicFile('origin-cache.txt');
+		const path = '/v/ap_bucket/origin-cache.txt';
+
+		const firstRes = await app.request(`https://example.test${path}`, {}, envWithAssets());
+		expect(firstRes.headers.get('X-Cache')).toBe('MISS');
+		expect(await firstRes.text()).toContain(`https://example.test/a/files/${fileId}`);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const otherOriginRes = await app.request(`https://alt.example.test${path}`, {}, envWithAssets());
+		expect(otherOriginRes.headers.get('X-Cache')).toBe('MISS');
+		expect(await otherOriginRes.text()).toContain(`https://alt.example.test/a/files/${fileId}`);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const cachedFirstOriginRes = await app.request(`https://example.test${path}`, {}, envWithAssets());
+		expect(cachedFirstOriginRes.headers.get('X-Cache')).toBe('HIT');
+		expect(await cachedFirstOriginRes.text()).toContain(`https://example.test/a/files/${fileId}`);
+	});
+
+	test('serves ActivityPub file notes from resolve route cache', async () => {
+		const { fileId } = await setupPublicFile('cached-note.txt');
+
+		const firstRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		expect(firstRes.status).toBe(200);
+		expect(firstRes.headers.get('X-Cache')).toBe('MISS');
+		expect(firstRes.headers.get('Cache-Control')).toBe('public, max-age=300');
+		await firstRes.text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const secondRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		expect(secondRes.status).toBe(200);
+		expect(secondRes.headers.get('X-Cache')).toBe('HIT');
+		const note = await secondRes.json() as { url: string };
+		expect(note.url).toBe('https://example.test/v/ap_bucket/cached-note.txt');
+	});
+
+	test('purges /v and /a file resolve caches when a file is deleted', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('delete-cached.txt');
+
+		const viewRes = await app.request('https://example.test/v/ap_bucket/delete-cached.txt', {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		await viewRes.text();
+		const noteRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		expect(noteRes.headers.get('X-Cache')).toBe('MISS');
+		await noteRes.text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const deleteRes = await app.request('https://example.test/api/files/delete', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'delete-cached.txt' }),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const afterDeleteViewRes = await app.request('https://example.test/v/ap_bucket/delete-cached.txt', {}, envWithAssets());
+		expect(afterDeleteViewRes.status).toBe(200);
+		expect(afterDeleteViewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(afterDeleteViewRes.headers.get('Link')).toBeNull();
+		expect(await afterDeleteViewRes.text()).not.toContain(`/a/files/${fileId}`);
+
+		const afterDeleteNoteRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		expect(afterDeleteNoteRes.status).toBe(404);
+	});
+
+	test('purges /v and /a file resolve caches when a public file is unlisted', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('unlist-cached.txt');
+
+		await (await app.request('https://example.test/v/ap_bucket/unlist-cached.txt', {}, envWithAssets())).text();
+		await (await app.request(`https://example.test/a/files/${fileId}`, {}, env)).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const updateRes = await app.request('https://example.test/api/files/update-listing', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, isListed: false, targets: [{ type: 'file', path: 'unlist-cached.txt' }] }),
+		}, env);
+		expect(updateRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const viewRes = await app.request('https://example.test/v/ap_bucket/unlist-cached.txt', {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(viewRes.headers.get('Link')).toBeNull();
+		expect(await viewRes.text()).not.toContain(`/a/files/${fileId}`);
+
+		const noteRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		expect(noteRes.status).toBe(404);
+	});
+
+	test('purges query-normalized resolve caches when a public file is unlisted', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('unlist-query-cached.txt');
+		const viewUrl = 'https://example.test/v/ap_bucket/unlist-query-cached.txt';
+
+		await (await app.request(`${viewUrl}?preview=1`, {}, envWithAssets())).text();
+		await (await app.request(`https://example.test/a/files/${fileId}?preview=1`, {}, env)).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const updateRes = await app.request('https://example.test/api/files/update-listing', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, isListed: false, targets: [{ type: 'file', path: 'unlist-query-cached.txt' }] }),
+		}, env);
+		expect(updateRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const viewRes = await app.request(`${viewUrl}?preview=2`, {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(viewRes.headers.get('Link')).toBeNull();
+		expect(await viewRes.text()).not.toContain(`/a/files/${fileId}`);
+
+		const noteRes = await app.request(`https://example.test/a/files/${fileId}?preview=2`, {}, env);
+		expect(noteRes.status).toBe(404);
+	});
+
+	test('purges old and new resolve cache paths when a file is renamed', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('before-rename.txt');
+		const oldUrl = 'https://example.test/v/ap_bucket/before-rename.txt';
+		const newUrl = 'https://example.test/v/ap_bucket/after-rename.txt';
+
+		await (await app.request(oldUrl, {}, envWithAssets())).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const moveRes = await app.request('https://example.test/api/files/move', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				type: 'file',
+				sourceBucketId: bucketId,
+				sourcePath: 'before-rename.txt',
+				targetBucketId: bucketId,
+				targetPath: 'after-rename.txt',
+			}),
+		}, env);
+		expect(moveRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const oldRes = await app.request(oldUrl, {}, envWithAssets());
+		expect(oldRes.headers.get('X-Cache')).toBe('MISS');
+		expect(oldRes.headers.get('Link')).toBeNull();
+		await oldRes.text();
+
+		const newRes = await app.request(newUrl, {}, envWithAssets());
+		expect(newRes.headers.get('X-Cache')).toBe('MISS');
+		expect(newRes.headers.get('Link')).toContain(`/a/files/${fileId}`);
+		expect(await newRes.text()).toContain(`/a/files/${fileId}`);
+	});
+
+	test('purges bucket actor resolve cache when a bucket is deleted', async () => {
+		const { token, bucketId } = await setupPublicFile('bucket-delete.txt');
+
+		const firstRes = await app.request(`https://example.test/a/buckets/${bucketId}`, {}, env);
+		expect(firstRes.status).toBe(200);
+		expect(firstRes.headers.get('X-Cache')).toBe('MISS');
+		await firstRes.text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const deleteRes = await app.request('https://example.test/api/buckets/delete', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId }),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const afterDeleteRes = await app.request(`https://example.test/a/buckets/${bucketId}`, {}, env);
+		expect(afterDeleteRes.status).toBe(404);
+	});
+
 	test('does not add ActivityPub alternate tags to unlisted file pages', async () => {
 		await setupPublicFile('hidden.txt', { isListed: false });
 
@@ -187,6 +389,151 @@ describe('ActivityPub routes', () => {
 		expect(res.status).toBe(200);
 		expect(res.headers.get('Link')).toContain(`<${href}>; rel="alternate"; type="application/activity+json"`);
 		expect(await res.text()).toContain(`<link rel="alternate" type="application/activity+json" href="${href}">`);
+	});
+
+	test('purges archive entry resolve caches when the archive is deleted', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('delete-archive.tar');
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const viewUrl = `https://example.test/v/ap_bucket/delete-archive.tar/%3Aentries/${encodedEntryPath}`;
+		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
+		await (await app.request(viewUrl, {}, envWithAssets())).text();
+		await (await app.request(noteUrl, {}, env)).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const deleteRes = await app.request('https://example.test/api/files/delete', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'delete-archive.tar' }),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const viewRes = await app.request(viewUrl, {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(viewRes.headers.get('Link')).toBeNull();
+		await viewRes.text();
+
+		const noteRes = await app.request(noteUrl, {}, env);
+		expect(noteRes.status).toBe(404);
+	});
+
+	test('purges archive entry resolve caches when a directory is deleted', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('dir/delete-archive.tar');
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const viewUrl = `https://example.test/v/ap_bucket/dir/delete-archive.tar/%3Aentries/${encodedEntryPath}`;
+		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
+		await (await app.request(viewUrl, {}, envWithAssets())).text();
+		await (await app.request(noteUrl, {}, env)).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const deleteRes = await app.request('https://example.test/api/directories/delete', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'dir/' }),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const viewRes = await app.request(viewUrl, {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(viewRes.headers.get('Link')).toBeNull();
+		await viewRes.text();
+
+		const noteRes = await app.request(noteUrl, {}, env);
+		expect(noteRes.status).toBe(404);
+	});
+
+	test('purges archive entry resolve caches when a bucket is deleted', async () => {
+		const { token, bucketId, fileId } = await setupPublicFile('bucket-delete-archive.tar');
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const viewUrl = `https://example.test/v/ap_bucket/bucket-delete-archive.tar/%3Aentries/${encodedEntryPath}`;
+		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
+		await (await app.request(viewUrl, {}, envWithAssets())).text();
+		await (await app.request(noteUrl, {}, env)).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const deleteRes = await app.request('https://example.test/api/buckets/delete', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId }),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const viewRes = await app.request(viewUrl, {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(viewRes.headers.get('Link')).toBeNull();
+		await viewRes.text();
+
+		const noteRes = await app.request(noteUrl, {}, env);
+		expect(noteRes.status).toBe(404);
+	});
+
+	test('purges archive entry resolve caches when an admin deletes an archive', async () => {
+		const { token: adminToken } = await createAdminUser();
+		const { token, fileId } = await setupPublicFile('admin-delete-archive.tar');
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const viewUrl = `https://example.test/v/ap_bucket/admin-delete-archive.tar/%3Aentries/${encodedEntryPath}`;
+		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
+		await (await app.request(viewUrl, {}, envWithAssets())).text();
+		await (await app.request(noteUrl, {}, env)).text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const deleteRes = await app.request('https://example.test/api/admin/delete-file', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ fileId }),
+		}, env);
+		expect(deleteRes.status).toBe(200);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const viewRes = await app.request(viewUrl, {}, envWithAssets());
+		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
+		expect(viewRes.headers.get('Link')).toBeNull();
+		await viewRes.text();
+
+		const noteRes = await app.request(noteUrl, {}, env);
+		expect(noteRes.status).toBe(404);
 	});
 
 	test('does not serve entries from an unlisted public archive', async () => {

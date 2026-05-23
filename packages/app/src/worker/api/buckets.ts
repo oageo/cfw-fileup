@@ -10,6 +10,8 @@ import { validateBucketName } from '../utils/name-validation';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { apiError } from '../utils/api-error';
+import { fileMutationEvents } from '../events/file-mutations';
+import { toFileMutationReferences } from '../utils/file-mutation-reference';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -89,6 +91,7 @@ app.post(
 		}
 
 		const bucketFiles = await db.select().from(files).where(eq(files.bucketId, bucket.id));
+		const purgeFiles = await toFileMutationReferences(db, bucketFiles);
 
 		for (const file of bucketFiles) {
 			try {
@@ -99,6 +102,14 @@ app.post(
 		}
 
 		await db.delete(buckets).where(eq(buckets.id, bucket.id));
+
+		fileMutationEvents.emit('bucket:deleted', {
+			env: c.env,
+			origin: new URL(c.req.url).origin,
+			waitUntil: promise => c.executionCtx.waitUntil(promise),
+			bucket: { id: bucket.id, name: bucket.name },
+			files: purgeFiles,
+		});
 
 		return c.json({ ok: true as const }, 200);
 	}, getResponseDefWithAuth('/api/buckets/delete')),

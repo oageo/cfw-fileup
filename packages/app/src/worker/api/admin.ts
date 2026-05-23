@@ -12,6 +12,8 @@ import { KNOWN_SETTINGS, KnownSettingRecordSchema } from '../../shared/app-setti
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { bumpWorkerCacheVersion } from '../utils/cache-names';
+import { fileMutationEvents } from '../events/file-mutations';
+import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -108,6 +110,8 @@ app.post(
 		if (!file) {
 			throw apiError(404, 'FILE_NOT_FOUND');
 		}
+		const bucket = await db.select({ id: buckets.id, name: buckets.name }).from(buckets).where(eq(buckets.id, file.bucketId)).get();
+		const purgeFile = await toFileMutationReference(db, file);
 
 		try {
 			await c.env.R2.delete(file.r2Key);
@@ -122,6 +126,16 @@ app.post(
 				.update(buckets)
 				.set({ usedBytes: sql`MAX(0, ${buckets.usedBytes} - ${file.size})` })
 				.where(eq(buckets.id, file.bucketId));
+		}
+
+		if (bucket) {
+			fileMutationEvents.emit('file:deleted', {
+				env: c.env,
+				origin: new URL(c.req.url).origin,
+				waitUntil: promise => c.executionCtx.waitUntil(promise),
+				bucket,
+				files: [purgeFile],
+			});
 		}
 
 		return c.json({ ok: true }, 200);
@@ -147,6 +161,7 @@ app.post(
 		}
 
 		const bucketFiles = await db.select().from(files).where(eq(files.bucketId, bucket.id));
+		const purgeFiles = await toFileMutationReferences(db, bucketFiles);
 
 		for (const file of bucketFiles) {
 			try {
@@ -157,6 +172,14 @@ app.post(
 		}
 
 		await db.delete(buckets).where(eq(buckets.id, bucket.id));
+
+		fileMutationEvents.emit('bucket:deleted', {
+			env: c.env,
+			origin: new URL(c.req.url).origin,
+			waitUntil: promise => c.executionCtx.waitUntil(promise),
+			bucket: { id: bucket.id, name: bucket.name },
+			files: purgeFiles,
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-bucket')),

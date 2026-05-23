@@ -12,6 +12,8 @@ import { isValidDirectoryPath } from '../../shared/name-validation';
 import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 import { apiError } from '../utils/api-error';
 import { hasFileDirectoryConflictForDirectory } from '../utils/path-conflicts';
+import { fileMutationEvents } from '../events/file-mutations';
+import { toFileMutationReferences } from '../utils/file-mutation-reference';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -73,9 +75,10 @@ app.post(
 		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		const childFiles = await db
-			.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size })
+			.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size, path: files.path, isTar: files.isTar, isTargz: files.isTargz })
 			.from(files)
 			.where(and(eq(files.bucketId, bucket.id), like(files.path, `${body.path}%`)));
+		const purgeFiles = await toFileMutationReferences(db, childFiles);
 
 		for (const f of childFiles) {
 			try { await c.env.R2.delete(f.r2Key); } catch { /* ignore */ }
@@ -94,6 +97,15 @@ app.post(
 		}
 
 		await db.delete(directories).where(and(eq(directories.bucketId, bucket.id), like(directories.path, `${body.path}%`)));
+
+		fileMutationEvents.emit('directory:deleted', {
+			env: c.env,
+			origin: new URL(c.req.url).origin,
+			waitUntil: promise => c.executionCtx.waitUntil(promise),
+			bucket: { id: bucket.id, name: bucket.name },
+			prefix: body.path,
+			files: purgeFiles,
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/directories/delete')),

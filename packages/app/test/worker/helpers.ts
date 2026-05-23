@@ -69,6 +69,7 @@ export async function setupDb(): Promise<void> {
 	}
 
 	await env.DB.prepare('UPDATE app_settings SET value = \'open\' WHERE key = \'registration_mode\'').run();
+	await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'worker_cache_version\', ?)').bind(`test-${Date.now()}-${Math.random()}`).run();
 }
 
 // Clear all data between tests (delete in dependency order)
@@ -96,6 +97,7 @@ export async function clearDb(): Promise<void> {
 		env.DB.prepare('DELETE FROM used_bucket_names'),
 	]);
 	await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'registration_mode\', \'open\')').run();
+	await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'worker_cache_version\', ?)').bind(`test-${Date.now()}-${Math.random()}`).run();
 }
 
 // Sign up a user and return status + response data

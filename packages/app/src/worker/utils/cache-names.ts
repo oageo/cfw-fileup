@@ -6,6 +6,7 @@ export const workerCacheBaseNames = {
 	download: 'download',
 	missingDownloadFile: 'download-file-not-found',
 	shortGet: 'api-short-get',
+	resolveRoute: 'resolve-route',
 } as const;
 
 export const workerCacheVersionSettingKey = 'worker_cache_version';

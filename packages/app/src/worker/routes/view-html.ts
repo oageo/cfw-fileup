@@ -1,14 +1,16 @@
 import { Hono, type Context } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { buckets, files, tarFiles, targzFiles } from '../scheme/index';
-import { shortGetCache } from '../middleware/short-get-cache';
+import { deleteResolveRouteCache, resolveRouteCache } from '../middleware/resolve-route-cache';
 import { getDb } from '../utils/db';
+import { fileMutationEvents, runMutationTask, type FileReference } from '../events/file-mutations';
 
 const app = new Hono<{ Bindings: Env }>();
 type AppContext = Context<{ Bindings: Env }>;
 
 const activityJsonType = 'application/activity+json';
 const viewHtmlCacheMaxAgeSeconds = 3 * 60 * 60;
+let viewHtmlCachePurgeListenersRegistered = false;
 
 function decodePathSegment(segment: string): string | null {
 	try {
@@ -103,7 +105,69 @@ function withActivityPubAlternate(response: Response, href: string): Response {
 	});
 }
 
-app.use('/v/*', shortGetCache({ maxAgeSeconds: viewHtmlCacheMaxAgeSeconds }));
+function encodePath(path: string): string {
+	return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+}
+
+function getViewCachePath(bucketName: string, filePath: string): string {
+	return `/v/${encodeURIComponent(bucketName)}/${encodePath(filePath)}`;
+}
+
+function getArchiveEntryViewCachePath(bucketName: string, filePath: string, entryPath: string): string {
+	return `${getViewCachePath(bucketName, filePath)}/${encodeURIComponent(':entries')}/${encodeURIComponent(entryPath)}`;
+}
+
+function purgeViewCache(env: Env, origin: string, bucketName: string, file: FileReference): Promise<Array<PromiseSettledResult<boolean>>> {
+	return Promise.allSettled([
+		deleteResolveRouteCache(env, getViewCachePath(bucketName, file.path), origin),
+		...(file.entryPaths ?? []).map(entryPath => deleteResolveRouteCache(env, getArchiveEntryViewCachePath(bucketName, file.path, entryPath), origin)),
+	]);
+}
+
+function registerViewHtmlCachePurgeListeners(): void {
+	if (viewHtmlCachePurgeListenersRegistered) return;
+	viewHtmlCachePurgeListenersRegistered = true;
+
+	fileMutationEvents.on('file:deleted', ({ env, origin, waitUntil, bucket, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeViewCache(env, origin, bucket.name, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /v deleted file cache:');
+	});
+
+	fileMutationEvents.on('file:updated', ({ env, origin, waitUntil, bucket, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeViewCache(env, origin, bucket.name, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /v updated file cache:');
+	});
+
+	fileMutationEvents.on('file:moved', ({ env, origin, waitUntil, sourceBucket, targetBucket, files }) => {
+		const promise = Promise.allSettled(files.flatMap(file => [
+			purgeViewCache(env, origin, sourceBucket.name, file),
+			purgeViewCache(env, origin, targetBucket.name, { id: file.id, path: file.nextPath, entryPaths: file.entryPaths }),
+		])).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /v moved file cache:');
+	});
+
+	fileMutationEvents.on('directory:deleted', ({ env, origin, waitUntil, bucket, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeViewCache(env, origin, bucket.name, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /v deleted directory cache:');
+	});
+
+	fileMutationEvents.on('directory:moved', ({ env, origin, waitUntil, sourceBucket, targetBucket, files }) => {
+		const promise = Promise.allSettled(files.flatMap(file => [
+			purgeViewCache(env, origin, sourceBucket.name, file),
+			purgeViewCache(env, origin, targetBucket.name, { id: file.id, path: file.nextPath, entryPaths: file.entryPaths }),
+		])).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /v moved directory cache:');
+	});
+
+	fileMutationEvents.on('bucket:deleted', ({ env, origin, waitUntil, bucket, files }) => {
+		const promise = Promise.allSettled(files.map(file => purgeViewCache(env, origin, bucket.name, file))).then(() => undefined);
+		runMutationTask(waitUntil, promise, 'Failed to purge /v deleted bucket cache:');
+	});
+}
+
+registerViewHtmlCachePurgeListeners();
+
+app.use('/v/*', resolveRouteCache({ externalMaxAgeSeconds: viewHtmlCacheMaxAgeSeconds }));
 
 app.get('/v/*', async (c) => {
 	const response = await c.env.ASSETS.fetch(c.req.raw);
