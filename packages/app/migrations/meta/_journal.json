@@ -50,6 +50,13 @@
       "when": 1779554229611,
       "tag": "0006_easy_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1779558100979,
+      "tag": "0007_famous_vermin",
+      "breakpoints": true
     }
   ]
 }

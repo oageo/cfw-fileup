@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { Download, EllipsisVertical, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
+import { Download, Eye, EyeOff, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
 import NirA from '@/components/NirA.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -587,7 +587,9 @@ async function executeBulkDelete(): Promise<void> {
 	}
 
 	const targets = selectAllMode.value
-		? [{ type: 'directory' as const, path: props.filePath, excludePaths: Array.from(excludedPaths.value) }]
+		? selectableEntries.value
+			.filter(entry => !excludedPaths.value.has(entry.fullPath))
+			.map(entry => ({ type: entry.isDir ? 'directory' as const : 'file' as const, path: entry.fullPath }))
 		: Array.from(selectedPaths.value).map((path) => {
 			const entry = entries.value.find(e => e.fullPath === path);
 			return { type: entry?.isDir ? 'directory' as const : 'file' as const, path };
@@ -614,12 +616,12 @@ async function executeBulkUpdateListing(isListed: boolean): Promise<void> {
 		return;
 	}
 
-	const targets = selectAllMode.value
-		? [{ type: 'directory' as const, path: props.filePath, excludePaths: Array.from(excludedPaths.value) }]
-		: Array.from(selectedPaths.value).map((path) => {
-			const entry = entries.value.find(e => e.fullPath === path);
-			return { type: entry?.isDir ? 'directory' as const : 'file' as const, path };
-		});
+	const targetEntries = selectAllMode.value
+		? selectableEntries.value.filter(entry => !excludedPaths.value.has(entry.fullPath))
+		: Array.from(selectedPaths.value)
+			.map(path => entries.value.find(entry => entry.fullPath === path))
+			.filter((entry): entry is DisplayEntry => entry != null);
+	const targets = targetEntries.map(entry => ({ type: entry.isDir ? 'directory' as const : 'file' as const, path: entry.fullPath }));
 
 	const result = await apiPost('/api/files/update-listing', { bucketId: bucketId.value, targets, isListed });
 	if (!result.ok) {
@@ -627,11 +629,31 @@ async function executeBulkUpdateListing(isListed: boolean): Promise<void> {
 		return;
 	}
 
+	const targetPaths = new Set(targetEntries.map(entry => entry.fullPath));
+	entries.value = entries.value.map(entry => targetPaths.has(entry.fullPath) ? { ...entry, isListed } : entry);
 	selectedPaths.value.clear();
 	excludedPaths.value.clear();
 	selectAllMode.value = false;
 	selectionPopoverOpen.value = false;
-	await load();
+}
+
+async function executeEntryUpdateListing(entry: DisplayEntry, isListed: boolean, event?: Event): Promise<void> {
+	if (event) stopGridActionEvent(event);
+	deleteError.value = '';
+	if (!bucketId.value) {
+		deleteError.value = '更新できません（バケットIDが不明）';
+		return;
+	}
+	const result = await apiPost('/api/files/update-listing', {
+		bucketId: bucketId.value,
+		isListed,
+		targets: [{ type: entry.isDir ? 'directory' as const : 'file' as const, path: entry.fullPath }],
+	});
+	if (!result.ok) {
+		deleteError.value = result.data.message ?? '更新失敗';
+		return;
+	}
+	entries.value = entries.value.map(item => item.fullPath === entry.fullPath ? { ...item, isListed } : item);
 }
 
 function buildArchiveEntries(): void {
@@ -732,6 +754,7 @@ async function load(): Promise<void> {
 					isDir: true,
 					fullPath: `${props.filePath}${e.name}/`,
 					label: 'フォルダ',
+					isListed: e.isListed,
 					};
 				}
 				const mime = e.isTargz ? 'application/gzip' : e.isTar ? 'application/x-tar' : (e.mimeType ?? '');
@@ -1041,8 +1064,8 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
                 </td>
                 <td v-if="!isArchive && authStore.user" :class="$style.publicCell">
-                  <div v-if="!entry.isDir" :class="$style.publicBadges">
-                    <span v-if="entry.visibility != null" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
+                  <div :class="$style.publicBadges">
+                    <span v-if="!entry.isDir && entry.visibility != null" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
                       {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
                     </span>
                     <span v-if="entry.isListed != null" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
@@ -1056,10 +1079,23 @@ watch([isPartiallySelected, isAllSelected], async () => {
                       :class="['btn', 'btn-ghost', 'btn-icon', $style.entryMenuButton]"
                       :aria-label="`${entry.name}の操作`"
                     >
-                      <EllipsisVertical :size="16" :stroke-width="2" aria-hidden="true" />
+                      <Eye v-if="entry.isListed !== false" :size="16" :stroke-width="2" aria-hidden="true" />
+                      <EyeOff v-else :size="16" :stroke-width="2" aria-hidden="true" />
                     </Popover.Activator>
                     <Popover.Content class="action-menu">
                       <div class="action-menu-inner">
+                        <Button.Root v-if="entry.isListed !== true" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateListing(entry, true)">
+                          <Button.Content>
+                            <Eye :size="16" :stroke-width="2" aria-hidden="true" />
+                            一覧に表示
+                          </Button.Content>
+                        </Button.Root>
+                        <Button.Root v-if="entry.isListed !== false" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateListing(entry, false)">
+                          <Button.Content>
+                            <EyeOff :size="16" :stroke-width="2" aria-hidden="true" />
+                            一覧から非表示
+                          </Button.Content>
+                        </Button.Root>
                         <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestMoveEntry(entry)">
                           <Button.Content>移動/名前変更</Button.Content>
                         </Button.Root>
@@ -1141,58 +1177,84 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   <span v-if="!entry.isDir && entry.visibility != null && !isArchive" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
                     {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}
                   </span>
-                  <span v-if="!entry.isDir && entry.isListed != null && !isArchive" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
+                  <span v-if="entry.isListed != null && !isArchive" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
                     {{ entry.isListed ? '表示' : '非表示' }}
                   </span>
                 </div>
                 <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
-                  <Popover.Root>
-                    <Popover.Activator
-                      :class="['btn', 'btn-ghost', 'btn-icon', $style.entryMenuButton]"
-                      :aria-label="`${entry.name}の操作`"
-                      @click="stopGridActionEvent"
-                    >
-                      <EllipsisVertical :size="16" :stroke-width="2" aria-hidden="true" />
-                    </Popover.Activator>
-                    <Popover.Content class="action-menu">
-                      <div class="action-menu-inner">
-                        <a
-                          v-if="!entry.isDir && entry.fileId && entry.visibility === 'public'"
-                          :href="`/d/${entry.fileId}`"
-                          download
-                          :class="['btn', 'btn-ghost', 'w-full', $style.menuItem]"
-                          @click.stop
-                        >
-                          <Download :size="16" :stroke-width="2" aria-hidden="true" />
-                          ダウンロード
-                        </a>
-                        <Button.Root
-                          v-else-if="entry.isDir"
-                          class="btn btn-ghost w-full"
-                          :class="$style.menuItem"
-                          :disabled="archiveDownloadProgress != null"
-                          @click="(event: Event) => { stopGridActionEvent(event); startEntryArchiveDownload(entry); }"
-                        >
-                          <Button.Content>
-                            <Download :size="16" :stroke-width="2" aria-hidden="true" />
-                            ダウンロード
-                          </Button.Content>
-                        </Button.Root>
-                        <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="(event: Event) => requestMoveEntry(entry, event)">
-                          <Button.Content>
-                            <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
-                            移動/名前変更
-                          </Button.Content>
-                        </Button.Root>
-                        <Button.Root class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="(event: Event) => { stopGridActionEvent(event); requestDeleteEntry(entry); }">
-                          <Button.Content>
-                            <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
-                            削除
-                          </Button.Content>
-                        </Button.Root>
-                      </div>
-                    </Popover.Content>
-                  </Popover.Root>
+                  <a
+                    v-if="!entry.isDir && entry.fileId && entry.visibility === 'public'"
+                    :href="`/d/${entry.fileId}`"
+                    download
+                    :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardDownloadButton]"
+                    :aria-label="`${entry.name}をダウンロード`"
+                    title="ダウンロード"
+                    @click.stop
+                  >
+                    <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                  </a>
+                  <Button.Root
+                    v-else-if="entry.isDir"
+                    class="btn btn-ghost"
+                    :class="[$style.gridCardActionButton, $style.gridCardDownloadButton]"
+                    :disabled="archiveDownloadProgress != null"
+                    :aria-label="`${entry.name}をダウンロード`"
+                    title="ダウンロード"
+                    @click="(event: Event) => { stopGridActionEvent(event); startEntryArchiveDownload(entry); }"
+                  >
+                    <Button.Content>
+                      <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+                  <Button.Root
+                    v-else
+                    class="btn btn-ghost"
+                    :class="[$style.gridCardActionButton, $style.gridCardDownloadButton]"
+                    disabled
+                    aria-label="ダウンロード不可"
+                    title="ダウンロード不可"
+                  >
+                    <Button.Content>
+                      <Download :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+
+                  <Button.Root
+                    class="btn btn-ghost"
+                    :class="[$style.gridCardActionButton, $style.gridCardIconButton]"
+                    :aria-label="entry.isListed === false ? `${entry.name}を一覧に表示` : `${entry.name}を一覧から非表示`"
+                    :title="entry.isListed === false ? '一覧に表示' : '一覧から非表示'"
+                    @click="(event: Event) => executeEntryUpdateListing(entry, entry.isListed === false, event)"
+                  >
+                    <Button.Content>
+                      <Eye v-if="entry.isListed !== false" :size="16" :stroke-width="2" aria-hidden="true" />
+                      <EyeOff v-else :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+
+                  <Button.Root
+                    class="btn btn-ghost"
+                    :class="[$style.gridCardActionButton, $style.gridCardIconButton]"
+                    :aria-label="`${entry.name}を移動または名前変更`"
+                    title="移動/名前変更"
+                    @click="(event: Event) => requestMoveEntry(entry, event)"
+                  >
+                    <Button.Content>
+                      <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+
+                  <Button.Root
+                    class="btn btn-ghost-danger"
+                    :class="[$style.gridCardActionButton, $style.gridCardIconButton]"
+                    :aria-label="`${entry.name}を削除`"
+                    title="削除"
+                    @click="(event: Event) => { stopGridActionEvent(event); requestDeleteEntry(entry); }"
+                  >
+                    <Button.Content>
+                      <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
                 </div>
               </div>
             </div>
@@ -1608,10 +1670,25 @@ watch([isPartiallySelected, isAllSelected], async () => {
 }
 
 .gridCardActionButton {
+  display: inline-flex;
+  align-items: center;
   min-width: 0;
   justify-content: center;
   padding-block: 4px;
   line-height: 1;
+}
+
+.gridCardActionButton :global(svg) {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.gridCardActionButton :global([data-v0-button-content]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
 }
 
 .gridCardDownloadButton {

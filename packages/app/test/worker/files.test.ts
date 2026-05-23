@@ -742,6 +742,11 @@ describe('POST /api/files/update', () => {
 			body: JSON.stringify({ bucketName: 'directory_listing_bucket' }),
 		}, env);
 		const { bucketId } = await bucketRes.json() as { bucketId: string };
+		await app.request('/api/directories/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'docs/' }),
+		}, env);
 		await createClosedFile({ token, bucketId, path: 'docs/a.txt', visibility: 'public' });
 		await createClosedFile({ token, bucketId, path: 'docs/nested/b.txt', visibility: 'public' });
 		await createClosedFile({ token, bucketId, path: 'outside.txt', visibility: 'public' });
@@ -757,7 +762,7 @@ describe('POST /api/files/update', () => {
 		}, env);
 		expect(updateRes.status).toBe(200);
 		const updateBody = await updateRes.json() as { updatedCount: number };
-		expect(updateBody.updatedCount).toBe(2);
+		expect(updateBody.updatedCount).toBe(1);
 
 		const rootRes = await app.request('/api/files/ls?bucketName=directory_listing_bucket&path=', {}, env);
 		expect(rootRes.status).toBe(200);
@@ -771,7 +776,7 @@ describe('POST /api/files/update', () => {
 		}, env);
 		expect(ownerRes.status).toBe(200);
 		const ownerBody = await ownerRes.json() as { entries: Array<{ name: string; isListed?: boolean }> };
-		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'a.txt', isListed: false }));
+		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'a.txt', isListed: true }));
 		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'nested' }));
 	});
 
@@ -802,9 +807,17 @@ describe('POST /api/files/update', () => {
 			body: JSON.stringify({ bucketName: 'listing_exclude_bucket' }),
 		}, env);
 		const { bucketId } = await bucketRes.json() as { bucketId: string };
+		for (const path of ['docs/', 'docs/keep-dir/', 'docs/hide-dir/']) {
+			await app.request('/api/directories/create', {
+				method: 'POST',
+				headers: authHeaders(token),
+				body: JSON.stringify({ bucketId, path }),
+			}, env);
+		}
 		await createClosedFile({ token, bucketId, path: 'docs/a.txt', visibility: 'public' });
 		await createClosedFile({ token, bucketId, path: 'docs/keep.txt', visibility: 'public' });
 		await createClosedFile({ token, bucketId, path: 'docs/keep-dir/b.txt', visibility: 'public' });
+		await createClosedFile({ token, bucketId, path: 'docs/hide-dir/c.txt', visibility: 'public' });
 
 		const updateRes = await app.request('/api/files/update-listing', {
 			method: 'POST',
@@ -812,7 +825,7 @@ describe('POST /api/files/update', () => {
 			body: JSON.stringify({
 				bucketId,
 				isListed: false,
-				targets: [{ type: 'directory', path: 'docs/', excludePaths: ['docs/keep.txt', 'docs/keep-dir/'] }],
+				targets: [{ type: 'directory', path: 'docs/', excludePaths: ['docs/', 'docs/keep-dir/'] }],
 			}),
 		}, env);
 		expect(updateRes.status).toBe(200);
@@ -822,7 +835,7 @@ describe('POST /api/files/update', () => {
 		const publicRes = await app.request('/api/files/ls?bucketName=listing_exclude_bucket&path=docs/', {}, env);
 		expect(publicRes.status).toBe(200);
 		const publicBody = await publicRes.json() as { entries: Array<{ name: string }> };
-		expect(publicBody.entries.map(entry => entry.name)).toEqual(['keep-dir', 'keep.txt']);
+		expect(publicBody.entries.map(entry => entry.name)).toEqual(['keep-dir', 'a.txt', 'keep.txt']);
 	});
 
 	test('update listed setting returns 404 when no files match', async () => {

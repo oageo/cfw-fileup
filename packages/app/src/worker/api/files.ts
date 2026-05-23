@@ -41,10 +41,11 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	}
 
 	if (normalizedPath !== '') {
-		const dirExists = await db.select({ id: directories.id })
+		const dirExists = await db.select({ id: directories.id, isListed: directories.isListed })
 			.from(directories)
 			.where(and(eq(directories.bucketId, bucket.id), eq(directories.path, normalizedPath)))
 			.get();
+		if (!isOwnerOrAdmin && dirExists && !dirExists.isListed) throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		if (!dirExists) {
 			const hasFileCondition = isOwnerOrAdmin
 				? and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true))
@@ -70,19 +71,21 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		})
 		.from(files)
 		.where(fileCondition);
-	const allDirs = await db.select({ path: directories.path }).from(directories).where(eq(directories.bucketId, bucket.id));
+	const allDirs = await db.select({ path: directories.path, isListed: directories.isListed }).from(directories).where(eq(directories.bucketId, bucket.id));
+	const hiddenDirPaths = isOwnerOrAdmin ? new Set<string>() : new Set(allDirs.filter(dir => !dir.isListed).map(dir => dir.path));
 
 	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean }> = [];
 	const seenDirs = new Set<string>();
 	for (const d of allDirs) {
 		if (!d.path.startsWith(normalizedPath)) continue;
+		if (!isOwnerOrAdmin && !d.isListed) continue;
 		const rest = d.path.slice(normalizedPath.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx !== -1) {
 			const dirName = rest.slice(0, slashIdx);
 			if (!seenDirs.has(dirName)) {
 				seenDirs.add(dirName);
-				entries.push({ type: 'dir', name: dirName });
+				entries.push({ type: 'dir', name: dirName, isListed: d.isListed });
 			}
 		}
 	}
@@ -94,9 +97,11 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility, ...(isOwnerOrAdmin ? { isListed: f.isListed } : {}) });
 		} else {
 			const dirName = rest.slice(0, slashIdx);
+			if (hiddenDirPaths.has(`${normalizedPath}${dirName}/`)) continue;
 			if (!seenDirs.has(dirName)) {
 				seenDirs.add(dirName);
-				entries.push({ type: 'dir', name: dirName });
+				const dir = allDirs.find(d => d.path === `${normalizedPath}${dirName}/`);
+				entries.push({ type: 'dir', name: dirName, ...(isOwnerOrAdmin && dir ? { isListed: dir.isListed } : {}) });
 			}
 		}
 	}
@@ -624,32 +629,64 @@ app.post(
 
 		let matchedCount = 0;
 		for (const target of body.targets) {
-			const whereClauses = ['bucket_id = ?', 'is_closed = 1'];
-			const params: Array<string | number> = [bucket.id];
 			if (target.type === 'file') {
-				whereClauses.push('path = ?');
-				params.push(target.path);
-			} else {
-				const prefix = target.path === '' || target.path.endsWith('/') ? target.path : `${target.path}/`;
-				whereClauses.push('path LIKE ?');
-				params.push(`${prefix}%`);
-				for (const excludedPath of target.excludePaths ?? []) {
-					const excludedPrefix = excludedPath === '' || excludedPath.endsWith('/') ? excludedPath : `${excludedPath}/`;
-					whereClauses.push('path != ?', 'path NOT LIKE ?');
-					params.push(excludedPath, `${excludedPrefix}%`);
-				}
+				const whereClauses = ['bucket_id = ?', 'is_closed = 1', 'path = ?'];
+				const params: Array<string | number> = [bucket.id, target.path];
+				const whereSql = whereClauses.join(' AND ');
+				const countRow = await c.env.DB
+					.prepare(`SELECT COUNT(*) AS count FROM files WHERE ${whereSql}`)
+					.bind(...params)
+					.first<{ count: number }>();
+				const countForTarget = countRow?.count ?? 0;
+				if (countForTarget === 0) continue;
+				matchedCount += countForTarget;
+				await c.env.DB
+					.prepare(`UPDATE files SET is_listed = ? WHERE ${whereSql}`)
+					.bind(body.isListed ? 1 : 0, ...params)
+					.run();
+				continue;
 			}
 
+			const prefix = target.path === '' || target.path.endsWith('/') ? target.path : `${target.path}/`;
+			const excludePaths = target.excludePaths ?? [];
+			const whereClauses = ['bucket_id = ?', 'path LIKE ?'];
+			const params: Array<string | number> = [bucket.id, `${prefix}%`];
+			for (const excludedPath of excludePaths) {
+				const normalizedExcludedPath = excludedPath.endsWith('/') ? excludedPath : `${excludedPath}/`;
+				if (normalizedExcludedPath === prefix) {
+					whereClauses.push('path != ?');
+					params.push(normalizedExcludedPath);
+				} else {
+					whereClauses.push('path != ?', 'path NOT LIKE ?');
+					params.push(normalizedExcludedPath, `${normalizedExcludedPath}%`);
+				}
+			}
 			const whereSql = whereClauses.join(' AND ');
 			const countRow = await c.env.DB
-				.prepare(`SELECT COUNT(*) AS count FROM files WHERE ${whereSql}`)
+				.prepare(`SELECT COUNT(*) AS count FROM directories WHERE ${whereSql}`)
 				.bind(...params)
 				.first<{ count: number }>();
 			const countForTarget = countRow?.count ?? 0;
+			if (countForTarget === 0) {
+				const targetDirectory = await db.select({ id: directories.id })
+					.from(directories)
+					.where(and(eq(directories.bucketId, bucket.id), eq(directories.path, prefix)))
+					.get();
+				if (!targetDirectory && excludePaths.length === 0) {
+					await db.insert(directories).values({
+						id: genEaidx(Date.now()),
+						bucketId: bucket.id,
+						path: prefix,
+						isListed: body.isListed,
+					}).onConflictDoNothing();
+					matchedCount += 1;
+					continue;
+				}
+			}
 			if (countForTarget === 0) continue;
 			matchedCount += countForTarget;
 			await c.env.DB
-				.prepare(`UPDATE files SET is_listed = ? WHERE ${whereSql}`)
+				.prepare(`UPDATE directories SET is_listed = ? WHERE ${whereSql}`)
 				.bind(body.isListed ? 1 : 0, ...params)
 				.run();
 		}
@@ -960,6 +997,7 @@ app.post(
 				id: genEaidx(Date.now()),
 				bucketId: targetBucket.id,
 				path: normalizedTargetPath,
+				isListed: sourceDirectory?.isListed ?? true,
 			}).onConflictDoNothing();
 		}
 
