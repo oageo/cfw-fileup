@@ -8,26 +8,26 @@ import { authMiddleware } from '../middleware/auth';
 import { hashPassword, verifyPassword } from '../utils/crypto';
 import { validateUsername } from '../utils/name-validation';
 import { apiDef, getResponseDefWithAuth } from '../../shared/api';
-import type { JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
+import type { JsonCtx } from '../../shared/api';
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.use(authMiddleware);
 
 app.post(
-  '/me',
-  describeRoute(omitResAndReq(apiDef['/api/account/me'])),
-  validator('json', apiDef['/api/account/me'].req),
-  describeResponse(async (c) => {
-    const user = c.get('user');
-    return c.json({
-      id: user.id,
-      username: user.username,
-      isAdmin: user.isAdmin,
-      termsAgreedAt: user.termsAgreedAt,
-    }, 200);
-  }, getResponseDefWithAuth('/api/account/me'))
+	'/me',
+	describeRoute(omitResAndReq(apiDef['/api/account/me'])),
+	validator('json', apiDef['/api/account/me'].req),
+	describeResponse(async (c) => {
+		const user = c.get('user');
+		return c.json({
+			id: user.id,
+			username: user.username,
+			isAdmin: user.isAdmin,
+			termsAgreedAt: user.termsAgreedAt,
+		}, 200);
+	}, getResponseDefWithAuth('/api/account/me')),
 );
 
 app.post(

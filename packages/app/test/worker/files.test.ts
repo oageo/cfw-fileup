@@ -50,7 +50,7 @@ describe('POST /api/files/create/open', () => {
 		expect(res.status).toBe(404);
 	});
 
-	test("cannot create file in another user's bucket", async () => {
+	test('cannot create file in another user\'s bucket', async () => {
 		const { bucketId } = await setupUserAndBucket();
 		const { data: d2 } = await signup('user2');
 		const t2 = String(d2.token);
@@ -694,7 +694,7 @@ describe('POST /api/files/delete', () => {
 		expect(deleteRes.status).toBe(200);
 	});
 
-	test("other user cannot delete another user's file", async () => {
+	test('other user cannot delete another user\'s file', async () => {
 		const { token, bucketId } = await setupUserAndBucket();
 		const { data: d2 } = await signup('user2');
 		const t2 = String(d2.token);

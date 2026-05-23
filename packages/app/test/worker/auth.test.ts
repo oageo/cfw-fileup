@@ -64,7 +64,7 @@ describe('POST /api/signup', () => {
 
 	test('with SIGNUP_PASSPHRASE set: second user without passphrase returns 403', async () => {
 		const customEnv = Object.assign({}, env, { SIGNUP_PASSPHRASE: 'secret' });
-		await env.DB.prepare("UPDATE app_settings SET value = 'passphrase' WHERE key = 'registration_mode'").run();
+		await env.DB.prepare('UPDATE app_settings SET value = \'passphrase\' WHERE key = \'registration_mode\'').run();
 		await app.request('/api/signup', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -80,7 +80,7 @@ describe('POST /api/signup', () => {
 
 	test('with SIGNUP_PASSPHRASE set: correct passphrase allows signup', async () => {
 		const customEnv = Object.assign({}, env, { SIGNUP_PASSPHRASE: 'secret' });
-		await env.DB.prepare("UPDATE app_settings SET value = 'passphrase' WHERE key = 'registration_mode'").run();
+		await env.DB.prepare('UPDATE app_settings SET value = \'passphrase\' WHERE key = \'registration_mode\'').run();
 		await app.request('/api/signup', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

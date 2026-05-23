@@ -1,8 +1,8 @@
 import * as v from 'valibot';
-import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
+import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 export const authApiDef = {
 	'/api/signup': {

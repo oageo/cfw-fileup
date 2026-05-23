@@ -203,7 +203,7 @@ describe('POST /api/buckets/delete', () => {
 		expect(buckets).toHaveLength(0);
 	});
 
-	test("other user cannot delete another user's bucket (403)", async () => {
+	test('other user cannot delete another user\'s bucket (403)', async () => {
 		const { data: d1 } = await signup('firstuser');
 		const { data: d2 } = await signup('user2');
 		const t1 = String(d1.token);

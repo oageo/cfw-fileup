@@ -1,7 +1,9 @@
 import * as v from 'valibot';
 
 const VALID_NAME_PATTERN = /^[0-9a-zA-Z_]+$/;
-const INVALID_PATH_SEGMENT_CHARS_PATTERN = /[\u0000-\u001F\u007F<>:"|?*\\/]/;
+// Control characters are intentionally rejected from file and directory names.
+// eslint-disable-next-line no-control-regex
+const INVALID_PATH_SEGMENT_CHARS_PATTERN = new RegExp('[\\u0000-\\u001F\\u007F<>:"|?*\\\\/]');
 
 export const NAME_FORMAT_ERROR = '英数字とアンダースコア [0-9a-zA-Z_] のみ使用できます';
 export const PATH_SEGMENT_FORMAT_ERROR = '名前に制御文字、/、\\、< > : " | ? * は使えません。また、末尾をスペースやドットにはできません';
@@ -28,7 +30,7 @@ export function isValidPathSegmentName(name: string): boolean {
 
 export function getInvalidPathSegment(path: string, options: { allowTrailingSlash: boolean }): string | null {
 	if (path === '') return '';
-	if (path.startsWith('/') || path.startsWith('\\')) return path[0] ?? '';
+	if (path.startsWith('/') || path.startsWith('\\')) return path[0];
 	const trimmed = options.allowTrailingSlash && path.endsWith('/') ? path.slice(0, -1) : path;
 	if (trimmed === '') return '';
 	const segments = trimmed.split('/');

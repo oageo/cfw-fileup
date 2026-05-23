@@ -1,6 +1,6 @@
 import { test as base } from '@playwright/test';
-import type { Page } from '@playwright/test';
 import { E2E_ADMIN_USERNAME, E2E_ADMIN_PASSWORD } from './global-setup';
+import type { Page } from '@playwright/test';
 
 interface TestUser {
 	username: string;

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
-import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
 import { getWorkerCacheName, workerCacheBaseNames } from '../../src/worker/utils/cache-names';
+import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
 
 beforeAll(async () => {
 	await setupDb();

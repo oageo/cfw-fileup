@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
-import type { FileVisibility } from '../../src/shared/file-visibility';
 import { env, app, setupDb, clearDb, signup, authHeaders } from './helpers';
+import type { FileVisibility } from '../../src/shared/file-visibility';
 
 beforeAll(async () => {
 	await setupDb();
@@ -104,7 +104,7 @@ describe('POST /api/file-tokens/create', () => {
 		expect(res.status).toBe(404);
 	});
 
-	test("other user's bucket returns 403", async () => {
+	test('other user\'s bucket returns 403', async () => {
 		const { token: t1, bucketId: b1, bucketName: bn1 } = await setupUserAndBucket('user1');
 		await createClosedFile(t1, b1, bn1, 'secret.txt');
 		const { token: t2 } = await setupUserAndBucket('user2');
@@ -189,7 +189,7 @@ describe('POST /api/file-tokens/list', () => {
 		expect(typeof body.tokens[0].createdAt).toBe('number');
 	});
 
-	test("other user's bucket returns 403", async () => {
+	test('other user\'s bucket returns 403', async () => {
 		const { token: t1, bucketId: b1, bucketName: bn1 } = await setupUserAndBucket('user1');
 		await createClosedFile(t1, b1, bn1, 'secret.txt');
 		const { token: t2 } = await setupUserAndBucket('user2');
@@ -257,7 +257,7 @@ describe('POST /api/file-tokens/delete', () => {
 		expect(res.status).toBe(404);
 	});
 
-	test("other user cannot delete another user's token", async () => {
+	test('other user cannot delete another user\'s token', async () => {
 		const { token: t1, bucketId: b1, bucketName: bn1 } = await setupUserAndBucket('user1');
 		await createClosedFile(t1, b1, bn1, 'secret.txt');
 		const createRes = await app.request('/api/file-tokens/create', {

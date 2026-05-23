@@ -1,5 +1,4 @@
 import * as v from 'valibot';
-import type { Context } from 'hono';
 import { ErrorResponse } from '../api.schemas.js';
 import { authApiDef } from './auth.js';
 import { accountApiDef } from './account.js';
@@ -9,6 +8,7 @@ import { fileTokensApiDef } from './file-tokens.js';
 import { adminApiDef } from './admin.js';
 import { directoriesApiDef } from './directories.js';
 import { passkeyApiDef } from './passkey.js';
+import type { Context } from 'hono';
 import type { ApiEndpointResponseType } from '../api.types.js';
 
 export * from './auth.js';
@@ -45,22 +45,22 @@ type GetSuccessSchema<Res> =
 export type ApiRes<T extends keyof ApiDef> = v.InferOutput<GetSuccessSchema<ApiDef[T]['res']>>;
 
 export type JsonCtx<T extends keyof ApiDef, B extends object = object> = Context<
-  { Bindings: B },
-  string,
-  { in: { json: ApiReq<T> }; out: { json: ApiReq<T> } }
+	{ Bindings: B },
+	string,
+	{ in: { json: ApiReq<T> }; out: { json: ApiReq<T> } }
 >;
 
 const authErrorResponses = {
-  401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
-  403: { description: 'Forbidden', content: { 'application/json': { vSchema: ErrorResponse } } },
+	401: { description: 'Unauthorized', content: { 'application/json': { vSchema: ErrorResponse } } },
+	403: { description: 'Forbidden', content: { 'application/json': { vSchema: ErrorResponse } } },
 } as const satisfies ApiEndpointResponseType;
 
 export function getResponseDefWithAuth<T extends keyof ApiDef>(
-  endpoint: T,
+	endpoint: T,
 ): Omit<typeof authErrorResponses, keyof ApiDef[T]['res']> & ApiDef[T]['res'] {
-  return Object.assign({}, authErrorResponses, apiDef[endpoint].res) as Omit<
+	return Object.assign({}, authErrorResponses, apiDef[endpoint].res) as Omit<
     typeof authErrorResponses,
     keyof ApiDef[T]['res']
-  > &
+	> &
     ApiDef[T]['res'];
 }

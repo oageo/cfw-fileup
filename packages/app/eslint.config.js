@@ -19,6 +19,17 @@ export default [
 		},
 	},
 	{
+		files: [
+			'*.config.ts',
+			'drizzle.config.ts',
+			'playwright.config.ts',
+			'test/e2e/global-setup.ts',
+		],
+		rules: {
+			'import/no-default-export': 'off',
+		},
+	},
+	{
 		files: ['**/*.ts', '**/*.tsx'],
 		ignores: ['src/client/**', 'src/sw/**', 'test/worker/**'],
 		languageOptions: {

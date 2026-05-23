@@ -1,8 +1,8 @@
 import * as v from 'valibot';
-import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { MAX_FILE_PATH_LENGTH } from '../const.js';
 import { directoryPathValidation } from '../name-validation.js';
+import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 export const directoriesApiDef = {
 	'/api/directories/create': {

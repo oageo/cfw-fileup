@@ -8,6 +8,6 @@ export const IdString = v.pipe(
 );
 
 export const ErrorResponse = v.pipe(
-  v.object({ error: v.string() }),
-  v.metadata({ ref: 'ErrorResponse' }),
+	v.object({ error: v.string() }),
+	v.metadata({ ref: 'ErrorResponse' }),
 );

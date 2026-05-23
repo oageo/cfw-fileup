@@ -11,8 +11,8 @@
  * Usage:
  *   BASE_URL=http://localhost:5173 SCENARIO=auth SCREENSHOTS_DIR=./screenshots npx tsx scripts/screenshot-pr.ts
  */
-import { chromium } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { chromium } from '@playwright/test';
 
 const BASE_URL = process.env['BASE_URL'] ?? 'http://localhost:5173';
 const ADMIN_USERNAME = 'e2e_admin';

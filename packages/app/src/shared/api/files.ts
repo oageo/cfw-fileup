@@ -1,5 +1,4 @@
 import * as v from 'valibot';
-import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { fileVisibilitySchema } from '../file-visibility.js';
 import { filePathValidation } from '../name-validation.js';
@@ -11,6 +10,7 @@ import {
 	MAX_MIME_TYPE_LENGTH,
 	MAX_PASSPHRASE_LENGTH,
 } from '../const.js';
+import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 const BucketNameString = v.pipe(v.string(), v.maxLength(MAX_BUCKET_NAME_LENGTH));
 const FilePathString = v.pipe(v.string(), v.maxLength(MAX_FILE_PATH_LENGTH));

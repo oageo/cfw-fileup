@@ -298,9 +298,6 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 
-		if (!body.fileId || !body.files) {
-			throw new HTTPException(400, { message: 'fileId and files are required' });
-		}
 		const invalidEntry = body.files.find(entry => !isValidFilePath(entry.path));
 		if (invalidEntry) {
 			throw new HTTPException(400, { message: `Invalid file path: ${invalidEntry.path}` });
@@ -359,9 +356,6 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 
-		if (!body.fileId || !body.files) {
-			throw new HTTPException(400, { message: 'fileId and files are required' });
-		}
 		const invalidEntry = body.files.find(entry => !isValidFilePath(entry.path));
 		if (invalidEntry) {
 			throw new HTTPException(400, { message: `Invalid file path: ${invalidEntry.path}` });
@@ -532,7 +526,7 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 
-		if (!body?.fileId) {
+		if (!body.fileId) {
 			throw new HTTPException(400, { message: 'fileId is required' });
 		}
 

@@ -1,8 +1,8 @@
 import * as v from 'valibot';
-import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_BUCKET_NAME_LENGTH } from '../const.js';
+import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 export const bucketsApiDef = {
 	'/api/buckets/create': {

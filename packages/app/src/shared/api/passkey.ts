@@ -1,7 +1,7 @@
 import * as v from 'valibot';
-import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH, MAX_USERNAME_LENGTH, MAX_WEBAUTHN_FIELD_LENGTH } from '../const.js';
+import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 const WebauthnString = v.pipe(v.string(), v.maxLength(MAX_WEBAUTHN_FIELD_LENGTH));
 
@@ -86,7 +86,7 @@ const BackupCodeStatus = v.pipe(
 );
 
 const PublicKeyCredentialCreationOptionsJSON = v.pipe(
-  // このunknownは仕方がない
+	// このunknownは仕方がない
 	v.record(v.string(), v.unknown()),
 	v.metadata({ ref: 'PublicKeyCredentialCreationOptionsJSON' }),
 );

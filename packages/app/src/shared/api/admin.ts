@@ -1,7 +1,7 @@
 import * as v from 'valibot';
-import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 import { ErrorResponse, IdString } from '../api.schemas.js';
 import { KnownSettingListSchema, KnownSettingRecordSchema } from '../app-settings.js';
+import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 const QuotaResponse = v.pipe(
 	v.object({
