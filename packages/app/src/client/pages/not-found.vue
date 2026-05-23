@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import NirA from '@/components/nira.vue';
+import NirA from '@/components/NirA.vue';
 </script>
 
 <template>

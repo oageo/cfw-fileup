@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
 
 const purging = ref(false);
 const error = ref('');

@@ -2,12 +2,12 @@
 import { ref, computed, onMounted } from 'vue';
 import { Button, Form, Popover } from '@vuetify/v0';
 import { EllipsisVertical } from '@lucide/vue';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { formatBytes } from '@/utils/byte-size';
-import { isValidNameFormat, NAME_FORMAT_ERROR } from '../../shared/name-validation';
+import { isValidNameFormat, NAME_FORMAT_ERROR } from '../../../shared/name-validation';
 
 interface Bucket {
 	id: string;

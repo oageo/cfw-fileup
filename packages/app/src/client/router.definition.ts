@@ -6,8 +6,8 @@
 
 import { defineAsyncComponent } from 'vue';
 import type { AsyncComponentLoader } from 'vue';
-import MkLoading from './components/loading.vue';
-import MkError from './components/error.vue';
+import MkLoading from './components/Loading.vue';
+import MkError from './components/Error.vue';
 import type { RouteDef } from './nirax';
 
 export const page = (loader: AsyncComponentLoader) => defineAsyncComponent({
@@ -35,22 +35,22 @@ export const ROUTE_DEF = [
 	{
 		path: '/my/buckets',
 		name: 'my-buckets',
-		component: page(() => import('@/pages/my-buckets.vue')),
+		component: page(() => import('@/pages/my/buckets.vue')),
 	},
 	{
 		path: '/my/uploadings',
 		name: 'my-uploadings',
-		component: page(() => import('@/pages/my-uploadings.vue')),
+		component: page(() => import('@/pages/my/uploadings.vue')),
 	},
 	{
 		path: '/my/downloads',
 		name: 'my-downloads',
-		component: page(() => import('@/pages/my-downloads.vue')),
+		component: page(() => import('@/pages/my/downloads.vue')),
 	},
 	{
 		path: '/my/passkeys',
 		name: 'my-passkeys',
-		component: page(() => import('@/pages/my-passkeys.vue')),
+		component: page(() => import('@/pages/my/passkeys.vue')),
 	},
 	{
 		path: '/uploader',
@@ -65,32 +65,32 @@ export const ROUTE_DEF = [
 	{
 		path: '/admin',
 		name: 'admin',
-		component: page(() => import('@/pages/admin-index.vue')),
+		component: page(() => import('@/pages/admin/index.vue')),
 	},
 	{
 		path: '/admin/settings',
 		name: 'admin-settings',
-		component: page(() => import('@/pages/admin-settings.vue')),
+		component: page(() => import('@/pages/admin/settings.vue')),
 	},
 	{
 		path: '/admin/users',
 		name: 'admin-users',
-		component: page(() => import('@/pages/admin-users.vue')),
+		component: page(() => import('@/pages/admin/users/index.vue')),
 	},
 	{
 		path: '/admin/global-quota',
 		name: 'admin-global-quota',
-		component: page(() => import('@/pages/admin-global-quota.vue')),
+		component: page(() => import('@/pages/admin/global-quota.vue')),
 	},
 	{
 		path: '/admin/plans',
 		name: 'admin-plans',
-		component: page(() => import('@/pages/admin-plans.vue')),
+		component: page(() => import('@/pages/admin/plans.vue')),
 	},
 	{
 		path: '/admin/users/:userId',
 		name: 'admin-user-quota',
-		component: page(() => import('@/pages/admin-user-quota.vue')),
+		component: page(() => import('@/pages/admin/users/user-quota.vue')),
 	},
 	{
 		path: '/api-doc',

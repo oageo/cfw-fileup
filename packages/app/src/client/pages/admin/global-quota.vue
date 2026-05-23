@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import * as v from 'valibot';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
 import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
 import SettingItem from '@/components/SettingItem.vue';
 

@@ -2,10 +2,10 @@
 import { computed, ref, onMounted } from 'vue';
 import * as v from 'valibot';
 import { Button } from '@vuetify/v0';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { BYTE_SIZE_UNITS, byteSizeUnitMultiplier, formatBytes, pickByteSizeUnit, type ByteSizeUnit } from '@/utils/byte-size';
 
 interface Plan {

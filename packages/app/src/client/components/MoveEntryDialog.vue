@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import * as v from 'valibot';
-import UploadDestinationDialog from './upload-destination-dialog.vue';
+import UploadDestinationDialog from './UploadDestinationDialog.vue';
 import { apiPost } from '@/utils/api';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { filePathValidation, pathSegmentNameValidation } from '../../shared/name-validation';

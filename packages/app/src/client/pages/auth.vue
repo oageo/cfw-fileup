@@ -8,7 +8,7 @@ import { setToken, fetchCurrentUser } from '../store/auth';
 import { apiPost } from '../utils/api';
 import type { ApiReq } from '../../shared/api';
 import { navigateTo } from '../navigate';
-import TurnstileWidget from '../components/turnstile-widget.vue';
+import TurnstileWidget from '../components/TurnstileWidget.vue';
 import { isValidNameFormat, NAME_FORMAT_ERROR } from '../../shared/name-validation';
 import { MAX_PASSPHRASE_LENGTH } from '../../shared/const';
 

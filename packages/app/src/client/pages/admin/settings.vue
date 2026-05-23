@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import * as v from 'valibot';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
 import SettingItem from '@/components/SettingItem.vue';
-import { KNOWN_SETTINGS, KnownSettingRecordSchema, type KnownSettingKey } from '../../shared/app-settings';
+import { KNOWN_SETTINGS, KnownSettingRecordSchema, type KnownSettingKey } from '../../../shared/app-settings';
 
 type SettingValues = {
 	[K in KnownSettingKey]: v.InferOutput<(typeof KNOWN_SETTINGS)[K]>;

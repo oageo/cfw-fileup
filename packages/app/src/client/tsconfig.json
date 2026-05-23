@@ -19,6 +19,6 @@
   ],
   "exclude": [
     "vite.config.ts",
-    "./components/nira.sample.vue"
+    "./components/NirA.sample.vue"
   ]
 }

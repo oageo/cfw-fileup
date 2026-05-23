@@ -5,7 +5,7 @@ import { CircleFadingArrowUp, Download, Moon, Sun, Upload, User } from '@lucide/
 import { mainRouter } from './router';
 import { fetchCurrentUser, authStore, clearAuth } from './store/auth';
 import { navigateFn } from './navigate';
-import NirA from './components/nira.vue';
+import NirA from './components/NirA.vue';
 import { connectUploadWorker, latestUploadJob } from './store/upload-worker';
 import { downloadStatus, downloadStatusPercent } from './store/download-status';
 

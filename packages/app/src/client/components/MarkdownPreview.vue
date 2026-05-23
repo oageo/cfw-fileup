@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { authHeaders } from '@/store/auth';
-import ShikiCodePreview from './shiki-code-preview.vue';
+import ShikiCodePreview from './ShikiCodePreview.vue';
 
 const props = defineProps<{
 	url: string;

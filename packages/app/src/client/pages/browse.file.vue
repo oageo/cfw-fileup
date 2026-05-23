@@ -5,15 +5,15 @@ import { TextCursorInput } from '@lucide/vue';
 import { authHeaders, authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
-import MoveEntryDialog from '@/components/move-entry-dialog.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import MoveEntryDialog from '@/components/MoveEntryDialog.vue';
 import type { DownloadTransformWorkerMessage, DownloadTransformWorkerRequest, DownloadTransformProgress } from '@/workers/download-transform.worker';
 import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
 import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
-import MarkdownPreview from '@/components/markdown-preview.vue';
-import RawTextPreview from '@/components/raw-text-preview.vue';
-import JsonPreview from '@/components/json-preview.vue';
+import MarkdownPreview from '@/components/MarkdownPreview.vue';
+import RawTextPreview from '@/components/RawTextPreview.vue';
+import JsonPreview from '@/components/JsonPreview.vue';
 
 const props = defineProps<{
 	bucketName: string;

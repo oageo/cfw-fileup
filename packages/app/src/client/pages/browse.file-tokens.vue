@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { Button, Popover } from '@vuetify/v0';
 import { EllipsisVertical } from '@lucide/vue';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { apiPost } from '@/utils/api';
 import type { FileVisibility } from '../../shared/file-visibility';
 

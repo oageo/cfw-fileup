@@ -5,9 +5,9 @@ import {
 	startRegistration,
 } from '@simplewebauthn/browser';
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
-import { apiPost } from '../utils/api';
-import type { ApiReq } from '../../shared/api';
-import ConfirmDialog from '../components/confirm-dialog.vue';
+import { apiPost } from '@/utils/api';
+import type { ApiReq } from '../../../shared/api';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
 interface PasskeyItem {
 	id: string;

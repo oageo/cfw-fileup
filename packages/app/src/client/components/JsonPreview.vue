@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Content, JsonEditor } from 'vanilla-jsoneditor';
 import 'vanilla-jsoneditor/themes/jse-theme-dark.css';
 import { authHeaders } from '@/store/auth';
-import ShikiCodePreview from './shiki-code-preview.vue';
+import ShikiCodePreview from './ShikiCodePreview.vue';
 
 const props = defineProps<{
 	url: string;

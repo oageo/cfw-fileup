@@ -2,11 +2,11 @@
 import { computed, ref, onMounted } from 'vue';
 import * as v from 'valibot';
 import { Button } from '@vuetify/v0';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
 import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import SettingItem from '@/components/SettingItem.vue';
 
 const props = defineProps<{ userId: string }>();

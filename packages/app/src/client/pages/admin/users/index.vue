@@ -2,10 +2,10 @@
 import { ref, onMounted } from 'vue';
 import { Button, Popover } from '@vuetify/v0';
 import { EllipsisVertical } from '@lucide/vue';
-import { authStore } from '../store/auth';
-import { apiPost } from '../utils/api';
-import NirA from '@/components/nira.vue';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
+import { authStore } from '@/store/auth';
+import { apiPost } from '@/utils/api';
+import NirA from '@/components/NirA.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
 interface AdminUser {
 	id: string;

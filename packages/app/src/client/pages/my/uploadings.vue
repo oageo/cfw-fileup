@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import type { FileVisibility } from '../../shared/file-visibility';
+import type { FileVisibility } from '../../../shared/file-visibility';
 import { Button } from '@vuetify/v0';
-import NirA from '@/components/nira.vue';
+import NirA from '@/components/NirA.vue';
 import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
-import ConfirmDialog from '@/components/confirm-dialog.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { connectUploadWorker, uploadWorkerJobs } from '@/store/upload-worker';
 import { formatBytes } from '@/utils/byte-size';
 
