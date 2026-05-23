@@ -15,25 +15,26 @@ import { googleAuthRoutes } from './api/google-auth';
 import { indieAuthRoutes } from './api/indieauth';
 import { downloadRoutes } from './routes/download';
 import { uploadRoutes } from './routes/upload';
+import { ApiError, createApiErrorResponse } from './utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.onError((err, c) => {
 	console.error('Error:', err);
 
-	if (err instanceof HTTPException) {
+	if (err instanceof ApiError) {
 		return c.json(
-			{
-				error: err.message || 'Internal Server Error',
-			},
+			createApiErrorResponse(err.code, err.message),
 			err.status,
 		);
 	}
 
+	if (err instanceof HTTPException) {
+		return c.json(createApiErrorResponse('INTERNAL_SERVER_ERROR'), err.status);
+	}
+
 	return c.json(
-		{
-			error: 'Internal Server Error',
-		},
+		createApiErrorResponse('INTERNAL_SERVER_ERROR'),
 		500,
 	);
 });

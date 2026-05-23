@@ -43,7 +43,7 @@ async function loadPasskeys(): Promise<void> {
 	try {
 		const result = await apiPost('/api/passkey/list');
 		if (!result.ok) {
-			error.value = result.data.error || 'パスキー一覧の取得に失敗しました';
+			error.value = result.data.message || 'パスキー一覧の取得に失敗しました';
 			return;
 		}
 		passkeys.value = result.data;
@@ -72,7 +72,7 @@ async function registerPasskey(): Promise<void> {
 	try {
 		const beginResult = await apiPost('/api/passkey/register/begin');
 		if (!beginResult.ok) {
-			registerError.value = beginResult.data.error || '登録の開始に失敗しました';
+			registerError.value = beginResult.data.message || '登録の開始に失敗しました';
 			return;
 		}
 		const { challengeId, options } = beginResult.data;
@@ -92,7 +92,7 @@ async function registerPasskey(): Promise<void> {
 			name: newPasskeyName.value.trim() || undefined,
 		});
 		if (!finishResult.ok) {
-			registerError.value = finishResult.data.error || '登録の完了に失敗しました';
+			registerError.value = finishResult.data.message || '登録の完了に失敗しました';
 			return;
 		}
 
@@ -111,7 +111,7 @@ async function deletePasskey(id: string): Promise<void> {
 	try {
 		const result = await apiPost('/api/passkey/delete', { passkeyId: id });
 		if (!result.ok) {
-			error.value = result.data.error || 'パスキーの削除に失敗しました';
+			error.value = result.data.message || 'パスキーの削除に失敗しました';
 			return;
 		}
 		await loadPasskeys();
@@ -132,7 +132,7 @@ async function generateBackupCodes(): Promise<void> {
 	try {
 		const result = await apiPost('/api/passkey/backup-codes/generate');
 		if (!result.ok) {
-			backupCodeError.value = result.data.error || 'バックアップコードの生成に失敗しました';
+			backupCodeError.value = result.data.message || 'バックアップコードの生成に失敗しました';
 			return;
 		}
 		backupCodes.value = result.data.codes;

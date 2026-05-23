@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and } from 'drizzle-orm';
 import { buckets, files, fileAccessTokens } from '../scheme/index';
@@ -10,6 +9,7 @@ import { authMiddleware } from '../middleware/auth';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { verifyTurnstile } from '../utils/turnstile';
+import { apiError } from '../utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,21 +24,21 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (body.expiresIn !== null && body.expiresIn <= 0) {
-			throw new HTTPException(400, { message: 'expiresIn must be a positive number or null' });
+			throw apiError(400, 'TOKEN_IS_REQUIRED', 'expiresIn must be a positive number or null');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		const file = await db
 			.select()
 			.from(files)
 			.where(and(eq(files.bucketId, bucket.id), eq(files.path, body.filePath)))
 			.get();
-		if (!file) throw new HTTPException(404, { message: 'File not found' });
-		if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
-		if (file.visibility === 'public') throw new HTTPException(400, { message: 'Cannot create token for public file' });
+		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
+		if (!file.isClosed) throw apiError(400, 'FILE_IS_NOT_CLOSED');
+		if (file.visibility === 'public') throw apiError(400, 'CANNOT_CREATE_TOKEN_FOR_PUBLIC_FILE');
 
 		const id = genEaidx(Date.now());
 		const token = generateToken();
@@ -61,15 +61,15 @@ app.post(
 		const body = c.req.valid('json');
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		const file = await db
 			.select()
 			.from(files)
 			.where(and(eq(files.bucketId, bucket.id), eq(files.path, body.filePath)))
 			.get();
-		if (!file) throw new HTTPException(404, { message: 'File not found' });
+		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
 
 		const rows = await db
 			.select()
@@ -108,8 +108,8 @@ app.post(
 			.where(eq(fileAccessTokens.id, body.tokenId))
 			.get();
 
-		if (!row) throw new HTTPException(404, { message: 'Token not found' });
-		if (row.bucketUserId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!row) throw apiError(404, 'TOKEN_NOT_FOUND');
+		if (row.bucketUserId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		await db.delete(fileAccessTokens).where(eq(fileAccessTokens.id, body.tokenId));
 
@@ -128,26 +128,26 @@ app.post(
 		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
 		if (turnstileSecret !== '') {
 			if (!body.turnstileToken) {
-				throw new HTTPException(400, { message: 'turnstileToken is required' });
+				throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');
 			}
 			const ok = await verifyTurnstile(body.turnstileToken, turnstileSecret);
 			if (!ok) {
-				throw new HTTPException(400, { message: 'Turnstile verification failed' });
+				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
 			}
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 
 		const file = await db
 			.select()
 			.from(files)
 			.where(and(eq(files.bucketId, bucket.id), eq(files.path, body.filePath)))
 			.get();
-		if (!file) throw new HTTPException(404, { message: 'File not found' });
-		if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
-		if (file.visibility !== 'passphrase') throw new HTTPException(403, { message: 'No passphrase set for this file' });
-		if (body.passphrase !== file.passphrase) throw new HTTPException(403, { message: 'Invalid passphrase' });
+		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
+		if (!file.isClosed) throw apiError(400, 'FILE_IS_NOT_CLOSED');
+		if (file.visibility !== 'passphrase') throw apiError(403, 'NO_PASSPHRASE_SET_FOR_THIS_FILE');
+		if (body.passphrase !== file.passphrase) throw apiError(403, 'INVALID_PASSPHRASE');
 
 		const id = genEaidx(Date.now());
 		const token = generateToken();

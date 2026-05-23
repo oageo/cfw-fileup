@@ -80,7 +80,7 @@ async function executeDelete(): Promise<void> {
 	}
 	const result = await apiPost('/api/files/delete', { bucketId: props.bucketId, path: props.filePath });
 	if (!result.ok) {
-		deleteError.value = result.data.error ?? '削除失敗';
+		deleteError.value = result.data.message ?? '削除失敗';
 		return;
 	}
 	mainRouter.pushByPath(parentPath.value);

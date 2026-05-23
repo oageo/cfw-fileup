@@ -525,7 +525,7 @@ async function createDirectory(name: string): Promise<void> {
 	}
 	const dirResult = await apiPost('/api/directories/create', { bucketId: bucketId.value!, path });
 	if (!dirResult.ok) {
-		mkdirError.value = dirResult.data.error;
+		mkdirError.value = dirResult.data.message;
 		return;
 	}
 	mkdirDialog.value = false;
@@ -559,7 +559,7 @@ async function executeDeleteEntry(): Promise<void> {
 	if (entry.isDir) {
 		const delResult = await apiPost('/api/files/delete', { bucketId: bucketId.value!, targets: [{ type: 'directory', path: entry.fullPath }] });
 		if (!delResult.ok) {
-			deleteError.value = delResult.data.error;
+			deleteError.value = delResult.data.message;
 			return;
 		}
 	} else {
@@ -569,7 +569,7 @@ async function executeDeleteEntry(): Promise<void> {
 		}
 		const delResult = await apiPost('/api/files/delete', { bucketId: bucketId.value, path: entry.fullPath });
 		if (!delResult.ok) {
-			deleteError.value = delResult.data.error ?? '削除失敗';
+			deleteError.value = delResult.data.message ?? '削除失敗';
 			return;
 		}
 	}
@@ -598,7 +598,7 @@ async function executeBulkDelete(): Promise<void> {
 	selectionPopoverOpen.value = false;
 
 	if (!result.ok) {
-		deleteError.value = result.data.error ?? '削除失敗';
+		deleteError.value = result.data.message ?? '削除失敗';
 		return;
 	}
 
@@ -687,7 +687,7 @@ async function load(): Promise<void> {
 					const result = await apiPost('/api/files/ls', { bucketName: props.bucketName, path: props.filePath });
 					if (!result.ok && result.status === 403) return await fetchPublicDirectoryEntries();
 					if (!result.ok) {
-						error.value = result.data.error;
+						error.value = result.data.message;
 						return null;
 					}
 					return result.data;
@@ -790,7 +790,7 @@ async function executeDeleteArchive(): Promise<void> {
 	}
 	const delResult = await apiPost('/api/files/delete', { bucketId: bucketId.value, path: props.filePath });
 	if (!delResult.ok) {
-		deleteError.value = delResult.data.error ?? '削除失敗';
+		deleteError.value = delResult.data.message ?? '削除失敗';
 		return;
 	}
 	const parts = props.filePath.split('/');

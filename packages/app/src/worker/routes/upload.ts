@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { eq, max, sql } from 'drizzle-orm';
 import { files, uploadParts } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { abortUpload } from '../utils/abort-upload';
 import { authMiddleware } from '../middleware/auth';
 import { genEaidx } from '../../shared/eaid-x';
+import { apiError } from '../utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -19,16 +19,16 @@ app.get('/upload/:fileId/resume', async (c) => {
 	const file = await db.select().from(files).where(eq(files.id, fileId)).get();
 
 	if (!file) {
-		throw new HTTPException(404, { message: 'File not found' });
+		throw apiError(404, 'FILE_NOT_FOUND');
 	}
 
 	if (file.userId !== user.id && !user.isAdmin) {
-		throw new HTTPException(403, { message: 'Forbidden' });
+		throw apiError(403, 'FORBIDDEN');
 	}
 
 	if (file.uploadExpiresAt < Date.now()) {
 		await abortUpload(file, c.env);
-		throw new HTTPException(410, { message: 'Upload expired' });
+		throw apiError(410, 'UPLOAD_EXPIRED');
 	}
 
 	let offset: number;
@@ -59,27 +59,27 @@ app.patch('/upload/:fileId/resume', async (c) => {
 	const fileId = c.req.param('fileId');
 	const uploadOffset = c.req.header('Upload-Offset');
 	if (!uploadOffset) {
-		throw new HTTPException(400, { message: 'Upload-Offset header is required' });
+		throw apiError(400, 'UPLOAD_OFFSET_HEADER_IS_REQUIRED');
 	}
 
 	const file = await db.select().from(files).where(eq(files.id, fileId)).get();
 
 	if (!file) {
-		throw new HTTPException(404, { message: 'File not found' });
+		throw apiError(404, 'FILE_NOT_FOUND');
 	}
 
 	if (file.userId !== user.id && !user.isAdmin) {
-		throw new HTTPException(403, { message: 'Forbidden' });
+		throw apiError(403, 'FORBIDDEN');
 	}
 
 	if (file.uploadExpiresAt < Date.now()) {
 		await abortUpload(file, c.env);
-		throw new HTTPException(410, { message: 'Upload expired' });
+		throw apiError(410, 'UPLOAD_EXPIRED');
 	}
 
 	const currentOffset = parseInt(uploadOffset, 10);
 	if (Number.isNaN(currentOffset)) {
-		throw new HTTPException(400, { message: 'Invalid Upload-Offset header' });
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER');
 	}
 
 	const contentLength = parseInt(c.req.header('Content-Length') ?? '0', 10);
@@ -91,7 +91,7 @@ app.patch('/upload/:fileId/resume', async (c) => {
 	}
 
 	if (!file.uploadId) {
-		throw new HTTPException(400, { message: 'Upload session not initialized' });
+		throw apiError(400, 'UPLOAD_SESSION_NOT_INITIALIZED');
 	}
 
 	const [{ maxPartNumber }] = await db
@@ -101,7 +101,7 @@ app.patch('/upload/:fileId/resume', async (c) => {
 
 	// ファイル作成時にクライアントが宣言したパートサイズをDBから取得して検証
 	if (contentLength > file.partSize) {
-		throw new HTTPException(400, { message: `All parts except the last must be at most ${file.partSize} bytes` });
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER', `All parts except the last must be at most ${file.partSize} bytes`);
 	}
 
 	const nextPartNumber = (maxPartNumber ?? 0) + 1;
@@ -113,7 +113,7 @@ app.patch('/upload/:fileId/resume', async (c) => {
 		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 		uploadedPart = await multipartUpload.uploadPart(nextPartNumber, c.req.raw.body!);
 	} catch (err) {
-		throw new HTTPException(400, { message: String(err) });
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER', String(err));
 	}
 
 	await db.insert(uploadParts).values({

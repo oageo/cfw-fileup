@@ -211,7 +211,7 @@ async function acceptBrowseTerms(): Promise<void> {
 	if (authStore.user) {
 		const result = await apiPost('/api/account/agree-terms', { agreedAt });
 		if (!result.ok) {
-			browseTermsError.value = result.data.error ?? '利用規約への同意を保存できませんでした';
+			browseTermsError.value = result.data.message ?? '利用規約への同意を保存できませんでした';
 			return;
 		}
 		updateTermsAgreedAt(result.data.termsAgreedAt);
@@ -350,7 +350,7 @@ async function submitPassphrase({ valid }: { valid: boolean }): Promise<void> {
 			turnstileToken: turnstileEnabled.value && turnstileToken.value ? turnstileToken.value : undefined,
 		});
 		if (!result.ok) {
-			passphraseError.value = result.data.error || `エラー: ${result.status}`;
+			passphraseError.value = result.data.message || `エラー: ${result.status}`;
 			return;
 		}
 		autoToken.value = result.data.token;

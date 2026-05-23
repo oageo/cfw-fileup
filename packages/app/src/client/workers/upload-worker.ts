@@ -12,6 +12,7 @@ declare const self: SharedWorkerGlobalScope;
 
 interface ApiFailure {
 	error: string;
+	message?: string;
 }
 
 interface OpenUploadResult {
@@ -106,7 +107,7 @@ async function apiPost<T>(endpoint: string, body: unknown, token: string | null)
 		body: JSON.stringify(body ?? {}),
 	});
 	const data = await res.json().catch(() => ({}));
-	if (!res.ok) throw new Error((data as ApiFailure).error ?? `HTTP ${res.status}`);
+	if (!res.ok) throw new Error((data as ApiFailure).message ?? `HTTP ${res.status}`);
 	return data as T;
 }
 
@@ -169,7 +170,7 @@ async function tusUpload(fileId: string, blob: Blob, path: string, partSize: num
 				if (res.ok) { success = true; break; }
 				if (res.status >= 400 && res.status < 500) {
 					const err = (await res.json().catch(() => ({}))) as ApiFailure;
-					throw new Error(`アップロード失敗 (${path}): ${err.error ?? res.status}`);
+					throw new Error(`アップロード失敗 (${path}): ${err.message ?? res.status}`);
 				}
 			} catch (err) {
 				if (attempt >= 2) throw err;
@@ -368,7 +369,7 @@ class TusChunkQueue {
 				if (res.status >= 400 && res.status < 500) {
 					await deleteFromOpfs(info.tmpName);
 					const err = (await res.json().catch(() => ({}))) as ApiFailure;
-					throw new Error(`アップロード失敗 (${this.path}): ${err.error ?? res.status}`);
+					throw new Error(`アップロード失敗 (${this.path}): ${err.message ?? res.status}`);
 				}
 			} catch (err) {
 				if (attempt >= 2) throw err;

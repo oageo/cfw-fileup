@@ -64,7 +64,7 @@ async function load(): Promise<void> {
 	error.value = '';
 	try {
 		const result = await apiPost('/api/files/uploadings');
-		if (!result.ok) { error.value = result.data.error; return; }
+		if (!result.ok) { error.value = result.data.message; return; }
 		entries.value = result.data.files;
 	} catch (e) {
 		error.value = String(e);
@@ -87,7 +87,7 @@ async function executeDelete(): Promise<void> {
 
 	const result = await apiPost('/api/files/delete', { bucketId: entry.bucketId, path: entry.path });
 	if (!result.ok) {
-		deleteErrors.value[entry.id] = result.data.error ?? '削除失敗';
+		deleteErrors.value[entry.id] = result.data.message ?? '削除失敗';
 		return;
 	}
 	await load();

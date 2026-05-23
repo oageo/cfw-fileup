@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, gte, desc, sql, count, like } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
+import { apiError } from '../utils/api-error';
 import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser } from '../utils/rate-limit';
@@ -22,7 +22,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	const db = getDb(c.env);
 	const normalizedPath = path === '' || path.endsWith('/') ? path : `${path}/`;
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
-	if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
+	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 
 	let isOwnerOrAdmin = forceOwner;
 	if (!isOwnerOrAdmin && allowBearerAuth) {
@@ -49,7 +49,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 				? and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true))
 				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'));
 			const hasFile = await db.select({ path: files.path }).from(files).where(hasFileCondition).get();
-			if (!hasFile) throw new HTTPException(404, { message: 'Directory not found' });
+			if (!hasFile) throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		}
 	}
 
@@ -115,10 +115,10 @@ app.use('/ls', shortGetCache({ maxAgeSeconds: 10 }));
 
 app.get('/ls', async (c) => {
 	const bucketName = c.req.query('bucketName');
-	if (!bucketName) throw new HTTPException(400, { message: 'bucketName is required' });
+	if (!bucketName) throw apiError(400, 'BUCKET_NAME_IS_REQUIRED');
 	const path = c.req.query('path') ?? '';
-	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw new HTTPException(400, { message: `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters` });
-	if (path.length > MAX_FILE_PATH_LENGTH) throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw apiError(400, 'BUCKET_NAME_IS_REQUIRED', `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters`);
+	if (path.length > MAX_FILE_PATH_LENGTH) throw apiError(400, 'INVALID_FILE_PATH', `path must be at most ${MAX_FILE_PATH_LENGTH} characters`);
 	return c.json(await listFiles(c, bucketName, path, false, false), 200);
 });
 
@@ -126,14 +126,14 @@ app.get('/meta', async (c) => {
 	const bucketName = c.req.query('bucketName');
 	const path = c.req.query('path');
 	const fileToken = c.req.query('token');
-	if (!bucketName || path == null) throw new HTTPException(400, { message: 'bucketName and path are required' });
-	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw new HTTPException(400, { message: `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters` });
-	if (path.length > MAX_FILE_PATH_LENGTH) throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
-	if (fileToken && fileToken.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `token must be at most ${MAX_ID_LENGTH} characters` });
+	if (!bucketName || path == null) throw apiError(400, 'BUCKET_NAME_IS_REQUIRED', 'bucketName and path are required');
+	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw apiError(400, 'BUCKET_NAME_IS_REQUIRED', `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters`);
+	if (path.length > MAX_FILE_PATH_LENGTH) throw apiError(400, 'INVALID_FILE_PATH', `path must be at most ${MAX_FILE_PATH_LENGTH} characters`);
+	if (fileToken && fileToken.length > MAX_ID_LENGTH) throw apiError(400, 'TOKEN_IS_REQUIRED', `token must be at most ${MAX_ID_LENGTH} characters`);
 
 	const db = getDb(c.env);
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
-	if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
+	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 
 	let isOwnerOrAdmin = false;
 	const authorization = c.req.header('Authorization');
@@ -155,7 +155,7 @@ app.get('/meta', async (c) => {
 		.from(files)
 		.where(and(eq(files.bucketId, bucket.id), eq(files.path, path), eq(files.isClosed, true)))
 		.get();
-	if (!file) throw new HTTPException(404, { message: 'File not found' });
+	if (!file) throw apiError(404, 'FILE_NOT_FOUND');
 
 	const hasMimeMismatch = hasSuspiciousFileType(file.path, file.mimeType ?? undefined);
 	const base = {
@@ -177,9 +177,9 @@ app.get('/meta', async (c) => {
 			.from(fileAccessTokens)
 			.where(and(eq(fileAccessTokens.token, fileToken), eq(fileAccessTokens.fileId, file.id)))
 			.get();
-		if (!fileTokenRecord) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!fileTokenRecord) throw apiError(403, 'FORBIDDEN');
 		if (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now()) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 		return c.json({ ...base, fileId: file.id });
 	}
@@ -197,8 +197,8 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 		return c.json(await listFiles(c, body.bucketName, body.path ?? '', true), 200);
 	}, getResponseDefWithAuth('/api/files/ls')),
 );
@@ -213,25 +213,25 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.bucketId || !body.path) {
-			throw new HTTPException(400, { message: 'bucketId and path are required' });
+			throw apiError(400, 'INVALID_FILE_PATH', 'bucketId and path are required');
 		}
 		if (!isValidFilePath(body.path)) {
-			throw new HTTPException(400, { message: 'Invalid file path' });
+			throw apiError(400, 'INVALID_FILE_PATH');
 		}
 
 		const partSize = body.partSize ?? DEFAULT_PART_SIZE;
 		if (partSize < MIN_PART_SIZE) {
-			throw new HTTPException(400, { message: `partSize must be at least ${MIN_PART_SIZE} bytes (5 MiB)` });
+			throw apiError(400, 'INVALID_FILE_PATH', `partSize must be at least ${MIN_PART_SIZE} bytes (5 MiB)`);
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
 
 		if (!bucket) {
-			throw new HTTPException(404, { message: 'Bucket not found' });
+			throw apiError(404, 'BUCKET_NOT_FOUND');
 		}
 
 		if (bucket.userId !== user.id && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		const existingFile = await db
@@ -241,7 +241,7 @@ app.post(
 			.get();
 
 		if (existingFile && existingFile.isClosed) {
-			throw new HTTPException(409, { message: 'File already exists' });
+			throw apiError(409, 'FILE_ALREADY_EXISTS');
 		}
 
 		const quota = await getQuotaForUser(c.env, user.id);
@@ -254,7 +254,7 @@ app.post(
 				.then((result) => result.length);
 
 			if (fileCount >= quota.maxFilesPerBucket) {
-				throw new HTTPException(429, { message: 'File limit exceeded' });
+				throw apiError(429, 'FILE_LIMIT_EXCEEDED');
 			}
 		}
 
@@ -267,7 +267,7 @@ app.post(
 				.then((result) => result.length);
 
 			if (dailyUploadCount >= quota.maxDailyUploads) {
-				throw new HTTPException(429, { message: 'Daily upload limit exceeded' });
+				throw apiError(429, 'DAILY_UPLOAD_LIMIT_EXCEEDED');
 			}
 		}
 
@@ -300,27 +300,27 @@ app.post(
 
 		const invalidEntry = body.files.find(entry => !isValidFilePath(entry.path));
 		if (invalidEntry) {
-			throw new HTTPException(400, { message: `Invalid file path: ${invalidEntry.path}` });
+			throw apiError(400, 'INVALID_FILE_PATH', `Invalid file path: ${invalidEntry.path}`);
 		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
 
 		if (!file) {
-			throw new HTTPException(404, { message: 'File not found' });
+			throw apiError(404, 'FILE_NOT_FOUND');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 
 		if (!bucket) {
-			throw new HTTPException(404, { message: 'Bucket not found' });
+			throw apiError(404, 'BUCKET_NOT_FOUND');
 		}
 
 		if (bucket.userId !== user.id && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		if (file.uploadExpiresAt < Date.now()) {
-			throw new HTTPException(410, { message: 'Upload expired' });
+			throw apiError(410, 'UPLOAD_EXPIRED');
 		}
 
 		const fileIds = body.files.map(() => genEaidx(Date.now()));
@@ -358,16 +358,16 @@ app.post(
 
 		const invalidEntry = body.files.find(entry => !isValidFilePath(entry.path));
 		if (invalidEntry) {
-			throw new HTTPException(400, { message: `Invalid file path: ${invalidEntry.path}` });
+			throw apiError(400, 'INVALID_FILE_PATH', `Invalid file path: ${invalidEntry.path}`);
 		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
-		if (!file) throw new HTTPException(404, { message: 'File not found' });
+		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
-		if (file.uploadExpiresAt < Date.now()) throw new HTTPException(410, { message: 'Upload expired' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
+		if (file.uploadExpiresAt < Date.now()) throw apiError(410, 'UPLOAD_EXPIRED');
 
 		const fileIds = body.files.map(() => genEaidx(Date.now()));
 		for (let i = 0; i < body.files.length; i++) {
@@ -398,27 +398,27 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.fileId) {
-			throw new HTTPException(400, { message: 'fileId is required' });
+			throw apiError(400, 'FILE_ID_IS_REQUIRED');
 		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
 
 		if (!file) {
-			throw new HTTPException(404, { message: 'File not found' });
+			throw apiError(404, 'FILE_NOT_FOUND');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 
 		if (!bucket) {
-			throw new HTTPException(404, { message: 'Bucket not found' });
+			throw apiError(404, 'BUCKET_NOT_FOUND');
 		}
 
 		if (bucket.userId !== user.id && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		if (file.uploadExpiresAt < Date.now()) {
-			throw new HTTPException(410, { message: 'Upload expired' });
+			throw apiError(410, 'UPLOAD_EXPIRED');
 		}
 
 		const quota = await getQuotaForUser(c.env, user.id);
@@ -430,7 +430,7 @@ app.post(
 				.where(eq(uploadParts.fileId, file.id));
 
 			if (parts.length === 0) {
-				throw new HTTPException(400, { message: 'Upload has not been completed' });
+				throw apiError(400, 'UPLOAD_HAS_NOT_BEEN_COMPLETED');
 			}
 
 			const sortedParts = parts
@@ -443,7 +443,7 @@ app.post(
 				await multipartUpload.complete(sortedParts);
 			} catch (err) {
 				console.error('Failed to complete multipart upload:', err);
-				throw new HTTPException(400, { message: 'Failed to finalize upload' });
+				throw apiError(400, 'FAILED_TO_FINALIZE_UPLOAD');
 			}
 
 			await db.update(files).set({ uploadId: null }).where(eq(files.id, file.id));
@@ -460,12 +460,12 @@ app.post(
 		}
 
 		if (!r2Object) {
-			throw new HTTPException(400, { message: 'Upload has not been completed' });
+			throw apiError(400, 'UPLOAD_HAS_NOT_BEEN_COMPLETED');
 		}
 
 		if (quota.maxBucketSizeBytes !== null) {
 			if (bucket.usedBytes + r2Object.size > quota.maxBucketSizeBytes) {
-				throw new HTTPException(429, { message: 'Bucket size limit exceeded' });
+				throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
 			}
 		}
 
@@ -494,7 +494,7 @@ app.post(
 		const mimeType = detectedMimeType ?? (isUtf8Text ? extensionMimeType : undefined) ?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined) ?? r2Object.httpMetadata?.contentType;
 		const mismatch = hasSuspiciousFileType(file.path, mimeType);
 		if (mismatch && await shouldRejectMismatchedFileType(db)) {
-			throw new HTTPException(400, { message: 'File content type does not match file extension' });
+			throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');
 		}
 
 		await db
@@ -527,17 +527,17 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.fileId) {
-			throw new HTTPException(400, { message: 'fileId is required' });
+			throw apiError(400, 'FILE_ID_IS_REQUIRED');
 		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
 
 		if (!file) {
-			throw new HTTPException(404, { message: 'File not found' });
+			throw apiError(404, 'FILE_NOT_FOUND');
 		}
 
 		if (file.userId !== user.id && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		const [{ partCount }] = await db
@@ -560,22 +560,22 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.bucketName || !body.filePath) {
-			throw new HTTPException(400, { message: 'bucketName and filePath are required' });
+			throw apiError(400, 'BUCKET_NAME_IS_REQUIRED', 'bucketName and filePath are required');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		const file = await db
 			.select()
 			.from(files)
 			.where(and(eq(files.bucketId, bucket.id), eq(files.path, body.filePath)))
 			.get();
-		if (!file) throw new HTTPException(404, { message: 'File not found' });
-		if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
+		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
+		if (!file.isClosed) throw apiError(400, 'FILE_IS_NOT_CLOSED');
 		if (file.visibility === 'public' && body.visibility !== 'public') {
-			throw new HTTPException(400, { message: 'Public files cannot change visibility' });
+			throw apiError(400, 'PUBLIC_FILES_CANNOT_CHANGE_VISIBILITY');
 		}
 
 		await db
@@ -630,22 +630,22 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.bucketId) {
-			throw new HTTPException(400, { message: 'bucketId is required' });
+			throw apiError(400, 'BUCKET_NOT_FOUND', 'bucketId is required');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
 
 		if (!bucket) {
-			throw new HTTPException(404, { message: 'Bucket not found' });
+			throw apiError(404, 'BUCKET_NOT_FOUND');
 		}
 
 		if (bucket.userId !== user.id && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		const targets = body.targets ?? (body.path ? [{ type: 'file' as const, path: body.path }] : []);
 		if (targets.length === 0) {
-			throw new HTTPException(400, { message: 'path or targets are required' });
+			throw apiError(400, 'PATH_OR_TARGETS_ARE_REQUIRED');
 		}
 
 		const filesToDelete = new Map<string, {
@@ -663,7 +663,7 @@ app.post(
 					.from(files)
 					.where(and(eq(files.bucketId, bucket.id), eq(files.path, target.path)))
 					.get();
-				if (!file) throw new HTTPException(404, { message: `File not found: ${target.path}` });
+				if (!file) throw apiError(404, 'FILE_NOT_FOUND', `File not found: ${target.path}`);
 				filesToDelete.set(file.id, file);
 				continue;
 			}
@@ -737,16 +737,16 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.sourceBucketId || !body.targetBucketId || !body.sourcePath || !body.targetPath) {
-			throw new HTTPException(400, { message: 'sourceBucketId, targetBucketId, sourcePath and targetPath are required' });
+			throw apiError(400, 'SOURCE_AND_TARGET_PATHS_ARE_REQUIRED');
 		}
 
 		const [sourceBucket, targetBucket] = await Promise.all([
 			db.select().from(buckets).where(eq(buckets.id, body.sourceBucketId)).get(),
 			db.select().from(buckets).where(eq(buckets.id, body.targetBucketId)).get(),
 		]);
-		if (!sourceBucket || !targetBucket) throw new HTTPException(404, { message: 'Bucket not found' });
+		if (!sourceBucket || !targetBucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 		if ((sourceBucket.userId !== user.id || targetBucket.userId !== user.id) && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		const normalizedSourcePath = body.type === 'directory'
@@ -757,19 +757,19 @@ app.post(
 			: body.targetPath;
 
 		if (normalizedTargetPath.length > MAX_FILE_PATH_LENGTH) {
-			throw new HTTPException(400, { message: `targetPath must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+			throw apiError(400, 'INVALID_FILE_PATH', `targetPath must be at most ${MAX_FILE_PATH_LENGTH} characters`);
 		}
 		if (body.type === 'file' && !isValidFilePath(normalizedTargetPath)) {
-			throw new HTTPException(400, { message: 'Invalid file path' });
+			throw apiError(400, 'INVALID_FILE_PATH');
 		}
 		if (body.type === 'directory') {
 			if (!isValidDirectoryPath(normalizedTargetPath)) {
-				throw new HTTPException(400, { message: 'Invalid directory path' });
+				throw apiError(400, 'INVALID_DIRECTORY_PATH');
 			}
 			const directoryNameError = await validateDirectoryPathForbiddenNames(db, normalizedTargetPath);
-			if (directoryNameError) throw new HTTPException(400, { message: directoryNameError });
+			if (directoryNameError) throw apiError(400, 'INVALID_DIRECTORY_PATH', directoryNameError);
 			if (body.sourceBucketId === body.targetBucketId && normalizedTargetPath.startsWith(normalizedSourcePath)) {
-				throw new HTTPException(400, { message: 'Directory cannot be moved into itself' });
+				throw apiError(400, 'DIRECTORY_CANNOT_BE_MOVED_INTO_ITSELF');
 			}
 		}
 
@@ -799,7 +799,7 @@ app.post(
 				.get()
 			: null;
 		if (targetFile || targetDirectory || targetVirtualDirectoryFile) {
-			throw new HTTPException(409, { message: 'Target already exists' });
+			throw apiError(409, 'TARGET_ALREADY_EXISTS');
 		}
 
 		if (body.type === 'file') {
@@ -808,17 +808,17 @@ app.post(
 				.from(files)
 				.where(and(eq(files.bucketId, sourceBucket.id), eq(files.path, normalizedSourcePath)))
 				.get();
-			if (!file) throw new HTTPException(404, { message: 'File not found' });
-			if (!file.isClosed) throw new HTTPException(400, { message: 'File is not closed' });
+			if (!file) throw apiError(404, 'FILE_NOT_FOUND');
+			if (!file.isClosed) throw apiError(400, 'FILE_IS_NOT_CLOSED');
 
 			const movedBytes = file.size ?? 0;
 			if (hasSuspiciousFileType(normalizedTargetPath, file.mimeType ?? undefined) && await shouldRejectMismatchedFileType(db)) {
-				throw new HTTPException(400, { message: 'File content type does not match file extension' });
+				throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');
 			}
 			if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
 				const quota = await getQuotaForUser(c.env, targetBucket.userId);
 				if (quota.maxBucketSizeBytes !== null && targetBucket.usedBytes + movedBytes > quota.maxBucketSizeBytes) {
-					throw new HTTPException(429, { message: 'Target bucket size limit exceeded' });
+					throw apiError(429, 'TARGET_BUCKET_SIZE_LIMIT_EXCEEDED');
 				}
 			}
 
@@ -849,14 +849,14 @@ app.post(
 			.from(directories)
 			.where(and(eq(directories.bucketId, sourceBucket.id), like(directories.path, `${normalizedSourcePath}%`)));
 		if (!sourceDirectory && childFiles.length === 0 && childDirectories.length === 0) {
-			throw new HTTPException(404, { message: 'Directory not found' });
+			throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		}
 
 		const movedBytes = childFiles.reduce((sum, file) => sum + (file.isClosed && file.size ? file.size : 0), 0);
 		if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
 			const quota = await getQuotaForUser(c.env, targetBucket.userId);
 			if (quota.maxBucketSizeBytes !== null && targetBucket.usedBytes + movedBytes > quota.maxBucketSizeBytes) {
-				throw new HTTPException(429, { message: 'Target bucket size limit exceeded' });
+				throw apiError(429, 'TARGET_BUCKET_SIZE_LIMIT_EXCEEDED');
 			}
 		}
 

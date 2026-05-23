@@ -190,9 +190,9 @@ async function handleGoogleCallback(): Promise<void> {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ googleToken }),
 		});
-		const data = (await res.json()) as { token?: string; error?: string };
+		const data = (await res.json()) as { token?: string; message?: string };
 		if (!res.ok || !data.token) {
-			signinError.value = data.error ?? 'Googleサインインに失敗しました';
+			signinError.value = data.message ?? 'Googleサインインに失敗しました';
 			return;
 		}
 		await finishAuth(data.token);
@@ -246,9 +246,9 @@ async function handleIndieAuthCallback(): Promise<void> {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ indieauthToken }),
 		});
-		const data = (await res.json()) as { token?: string; error?: string };
+		const data = (await res.json()) as { token?: string; message?: string };
 		if (!res.ok || !data.token) {
-			signinError.value = data.error ?? 'IndieAuthサインインに失敗しました';
+			signinError.value = data.message ?? 'IndieAuthサインインに失敗しました';
 			return;
 		}
 		await finishAuth(data.token);
@@ -323,7 +323,7 @@ async function signinWithPassword({ valid }: { valid: boolean }): Promise<void> 
 			turnstileToken: turnstileEnabled.value && signinTurnstileToken.value ? signinTurnstileToken.value : undefined,
 		});
 		if (!result.ok) {
-			signinError.value = result.data.error;
+			signinError.value = result.data.message;
 			return;
 		}
 		await finishAuth(result.data.token);
@@ -340,7 +340,7 @@ async function signinWithPasskey(): Promise<void> {
 	try {
 		const beginResult = await apiPost('/api/passkey/authenticate/begin');
 		if (!beginResult.ok) {
-			signinError.value = beginResult.data.error || 'パスキー認証の開始に失敗しました';
+			signinError.value = beginResult.data.message || 'パスキー認証の開始に失敗しました';
 			return;
 		}
 
@@ -359,7 +359,7 @@ async function signinWithPasskey(): Promise<void> {
 			credential: credential as unknown as ApiReq<'/api/passkey/authenticate/finish'>['credential'],
 		});
 		if (!finishResult.ok) {
-			signinError.value = finishResult.data.error || 'パスキー認証に失敗しました';
+			signinError.value = finishResult.data.message || 'パスキー認証に失敗しました';
 			return;
 		}
 		await finishAuth(finishResult.data.token);
@@ -390,7 +390,7 @@ async function signupWithPassword({ valid }: { valid: boolean }): Promise<void> 
 			turnstileToken: turnstileEnabled.value && signupTurnstileToken.value ? signupTurnstileToken.value : undefined,
 		});
 		if (!result.ok) {
-			signupError.value = result.data.error;
+			signupError.value = result.data.message;
 			return;
 		}
 		await finishAuth(result.data.token);
@@ -415,7 +415,7 @@ async function signupWithPasskey(): Promise<void> {
 			turnstileToken: turnstileEnabled.value && signupTurnstileToken.value ? signupTurnstileToken.value : undefined,
 		});
 		if (!beginResult.ok) {
-			passkeySignupError.value = beginResult.data.error || 'サインアップの開始に失敗しました';
+			passkeySignupError.value = beginResult.data.message || 'サインアップの開始に失敗しました';
 			return;
 		}
 
@@ -435,7 +435,7 @@ async function signupWithPasskey(): Promise<void> {
 			passkeyName: signupForm.passkeyName.trim() || undefined,
 		});
 		if (!finishResult.ok) {
-			passkeySignupError.value = finishResult.data.error || 'アカウント作成に失敗しました';
+			passkeySignupError.value = finishResult.data.message || 'アカウント作成に失敗しました';
 			return;
 		}
 		await finishAuth(finishResult.data.token, '/my/passkeys');

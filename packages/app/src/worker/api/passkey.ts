@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, lt, count } from 'drizzle-orm';
 import {
@@ -8,6 +7,7 @@ import {
 	generateAuthenticationOptions,
 	verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
+import { apiError } from '../utils/api-error';
 import { passkeys, passkeysChallenges, backupCodes, tokens, users, appSettings, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
@@ -157,7 +157,7 @@ app.post(
 			.get();
 
 		if (!challengeRecord || challengeRecord.expiresAt < now) {
-			throw new HTTPException(400, { message: 'Invalid or expired challenge' });
+			throw apiError(400, 'INVALID_OR_EXPIRED_CHALLENGE');
 		}
 
 		await db.delete(passkeysChallenges).where(eq(passkeysChallenges.id, body.challengeId));
@@ -171,11 +171,11 @@ app.post(
 				expectedRPID: rpID,
 			});
 		} catch (e) {
-			throw new HTTPException(400, { message: `Verification failed: ${String(e)}` });
+			throw apiError(400, 'VERIFICATION_FAILED', `Verification failed: ${String(e)}`);
 		}
 
 		if (!verification.verified) {
-			throw new HTTPException(400, { message: 'Verification failed' });
+			throw apiError(400, 'VERIFICATION_FAILED');
 		}
 
 		const { credential: cred } = verification.registrationInfo;
@@ -254,7 +254,7 @@ app.post(
 			.get();
 
 		if (!challengeRecord || challengeRecord.expiresAt < now) {
-			throw new HTTPException(400, { message: 'Invalid or expired challenge' });
+			throw apiError(400, 'INVALID_OR_EXPIRED_CHALLENGE');
 		}
 
 		await db.delete(passkeysChallenges).where(eq(passkeysChallenges.id, body.challengeId));
@@ -266,7 +266,7 @@ app.post(
 			.get();
 
 		if (!passkeyRecord) {
-			throw new HTTPException(401, { message: 'Passkey not found' });
+			throw apiError(404, 'PASSKEY_NOT_FOUND');
 		}
 
 		let verification;
@@ -286,11 +286,11 @@ app.post(
 				},
 			});
 		} catch (e) {
-			throw new HTTPException(401, { message: `Authentication failed: ${String(e)}` });
+			throw apiError(401, 'AUTHENTICATION_FAILED', `Authentication failed: ${String(e)}`);
 		}
 
 		if (!verification.verified) {
-			throw new HTTPException(401, { message: 'Authentication failed' });
+			throw apiError(401, 'AUTHENTICATION_FAILED');
 		}
 
 		await db
@@ -300,10 +300,10 @@ app.post(
 
 		const user = await db.select().from(users).where(eq(users.id, passkeyRecord.userId)).get();
 		if (!user) {
-			throw new HTTPException(401, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 		if (user.isSuspended) {
-			throw new HTTPException(401, { message: 'Account is suspended' });
+			throw apiError(403, 'ACCOUNT_IS_SUSPENDED');
 		}
 
 		const tokenId = genEaidx(Date.now());
@@ -353,7 +353,7 @@ app.post(
 			.get();
 
 		if (!passkeyRecord) {
-			throw new HTTPException(404, { message: 'Passkey not found' });
+			throw apiError(404, 'PASSKEY_NOT_FOUND');
 		}
 
 		await db.delete(passkeys).where(eq(passkeys.id, passkeyId));
@@ -429,17 +429,17 @@ app.post(
 
 		const user = await db.select().from(users).where(eq(users.username, username)).get();
 		if (!user) {
-			throw new HTTPException(401, { message: 'Invalid credentials or code' });
+			throw apiError(401, 'INVALID_CREDENTIALS_OR_CODE');
 		}
 		if (user.isSuspended) {
-			throw new HTTPException(401, { message: 'Account is suspended' });
+			throw apiError(403, 'ACCOUNT_IS_SUSPENDED');
 		}
 		if (!user.passwordHash) {
-			throw new HTTPException(401, { message: 'Invalid credentials or code' });
+			throw apiError(401, 'INVALID_CREDENTIALS_OR_CODE');
 		}
 		const passwordValid = await verifyPassword(password, user.passwordHash);
 		if (!passwordValid) {
-			throw new HTTPException(401, { message: 'Invalid credentials or code' });
+			throw apiError(401, 'INVALID_CREDENTIALS_OR_CODE');
 		}
 
 		const codeHash = await hashBackupCode(code.toUpperCase().replace(/[\s-]/g, ''));
@@ -451,7 +451,7 @@ app.post(
 			.get();
 
 		if (!codeRecord || codeRecord.usedAt !== null) {
-			throw new HTTPException(401, { message: 'Invalid credentials or code' });
+			throw apiError(401, 'INVALID_CREDENTIALS_OR_CODE');
 		}
 
 		await db.update(backupCodes).set({ usedAt: Date.now() }).where(eq(backupCodes.id, codeRecord.id));
@@ -478,12 +478,12 @@ app.post(
 
 		if ((c.env.TURNSTILE_SECRET as string) !== '') {
 			if (!turnstileToken || !await verifyTurnstile(turnstileToken, c.env.TURNSTILE_SECRET)) {
-				throw new HTTPException(400, { message: 'Turnstile verification failed' });
+				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
 			}
 		}
 
 		if (!isValidNameFormat(trimmed)) {
-			throw new HTTPException(400, { message: 'Invalid username format' });
+			throw apiError(400, 'INVALID_USERNAME_FORMAT');
 		}
 
 		const userCount = await db.select({ count: count() }).from(users);
@@ -498,26 +498,26 @@ app.post(
 		const registrationMode = (registrationModeSetting?.value ?? 'passphrase') as 'closed' | 'passphrase' | 'open';
 
 		if (!isFirstUser && registrationMode === 'closed') {
-			throw new HTTPException(403, { message: 'Registration is closed' });
+			throw apiError(403, 'REGISTRATION_IS_CLOSED');
 		}
 
 		if (registrationMode === 'passphrase') {
 			const signupPassphrase = c.env.SIGNUP_PASSPHRASE;
 			if (!signupPassphrase || !passphrase || passphrase !== signupPassphrase) {
-				throw new HTTPException(403, { message: 'Invalid passphrase' });
+				throw apiError(403, 'INVALID_PASSPHRASE');
 			}
 		}
 
 		const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, trimmed)).get();
 		if (existing) {
-			throw new HTTPException(409, { message: 'Username already taken' });
+			throw apiError(409, 'USERNAME_ALREADY_TAKEN');
 		}
 
 		if (!isFirstUser) {
 			const usernameError = await validateUsername(db, trimmed);
 			if (usernameError) {
 				const status = usernameError === 'Username already exists' ? 409 : 400;
-				throw new HTTPException(status, { message: usernameError });
+				throw apiError(status, usernameError === 'Username already taken' ? 'USERNAME_ALREADY_TAKEN' : 'INVALID_USERNAME_FORMAT', usernameError);
 			}
 		}
 
@@ -571,12 +571,12 @@ app.post(
 			.get();
 
 		if (!challengeRecord || challengeRecord.expiresAt < now) {
-			throw new HTTPException(400, { message: 'Invalid or expired challenge' });
+			throw apiError(400, 'INVALID_OR_EXPIRED_CHALLENGE');
 		}
 
 		const parts = challengeRecord.userId?.split(':') ?? [];
 		if (parts.length < 3 || parts[0] !== 'signup' || !parts[1]) {
-			throw new HTTPException(400, { message: 'Invalid challenge data' });
+			throw apiError(400, 'INVALID_CHALLENGE_DATA');
 		}
 		const userId = parts[1];
 		const username = parts.slice(2).join(':');
@@ -585,7 +585,7 @@ app.post(
 
 		const existing = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).get();
 		if (existing) {
-			throw new HTTPException(409, { message: 'Username already taken' });
+			throw apiError(409, 'USERNAME_ALREADY_TAKEN');
 		}
 
 		const userCount = await db.select({ count: count() }).from(users);
@@ -594,7 +594,7 @@ app.post(
 			const usernameError = await validateUsername(db, username);
 			if (usernameError) {
 				const status = usernameError === 'Username already exists' ? 409 : 400;
-				throw new HTTPException(status, { message: usernameError });
+				throw apiError(status, usernameError === 'Username already taken' ? 'USERNAME_ALREADY_TAKEN' : 'INVALID_USERNAME_FORMAT', usernameError);
 			}
 		}
 
@@ -607,11 +607,11 @@ app.post(
 				expectedRPID: rpID,
 			});
 		} catch (e) {
-			throw new HTTPException(400, { message: `Verification failed: ${String(e)}` });
+			throw apiError(400, 'VERIFICATION_FAILED', `Verification failed: ${String(e)}`);
 		}
 
 		if (!verification.verified) {
-			throw new HTTPException(400, { message: 'Verification failed' });
+			throw apiError(400, 'VERIFICATION_FAILED');
 		}
 
 		const { credential: cred } = verification.registrationInfo;

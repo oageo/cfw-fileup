@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, sql } from 'drizzle-orm';
 import * as v from 'valibot';
+import { apiError } from '../utils/api-error';
 import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser, getGlobalQuota } from '../utils/rate-limit';
@@ -26,13 +26,13 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.userId) {
-			throw new HTTPException(400, { message: 'userId is required' });
+			throw apiError(400, 'USER_ID_IS_REQUIRED');
 		}
 
 		const user = await db.select().from(users).where(eq(users.id, body.userId)).get();
 
 		if (!user) {
-			throw new HTTPException(404, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
 		await db.update(users).set({ isSuspended: true }).where(eq(users.id, body.userId));
@@ -51,13 +51,13 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.userId) {
-			throw new HTTPException(400, { message: 'userId is required' });
+			throw apiError(400, 'USER_ID_IS_REQUIRED');
 		}
 
 		const user = await db.select().from(users).where(eq(users.id, body.userId)).get();
 
 		if (!user) {
-			throw new HTTPException(404, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
 		await db.update(users).set({ isSuspended: false }).where(eq(users.id, body.userId));
@@ -75,13 +75,13 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.userId) {
-			throw new HTTPException(400, { message: 'userId is required' });
+			throw apiError(400, 'USER_ID_IS_REQUIRED');
 		}
 
 		const user = await db.select().from(users).where(eq(users.id, body.userId)).get();
 
 		if (!user) {
-			throw new HTTPException(404, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
 		await db.update(users).set({ isAdmin: true }).where(eq(users.id, body.userId));
@@ -99,13 +99,13 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.fileId) {
-			throw new HTTPException(400, { message: 'fileId is required' });
+			throw apiError(400, 'FILE_ID_IS_REQUIRED');
 		}
 
 		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
 
 		if (!file) {
-			throw new HTTPException(404, { message: 'File not found' });
+			throw apiError(404, 'FILE_NOT_FOUND');
 		}
 
 		try {
@@ -136,13 +136,13 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.bucketId) {
-			throw new HTTPException(400, { message: 'bucketId is required' });
+			throw apiError(400, 'BUCKET_NOT_FOUND', 'bucketId is required');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
 
 		if (!bucket) {
-			throw new HTTPException(404, { message: 'Bucket not found' });
+			throw apiError(404, 'BUCKET_NOT_FOUND');
 		}
 
 		const bucketFiles = await db.select().from(files).where(eq(files.bucketId, bucket.id));
@@ -182,7 +182,7 @@ app.post(
 
 		const user = await db.select().from(users).where(eq(users.id, userId)).get();
 		if (!user) {
-			throw new HTTPException(404, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
 		const now = Date.now();
@@ -276,7 +276,7 @@ app.post(
 
 		const user = await db.select().from(users).where(eq(users.id, body.userId)).get();
 		if (!user) {
-			throw new HTTPException(404, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
 		await db.delete(userQuotas).where(eq(userQuotas.userId, body.userId));

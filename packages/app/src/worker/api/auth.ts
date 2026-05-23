@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, count, and } from 'drizzle-orm';
+import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, usedUsernames, passkeys, backupCodes } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { hashPassword, verifyPassword, generateToken } from '../utils/crypto';
@@ -41,7 +41,7 @@ app.post(
 		if ((c.env.TURNSTILE_SECRET as string) !== '') {
 			const token = body.turnstileToken;
 			if (!token || !await verifyTurnstile(token, c.env.TURNSTILE_SECRET)) {
-				throw new HTTPException(400, { message: 'Turnstile verification failed' });
+				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
 			}
 		}
 
@@ -56,7 +56,7 @@ app.post(
 				.get();
 
 			if (googleRequiredSetting?.value === 'true') {
-				throw new HTTPException(403, { message: 'Only Google account registration is allowed' });
+				throw apiError(403, 'ONLY_GOOGLE_ACCOUNT_REGISTRATION_IS_ALLOWED');
 			}
 		}
 
@@ -69,13 +69,13 @@ app.post(
 		const registrationMode = (registrationModeSetting?.value ?? 'passphrase') as 'closed' | 'passphrase' | 'open';
 
 		if (!isFirstUser && registrationMode === 'closed') {
-			throw new HTTPException(403, { message: 'Registration is closed' });
+			throw apiError(403, 'REGISTRATION_IS_CLOSED');
 		}
 
 		if (registrationMode === 'passphrase') {
 			const signupPassphrase = c.env.SIGNUP_PASSPHRASE;
 			if (!signupPassphrase || !body.passphrase || body.passphrase !== signupPassphrase) {
-				throw new HTTPException(403, { message: 'Invalid passphrase' });
+				throw apiError(403, 'INVALID_PASSPHRASE');
 			}
 		}
 
@@ -84,7 +84,7 @@ app.post(
 			const usernameError = await validateUsername(db, username);
 			if (usernameError) {
 				const status = usernameError === 'Username already exists' ? 409 : 400;
-				throw new HTTPException(status, { message: usernameError });
+				throw apiError(status, usernameError === 'Username already exists' ? 'USERNAME_ALREADY_EXISTS' : 'INVALID_USERNAME_FORMAT', usernameError);
 			}
 		}
 
@@ -130,18 +130,18 @@ app.post(
 		if ((c.env.TURNSTILE_SECRET as string) !== '') {
 			const token = body.turnstileToken;
 			if (!token || !await verifyTurnstile(token, c.env.TURNSTILE_SECRET)) {
-				throw new HTTPException(400, { message: 'Turnstile verification failed' });
+				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
 			}
 		}
 
 		const user = await db.select().from(users).where(eq(users.username, username)).get();
 
 		if (!user) {
-			throw new HTTPException(401, { message: 'Invalid credentials' });
+			throw apiError(401, 'INVALID_CREDENTIALS');
 		}
 
 		if (user.isSuspended) {
-			throw new HTTPException(401, { message: 'Account is suspended' });
+			throw apiError(403, 'ACCOUNT_IS_SUSPENDED');
 		}
 
 		const googleRequiredSetting = await db
@@ -151,15 +151,15 @@ app.post(
 			.get();
 
 		if (googleRequiredSetting?.value === 'true') {
-			throw new HTTPException(403, { message: 'Only Google account sign-in is allowed' });
+			throw apiError(403, 'ONLY_GOOGLE_ACCOUNT_SIGN_IN_IS_ALLOWED');
 		}
 
 		if (!user.passwordHash) {
-			throw new HTTPException(401, { message: 'Invalid credentials' });
+			throw apiError(401, 'INVALID_CREDENTIALS');
 		}
 		const passwordValid = await verifyPassword(password, user.passwordHash);
 		if (!passwordValid) {
-			throw new HTTPException(401, { message: 'Invalid credentials' });
+			throw apiError(401, 'INVALID_CREDENTIALS');
 		}
 
 		const userPasskeys = await db
@@ -171,7 +171,7 @@ app.post(
 		if (userPasskeys.length > 0) {
 			const normalizedBackupCode = body.backupCode?.toUpperCase().replace(/[\s-]/g, '') ?? '';
 			if (!normalizedBackupCode) {
-				throw new HTTPException(401, { message: 'Backup code required' });
+				throw apiError(401, 'BACKUP_CODE_REQUIRED');
 			}
 
 			const codeHash = await hashBackupCode(normalizedBackupCode);
@@ -182,7 +182,7 @@ app.post(
 				.get();
 
 			if (!codeRecord || codeRecord.usedAt !== null) {
-				throw new HTTPException(401, { message: 'Invalid credentials or code' });
+				throw apiError(401, 'INVALID_CREDENTIALS_OR_CODE');
 			}
 
 			await db.update(backupCodes).set({ usedAt: Date.now() }).where(eq(backupCodes.id, codeRecord.id));

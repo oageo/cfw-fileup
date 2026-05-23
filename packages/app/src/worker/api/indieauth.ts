@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { eq, count, lt } from 'drizzle-orm';
+import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { generateToken } from '../utils/crypto';
@@ -286,27 +286,27 @@ app.get('/begin', async (c) => {
 	const passphrase = c.req.query('passphrase');
 	const signupUsername = c.req.query('username');
 	if (!profileUrlRaw) {
-		throw new HTTPException(400, { message: 'profile_url is required' });
+		throw apiError(400, 'PROFILE_URL_IS_REQUIRED');
 	}
 	if (passphrase && passphrase.length > MAX_PASSPHRASE_LENGTH) {
-		throw new HTTPException(400, { message: `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters` });
+		throw apiError(400, 'PASSPHRASE_TOO_LONG', `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters`);
 	}
 	if (signupUsername && signupUsername.length > MAX_USERNAME_LENGTH) {
-		throw new HTTPException(400, { message: `username must be at most ${MAX_USERNAME_LENGTH} characters` });
+		throw apiError(400, 'INVALID_USERNAME_FORMAT', `username must be at most ${MAX_USERNAME_LENGTH} characters`);
 	}
 
 	const profileUrl = normalizeProfileUrl(profileUrlRaw);
 	if (!profileUrl) {
-		throw new HTTPException(400, { message: 'Invalid profile URL' });
+		throw apiError(400, 'INVALID_PROFILE_URL');
 	}
 
 	if (await isServerBlocked(c.env, profileUrl)) {
-		throw new HTTPException(403, { message: 'This Misskey server is not allowed' });
+		throw apiError(403, 'THIS_MISSKEY_SERVER_IS_NOT_ALLOWED');
 	}
 
 	const server = await discoverAuthorizationServer(profileUrl);
 	if (!server) {
-		throw new HTTPException(400, { message: 'Could not discover IndieAuth authorization endpoint from the given profile URL' });
+		throw apiError(400, 'INDIEAUTH_DISCOVERY_FAILED');
 	}
 
 	const db = getDb(c.env);
@@ -521,13 +521,13 @@ app.post('/complete', async (c) => {
 	const body = (await c.req.json()) as { indieauthToken?: string };
 
 	if (!body.indieauthToken) {
-		throw new HTTPException(400, { message: 'indieauthToken is required' });
+		throw apiError(400, 'INDIEAUTH_TOKEN_IS_REQUIRED');
 	}
 
 	const db = getDb(c.env);
 	const tokenRecord = await db.select().from(tokens).where(eq(tokens.token, body.indieauthToken)).get();
 	if (!tokenRecord) {
-		throw new HTTPException(401, { message: 'Invalid token' });
+		throw apiError(401, 'INVALID_TOKEN');
 	}
 
 	return c.json({ token: body.indieauthToken });

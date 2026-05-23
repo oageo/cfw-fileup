@@ -83,7 +83,7 @@ async function loadBuckets(): Promise<void> {
 	const result = await apiPost('/api/buckets/list');
 	loadingBuckets.value = false;
 	if (!result.ok) {
-		bucketError.value = result.data.error;
+		bucketError.value = result.data.message;
 		return;
 	}
 	buckets.value = result.data.buckets;
@@ -125,7 +125,7 @@ async function loadDirectory(): Promise<void> {
 	});
 	loadingDir.value = false;
 	if (!result.ok) {
-		dirError.value = result.data.error;
+		dirError.value = result.data.message;
 		return;
 	}
 	dirEntries.value = result.data.entries.filter(e => e.type === 'dir');
@@ -167,7 +167,7 @@ async function createDirectory(): Promise<void> {
 	const path = `${currentPath.value}${name}/`;
 	const result = await apiPost('/api/directories/create', { bucketId: selectedBucketId.value, path });
 	if (!result.ok) {
-		mkdirError.value = result.data.error;
+		mkdirError.value = result.data.message;
 		return;
 	}
 	newDirName.value = '';

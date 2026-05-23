@@ -16,7 +16,7 @@ async function purgeWorkerCache(): Promise<void> {
 	success.value = '';
 	try {
 		const result = await apiPost('/api/admin/purge-worker-cache');
-		if (!result.ok) throw new Error(result.data.error);
+		if (!result.ok) throw new Error(result.data.message);
 		success.value = `Workerキャッシュをパージしました (${result.data.version})`;
 	} catch (e) {
 		error.value = String(e);

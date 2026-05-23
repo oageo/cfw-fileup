@@ -53,7 +53,7 @@ async function loadTokens(): Promise<void> {
 	try {
 		const result = await apiPost('/api/file-tokens/list', { bucketName: props.bucketName, filePath: props.filePath });
 		if (!result.ok) {
-			listError.value = result.data.error;
+			listError.value = result.data.message;
 			return;
 		}
 		tokens.value = result.data.tokens.sort((a, b) => b.createdAt - a.createdAt);
@@ -93,7 +93,7 @@ async function createToken(): Promise<void> {
 			expiresIn,
 		});
 		if (!result.ok) {
-			createError.value = result.data.error;
+			createError.value = result.data.message;
 			return;
 		}
 		createdToken.value = result.data;
@@ -135,7 +135,7 @@ async function executeDelete(): Promise<void> {
 	try {
 		const result = await apiPost('/api/file-tokens/delete', { tokenId: deletingId.value });
 		if (!result.ok) {
-			deleteError.value = result.data.error;
+			deleteError.value = result.data.message;
 			return;
 		}
 		tokens.value = tokens.value.filter((t) => t.id !== deletingId.value);
@@ -167,7 +167,7 @@ async function saveVisibility(): Promise<void> {
 			passphrase: editPassphrase.value || undefined,
 		});
 		if (!result.ok) {
-			visibilityError.value = result.data.error;
+			visibilityError.value = result.data.message;
 			return;
 		}
 		emit('update:fileVisibility', editVisibility.value);

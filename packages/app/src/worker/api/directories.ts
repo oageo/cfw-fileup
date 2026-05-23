@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, like, sql } from 'drizzle-orm';
 import { buckets, files, directories } from '../scheme/index';
@@ -11,6 +10,7 @@ import { omitResAndReq } from '../utils/omit';
 import { MAX_FILE_PATH_LENGTH } from '../../shared/const';
 import { isValidDirectoryPath } from '../../shared/name-validation';
 import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
+import { apiError } from '../utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -25,23 +25,23 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 
-		if (!body.bucketId || !body.path) throw new HTTPException(400, { message: 'bucketId and path are required' });
+		if (!body.bucketId || !body.path) throw apiError(400, 'INVALID_DIRECTORY_PATH', 'bucketId and path are required');
 
 		const normalizedPath = body.path.endsWith('/') ? body.path : `${body.path}/`;
 		if (normalizedPath.length > MAX_FILE_PATH_LENGTH) {
-			throw new HTTPException(400, { message: `path must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+			throw apiError(400, 'INVALID_DIRECTORY_PATH', `path must be at most ${MAX_FILE_PATH_LENGTH} characters`);
 		}
 		if (!isValidDirectoryPath(normalizedPath)) {
-			throw new HTTPException(400, { message: 'Invalid directory path' });
+			throw apiError(400, 'INVALID_DIRECTORY_PATH');
 		}
 		const directoryNameError = await validateDirectoryPathForbiddenNames(db, normalizedPath);
 		if (directoryNameError) {
-			throw new HTTPException(400, { message: directoryNameError });
+			throw apiError(400, 'INVALID_DIRECTORY_PATH', directoryNameError);
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		await db.insert(directories).values({
 			id: genEaidx(Date.now()),
@@ -62,11 +62,11 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 
-		if (!body.bucketId || !body.path) throw new HTTPException(400, { message: 'bucketId and path are required' });
+		if (!body.bucketId || !body.path) throw apiError(400, 'INVALID_DIRECTORY_PATH', 'bucketId and path are required');
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
-		if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
-		if (bucket.userId !== user.id && !user.isAdmin) throw new HTTPException(403, { message: 'Forbidden' });
+		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 
 		const childFiles = await db
 			.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size })

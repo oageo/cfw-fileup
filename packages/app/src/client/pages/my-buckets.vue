@@ -50,7 +50,7 @@ async function loadBuckets(): Promise<void> {
 	try {
 		const result = await apiPost('/api/buckets/list');
 		if (!result.ok) {
-			error.value = result.data.error;
+			error.value = result.data.message;
 			return;
 		}
 		buckets.value = result.data.buckets;
@@ -74,7 +74,7 @@ async function createBucket({ valid }: { valid: boolean }): Promise<void> {
 	try {
 		const result = await apiPost('/api/buckets/create', { bucketName: newBucketName.value.trim() });
 		if (!result.ok) {
-			createError.value = result.data.error;
+			createError.value = result.data.message;
 			return;
 		}
 		newBucketName.value = '';
@@ -99,7 +99,7 @@ async function executeDeletion(): Promise<void> {
 	try {
 		const result = await apiPost('/api/buckets/delete', { bucketId });
 		if (!result.ok) {
-			error.value = result.data.error;
+			error.value = result.data.message;
 			return;
 		}
 		await loadBuckets();

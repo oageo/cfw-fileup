@@ -71,7 +71,7 @@ async function submit(destination: { bucketId: string; bucketName: string; prefi
 	});
 	submitting.value = false;
 	if (!result.ok) {
-		error.value = result.data.error;
+		error.value = result.data.message;
 		return;
 	}
 	emit('update:open', false);

@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq } from 'drizzle-orm';
 import { users, usedUsernames } from '../scheme/index';
@@ -9,6 +8,7 @@ import { hashPassword, verifyPassword } from '../utils/crypto';
 import { validateUsername } from '../utils/name-validation';
 import { apiDef, getResponseDefWithAuth } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
+import { apiError } from '../utils/api-error';
 import type { JsonCtx } from '../../shared/api';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -53,28 +53,28 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.currentPassword) {
-			throw new HTTPException(400, { message: 'currentPassword is required' });
+			throw apiError(400, 'CURRENT_PASSWORD_IS_REQUIRED');
 		}
 
 		const userRecord = await db.select().from(users).where(eq(users.id, user.id)).get();
 
 		if (!userRecord) {
-			throw new HTTPException(404, { message: 'User not found' });
+			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
 		if (!userRecord.passwordHash) {
-			throw new HTTPException(401, { message: 'Invalid password' });
+			throw apiError(401, 'INVALID_PASSWORD');
 		}
 		const passwordValid = await verifyPassword(body.currentPassword, userRecord.passwordHash);
 		if (!passwordValid) {
-			throw new HTTPException(401, { message: 'Invalid password' });
+			throw apiError(401, 'INVALID_PASSWORD');
 		}
 
 		if (body.username) {
 			const newUsername = body.username.trim();
 
 			if (newUsername.length < 1 || newUsername.length > 32) {
-				throw new HTTPException(400, { message: 'username must be 1-32 characters' });
+				throw apiError(400, 'INVALID_USERNAME_FORMAT', 'username must be 1-32 characters');
 			}
 
 			if (newUsername.toLowerCase() !== userRecord.username.toLowerCase()) {
@@ -82,7 +82,7 @@ app.post(
 				const usernameError = await validateUsername(db, newUsername);
 				if (usernameError) {
 					const status = usernameError === 'Username already exists' ? 409 : 400;
-					throw new HTTPException(status, { message: usernameError });
+					throw apiError(status, usernameError === 'Username already exists' ? 'USERNAME_ALREADY_EXISTS' : 'INVALID_USERNAME_FORMAT', usernameError);
 				}
 
 				await db.update(users).set({ username: newUsername }).where(eq(users.id, user.id));
@@ -97,7 +97,7 @@ app.post(
 
 		if (body.newPassword) {
 			if (body.newPassword.length < 8) {
-				throw new HTTPException(400, { message: 'password must be at least 8 characters' });
+				throw apiError(400, 'INVALID_PASSWORD', 'password must be at least 8 characters');
 			}
 
 			const passwordHash = await hashPassword(body.newPassword);

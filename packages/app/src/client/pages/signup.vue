@@ -82,7 +82,7 @@ async function submit({ valid }: { valid: boolean }): Promise<void> {
 			turnstileToken: turnstileEnabled.value && turnstileToken.value ? turnstileToken.value : undefined,
 		});
 		if (!result.ok) {
-			error.value = result.data.error;
+			error.value = result.data.message;
 			return;
 		}
 		if (result.data.token) {
@@ -107,7 +107,7 @@ async function signupWithPasskey(): Promise<void> {
 	try {
 		const beginResult = await apiPost('/api/passkey/signup/begin', { username: passkeyForm.username.trim() });
 		if (!beginResult.ok) {
-			passkeyError.value = beginResult.data.error || 'サインアップの開始に失敗しました';
+			passkeyError.value = beginResult.data.message || 'サインアップの開始に失敗しました';
 			return;
 		}
 		const { challengeId, options } = beginResult.data;
@@ -126,7 +126,7 @@ async function signupWithPasskey(): Promise<void> {
 			passkeyName: passkeyForm.passkeyName.trim() || undefined,
 		});
 		if (!finishResult.ok) {
-			passkeyError.value = finishResult.data.error || 'アカウント作成に失敗しました';
+			passkeyError.value = finishResult.data.message || 'アカウント作成に失敗しました';
 			return;
 		}
 		if (finishResult.data.token) {

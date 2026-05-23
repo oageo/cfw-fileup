@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { eq, count, lt } from 'drizzle-orm';
+import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { generateToken } from '../utils/crypto';
@@ -44,17 +44,17 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.get('/', async (c) => {
 	if ((c.env.GOOGLE_CLIENT_ID as string) === '' || (c.env.GOOGLE_CLIENT_SECRET as string) === '') {
-		throw new HTTPException(503, { message: 'Google OAuth is not configured' });
+		throw apiError(503, 'GOOGLE_OAUTH_IS_NOT_CONFIGURED');
 	}
 
 	const db = getDb(c.env);
 	const passphrase = c.req.query('passphrase');
 	const signupUsername = c.req.query('username');
 	if (passphrase && passphrase.length > MAX_PASSPHRASE_LENGTH) {
-		throw new HTTPException(400, { message: `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters` });
+		throw apiError(400, 'PASSPHRASE_TOO_LONG', `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters`);
 	}
 	if (signupUsername && signupUsername.length > MAX_USERNAME_LENGTH) {
-		throw new HTTPException(400, { message: `username must be at most ${MAX_USERNAME_LENGTH} characters` });
+		throw apiError(400, 'INVALID_USERNAME_FORMAT', `username must be at most ${MAX_USERNAME_LENGTH} characters`);
 	}
 
 	// Clean up expired states
@@ -82,7 +82,7 @@ app.get('/', async (c) => {
 
 app.get('/callback', async (c) => {
 	if ((c.env.GOOGLE_CLIENT_ID as string) === '' || (c.env.GOOGLE_CLIENT_SECRET as string) === '') {
-		throw new HTTPException(503, { message: 'Google OAuth is not configured' });
+		throw apiError(503, 'GOOGLE_OAUTH_IS_NOT_CONFIGURED');
 	}
 
 	const db = getDb(c.env);
@@ -244,14 +244,14 @@ app.post('/complete', async (c) => {
 	const body = (await c.req.json()) as { googleToken?: string };
 
 	if (!body.googleToken) {
-		throw new HTTPException(400, { message: 'googleToken is required' });
+		throw apiError(400, 'GOOGLE_TOKEN_IS_REQUIRED');
 	}
 
 	const db = getDb(c.env);
 
 	const tokenRecord = await db.select().from(tokens).where(eq(tokens.token, body.googleToken)).get();
 	if (!tokenRecord) {
-		throw new HTTPException(401, { message: 'Invalid token' });
+		throw apiError(401, 'INVALID_TOKEN');
 	}
 
 	// Token is valid - return it as the session token

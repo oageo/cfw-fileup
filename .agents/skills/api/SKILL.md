@@ -22,6 +22,7 @@ tags: [api, typescript, hono, schema, openapi]
 ## 定義と実装のパス
 
 - `packages/app/src/shared/api.schemas.ts` - 共有エラーレスポンススキーマ
+- `packages/app/src/shared/api-errors.ts` - APIエラーコードと既定メッセージ
 - `packages/app/src/shared/api/index.ts` - APIスキーマ定義ファイルのインデックス
 - `packages/app/src/shared/api/*.ts` - APIスキーマ定義ファイル
 - `packages/app/src/worker/api/*.ts` - API実装ファイル ハンドラ
@@ -34,12 +35,30 @@ tags: [api, typescript, hono, schema, openapi]
 
 ```ts
 import * as v from 'valibot';
+import { apiErrorMessages } from './api-errors.js';
 
 export const ErrorResponse = v.pipe(
-  v.object({ error: v.string() }),
+  v.object({
+    error: v.picklist(Object.keys(apiErrorMessages) as [keyof typeof apiErrorMessages, ...(keyof typeof apiErrorMessages)[]]),
+    message: v.string(),
+  }),
   v.metadata({ ref: 'ErrorResponse' }),
 );
 ```
+
+エラーレスポンスは次の形にする：
+
+```json
+{
+  "error": "BUCKET_NOT_FOUND",
+  "message": "Bucket not found"
+}
+```
+
+- `error` はフロントエンドなど機械が分岐するための stable な SNAKE_CASE code
+- `message` は人間向け表示テキスト
+- エラーコードと既定メッセージは `packages/app/src/shared/api-errors.ts` の `apiErrorMessages` に追加する
+- 既存コード名を変更するとフロントエンドの分岐が壊れるので、表示文言だけ変えたい場合は `message` 側を変える
 
 ---
 
@@ -70,7 +89,7 @@ export const exampleApiDef = {
     // 【重要】全ての応答コードに description と content + vSchema を設定すること。
     // describeResponse の型推論は vSchema から T を組み立てるため、
     // content が欠けているエントリがあると T の推論が壊れ連鎖型エラーになる。
-    // エラー応答は onError が { error: string } を返すので ErrorResponse を使う。
+    // エラー応答は onError が { error: ApiErrorCode, message: string } を返すので ErrorResponse を使う。
     res: {
       200: { description: 'Success', content: { 'application/json': { vSchema: UserResponse } } },
       404: { description: 'Not Found', content: { 'application/json': { vSchema: ErrorResponse } } },
@@ -89,12 +108,12 @@ export const exampleApiDef = {
 
 ```ts
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth';
 import { getDb } from '../utils/db';
 import { users } from '../scheme/index';
+import { apiError } from '../utils/api-error';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 
@@ -122,7 +141,7 @@ app.post(
       .get();
 
     if (!user) {
-      throw new HTTPException(404, { message: 'Not Found' });
+      throw apiError(404, 'USER_NOT_FOUND');
     }
 
     // `, 200`は必須
@@ -137,6 +156,20 @@ app.post(
 
 export const exampleRoutes = app;
 ```
+
+### エラーの投げ方
+
+APIハンドラでは `HTTPException` を直接投げず、`apiError(status, code, message?)` を使う。
+
+```ts
+throw apiError(404, 'BUCKET_NOT_FOUND');
+throw apiError(400, 'INVALID_FILE_PATH', `path must be at most ${MAX_FILE_PATH_LENGTH} characters`);
+```
+
+- `code` は `shared/api-errors.ts` の `apiErrorMessages` に存在するキーだけを使う
+- `message` を省略すると `apiErrorMessages[code]` が使われる
+- 動的な詳細を返したい場合でも `error` code は安定させ、詳細だけ `message` に入れる
+- `worker/index.ts` の `onError` が `ApiError` を `{ error: code, message }` に変換する
 
 ---
 
@@ -184,3 +217,15 @@ endpoint の `res` に `401` が定義されていると `authErrorResponses` �
 POST JSON body タイプのAPIでは、 `apiPost` を利用できる。
 
 `import { apiPost } from '../utils/api';`
+
+失敗時の `ApiFailure` は `data.error` がエラーコード、`data.message` が表示用テキスト。
+
+```ts
+const result = await apiPost('/api/buckets/delete', { bucketId });
+if (!result.ok) {
+  if (result.data.error === 'BUCKET_NOT_FOUND') {
+    // stable codeで分岐
+  }
+  error.value = result.data.message; // 表示には message を使う
+}
+```

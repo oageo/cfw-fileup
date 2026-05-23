@@ -191,7 +191,7 @@ function getEffectiveSelectedFileEntries() {
 async function loadBucket(): Promise<void> {
 	const result = await apiPost('/api/buckets/list');
 	if (!result.ok) {
-		loadError.value = result.data.error;
+		loadError.value = result.data.message;
 		return;
 	}
 	buckets.value = result.data.buckets;
@@ -784,8 +784,8 @@ async function tusUpload(fileId: string, blob: Blob, filename: string, partSize:
 				});
 				if (res.ok) { success = true; break; }
 				if (res.status >= 400 && res.status < 500) {
-					const err = (await res.json().catch(() => ({}))) as { error?: string };
-					uploadError.value = `アップロード失敗 (${filename}): ${err.error ?? res.status}`;
+					const err = (await res.json().catch(() => ({}))) as { message?: string };
+					uploadError.value = `アップロード失敗 (${filename}): ${err.message ?? res.status}`;
 					return false;
 				}
 			} catch {
@@ -832,14 +832,14 @@ async function openUpload(path: string): Promise<OpenUploadResult | null> {
 	if (!bucket.value) return null;
 	// サーバーのデフォルト (32MiB) を使用するためpartSizeは省略可能
 	const result = await apiPost('/api/files/create/open', { bucketId: bucket.value.id, path });
-	if (!result.ok) { uploadError.value = result.data.error; return null; }
+	if (!result.ok) { uploadError.value = result.data.message; return null; }
 	return { fileId: result.data.fileId, partSize: result.data.partSize };
 }
 
 async function closeUpload(fileId: string): Promise<boolean> {
 	const result = await apiPost('/api/files/create/close', { fileId, visibility: visibility.value, passphrase: passphrase.value || undefined });
 	if (!result.ok) {
-		uploadError.value = result.data.error;
+		uploadError.value = result.data.message;
 		return false;
 	}
 	return true;
@@ -965,8 +965,8 @@ class TusChunkQueue {
 				if (res.status >= 400 && res.status < 500) {
 					const root = await navigator.storage.getDirectory();
 					await root.removeEntry(tmpName).catch(() => {});
-					const err = (await res.json().catch(() => ({}))) as { error?: string };
-					uploadError.value = `アップロード失敗 (${this.path}): ${err.error ?? res.status}`;
+					const err = (await res.json().catch(() => ({}))) as { message?: string };
+					uploadError.value = `アップロード失敗 (${this.path}): ${err.message ?? res.status}`;
 					return false;
 				}
 				// 5xx はリトライ
@@ -1075,7 +1075,7 @@ async function uploadTarStream(
 
 	const indexResult = await apiPost('/api/files/create/tar-index', { fileId, files: resolvedIndex });
 	if (!indexResult.ok) {
-		uploadError.value = indexResult.data.error;
+		uploadError.value = indexResult.data.message;
 		await deleteExistingFile(archivePath);
 		return false;
 	}
@@ -1101,7 +1101,7 @@ async function uploadBgzfStream(
 
 	const bgzfIndexResult = await apiPost('/api/files/create/targz-index', { fileId, files: resolvedIndex });
 	if (!bgzfIndexResult.ok) {
-		uploadError.value = bgzfIndexResult.data.error;
+		uploadError.value = bgzfIndexResult.data.message;
 		await deleteExistingFile(archivePath);
 		return false;
 	}

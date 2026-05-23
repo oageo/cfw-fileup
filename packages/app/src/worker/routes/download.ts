@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { eq, and, like } from 'drizzle-orm';
 import { createBgzfBlock } from 'bgzf';
 import parseRange from 'range-parser';
@@ -9,6 +8,7 @@ import { getDb } from '../utils/db';
 import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
+import { apiError, createApiErrorResponse } from '../utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
@@ -386,7 +386,7 @@ function createMissingFileResponse(fileId: string): Response {
 		: now + tenYearsInSeconds * 1000;
 	const maxAge = Math.max(0, Math.floor((expiresAt - now) / 1000));
 
-	return new Response(JSON.stringify({ error: 'File not found' }), {
+	return new Response(JSON.stringify(createApiErrorResponse('FILE_NOT_FOUND')), {
 		status: 404,
 		headers: {
 			'Content-Type': 'application/json',
@@ -460,8 +460,8 @@ async function decompressGzipChunk(data: Uint8Array): Promise<Uint8Array<ArrayBu
 app.get('/d/:fileId', async (c) => {
 	const db = getDb(c.env);
 	const fileId = c.req.param('fileId');
-	if (fileId.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `fileId must be at most ${MAX_ID_LENGTH} characters` });
-	if (!aidxRegExp.test(fileId)) throw new HTTPException(400, { message: 'Invalid file ID' });
+	if (fileId.length > MAX_ID_LENGTH) throw apiError(400, 'FILE_ID_IS_REQUIRED', `fileId must be at most ${MAX_ID_LENGTH} characters`);
+	if (!aidxRegExp.test(fileId)) throw apiError(400, 'INVALID_FILE_ID');
 	const cachedMissingFile = await matchMissingFileCache(c.env, fileId);
 	if (cachedMissingFile !== null) return cachedMissingFile;
 
@@ -472,13 +472,13 @@ app.get('/d/:fileId', async (c) => {
 		return response;
 	}
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
-	if (!bucket) throw new HTTPException(404, { message: 'Bucket not found' });
+	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 
 	const download = new DownloadContext(file, c.req.raw);
 	const rangeHeader = c.req.header('Range') ?? null;
 	const ifRangeHeader = c.req.header('If-Range') ?? null;
 	if (download.fileQuery !== null && download.fileQuery.length > MAX_FILE_PATH_LENGTH) {
-		throw new HTTPException(400, { message: `file must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+		throw apiError(400, 'INVALID_FILE_PATH', `file must be at most ${MAX_FILE_PATH_LENGTH} characters`);
 	}
 
 	if (download.isMetaMode) {
@@ -552,13 +552,13 @@ app.get('/d/:fileId', async (c) => {
 	if (file.visibility !== 'public') {
 		const fileToken = c.req.query('token');
 		if (fileToken) {
-			if (fileToken.length > MAX_ID_LENGTH) throw new HTTPException(400, { message: `token must be at most ${MAX_ID_LENGTH} characters` });
+			if (fileToken.length > MAX_ID_LENGTH) throw apiError(400, 'TOKEN_IS_REQUIRED', `token must be at most ${MAX_ID_LENGTH} characters`);
 			const fileTokenRecord = await db
 				.select()
 				.from(fileAccessTokens)
 				.where(and(eq(fileAccessTokens.token, fileToken), eq(fileAccessTokens.fileId, file.id)))
 				.get();
-			if (!fileTokenRecord) throw new HTTPException(403, { message: 'Forbidden' });
+			if (!fileTokenRecord) throw apiError(403, 'FORBIDDEN');
 			if (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now()) {
 				download.useExpiredFileToken(fileTokenRecord);
 				const cacheTarget = download.cacheTarget;
@@ -573,7 +573,7 @@ app.get('/d/:fileId', async (c) => {
 			download.useFileToken(fileTokenRecord);
 		} else {
 			const authorization = c.req.header('Authorization');
-			if (!authorization?.startsWith('Bearer ')) throw new HTTPException(403, { message: 'Forbidden' });
+			if (!authorization?.startsWith('Bearer ')) throw apiError(403, 'FORBIDDEN');
 			const token = authorization.slice(7);
 			const tokenRecord = await db
 				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended })
@@ -582,7 +582,7 @@ app.get('/d/:fileId', async (c) => {
 				.where(eq(tokens.token, token))
 				.get();
 			if (!tokenRecord || tokenRecord.isSuspended || (!tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId)) {
-				throw new HTTPException(403, { message: 'Forbidden' });
+				throw apiError(403, 'FORBIDDEN');
 			}
 		}
 	}
@@ -613,7 +613,7 @@ app.get('/d/:fileId', async (c) => {
 	if ((file.isTargz || file.isTar) && download.isListMode) {
 		const listPath = c.req.query('list');
 		if (listPath && listPath.length > MAX_FILE_PATH_LENGTH) {
-			throw new HTTPException(400, { message: `list must be at most ${MAX_FILE_PATH_LENGTH} characters` });
+			throw apiError(400, 'INVALID_FILE_PATH', `list must be at most ${MAX_FILE_PATH_LENGTH} characters`);
 		}
 		if (file.isTargz) {
 			const index = await db.select().from(targzFiles).where(
@@ -641,14 +641,14 @@ app.get('/d/:fileId', async (c) => {
 			.get();
 
 		if (!indexEntry) {
-			throw new HTTPException(404, { message: 'File not found in archive' });
+			throw apiError(404, 'FILE_NOT_FOUND_IN_ARCHIVE');
 		}
 
 		const rangeData = await c.env.R2.get(file.r2Key, {
 			range: { offset: indexEntry.offset, length: indexEntry.size },
 		});
 		if (!rangeData?.body) {
-			throw new HTTPException(500, { message: 'Failed to retrieve file' });
+			throw apiError(500, 'FAILED_TO_RETRIEVE_FILE');
 		}
 
 		const response = new Response(rangeData.body, {
@@ -670,7 +670,7 @@ app.get('/d/:fileId', async (c) => {
 			.get();
 
 		if (!indexEntry) {
-			throw new HTTPException(404, { message: 'File not found in archive' });
+			throw apiError(404, 'FILE_NOT_FOUND_IN_ARCHIVE');
 		}
 
 		try {
@@ -683,7 +683,7 @@ app.get('/d/:fileId', async (c) => {
 				},
 			});
 			if (!firstBlockData?.body) {
-				throw new HTTPException(404, { message: 'Failed to retrieve file' });
+				throw apiError(404, 'FAILED_TO_RETRIEVE_FILE');
 			}
 
 			const firstBytes = await firstBlockData.arrayBuffer();
@@ -747,7 +747,7 @@ app.get('/d/:fileId', async (c) => {
 			return response;
 		} catch (error) {
 			console.error('Failed to fetch from R2:', error);
-			throw new HTTPException(500, { message: 'Internal server error' });
+			throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		}
 	}
 
@@ -773,7 +773,7 @@ app.get('/d/:fileId', async (c) => {
 			if (!rangeObject?.body) {
 				const cached = await matchDownloadCache('plain');
 				if (cached !== null) return cached;
-				throw new HTTPException(404, { message: 'File not found in storage' });
+				throw apiError(404, 'FILE_NOT_FOUND_IN_STORAGE');
 			}
 
 			plainHeaders.set('Accept-Ranges', 'bytes');
@@ -791,7 +791,7 @@ app.get('/d/:fileId', async (c) => {
 		if (rangeSource === null) {
 			const cached = await matchDownloadCache('plain');
 			if (cached !== null) return cached;
-			throw new HTTPException(404, { message: 'File not found in storage' });
+			throw apiError(404, 'FILE_NOT_FOUND_IN_STORAGE');
 		}
 
 		const contentType = plainHeaders.get('Content-Type') ?? 'application/octet-stream';
@@ -819,7 +819,7 @@ app.get('/d/:fileId', async (c) => {
 	const r2Object = await c.env.R2.get(file.r2Key);
 
 	if (!r2Object) {
-		throw new HTTPException(404, { message: 'File not found in storage' });
+		throw apiError(404, 'FILE_NOT_FOUND_IN_STORAGE');
 	}
 
 	const response = new Response(r2Object.body, {

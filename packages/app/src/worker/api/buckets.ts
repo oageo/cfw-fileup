@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { HTTPException } from 'hono/http-exception';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq } from 'drizzle-orm';
 import { buckets, files, usedBucketNames } from '../scheme/index';
@@ -10,6 +9,7 @@ import { genEaidx } from '../../shared/eaid-x';
 import { validateBucketName } from '../utils/name-validation';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
+import { apiError } from '../utils/api-error';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -25,7 +25,7 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.bucketName) {
-			throw new HTTPException(400, { message: 'bucketName is required' });
+			throw apiError(400, 'BUCKET_NAME_IS_REQUIRED');
 		}
 
 		// 使用可能な文字・禁止ワード・重複（大文字小文字を区別しない）チェック
@@ -33,7 +33,7 @@ app.post(
 		if (bucketNameError) {
 			// 重複エラーのみ409、それ以外は400
 			const status = bucketNameError === 'Bucket name already exists' ? 409 : 400;
-			throw new HTTPException(status, { message: bucketNameError });
+			throw apiError(status, bucketNameError === 'Bucket name already exists' ? 'BUCKET_NAME_ALREADY_EXISTS' : 'INVALID_FILE_PATH', bucketNameError);
 		}
 
 		const quota = await getQuotaForUser(c.env, user.id);
@@ -43,7 +43,7 @@ app.post(
 				.then((result) => result.length);
 
 			if (userBucketCount >= quota.maxBuckets) {
-				throw new HTTPException(429, { message: 'Bucket limit exceeded' });
+				throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
 			}
 		}
 
@@ -75,17 +75,17 @@ app.post(
 		const body = c.req.valid('json');
 
 		if (!body.bucketId) {
-			throw new HTTPException(400, { message: 'bucketId is required' });
+			throw apiError(400, 'BUCKET_NOT_FOUND', 'bucketId is required');
 		}
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.id, body.bucketId)).get();
 
 		if (!bucket) {
-			throw new HTTPException(404, { message: 'Bucket not found' });
+			throw apiError(404, 'BUCKET_NOT_FOUND');
 		}
 
 		if (bucket.userId !== user.id && !user.isAdmin) {
-			throw new HTTPException(403, { message: 'Forbidden' });
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		const bucketFiles = await db.select().from(files).where(eq(files.bucketId, bucket.id));

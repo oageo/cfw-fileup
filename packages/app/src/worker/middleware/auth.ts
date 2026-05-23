@@ -1,8 +1,8 @@
 import { createMiddleware } from 'hono/factory';
-import { HTTPException } from 'hono/http-exception';
 import { eq } from 'drizzle-orm';
 import { tokens, users } from '../scheme/index';
 import { getDb } from '../utils/db';
+import { apiError } from '../utils/api-error';
 
 export type AuthUser = {
 	id: string;
@@ -21,7 +21,7 @@ declare module 'hono' {
 export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
 	const authorization = c.req.header('Authorization');
 	if (!authorization?.startsWith('Bearer ')) {
-		throw new HTTPException(401, { message: 'Unauthorized' });
+		throw apiError(401, 'UNAUTHORIZED');
 	}
 
 	const token = authorization.slice(7);
@@ -41,11 +41,11 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 		.get();
 
 	if (!tokenRecord) {
-		throw new HTTPException(401, { message: 'Unauthorized' });
+		throw apiError(401, 'UNAUTHORIZED');
 	}
 
 	if (tokenRecord.isSuspended) {
-		throw new HTTPException(403, { message: 'Account is suspended' });
+		throw apiError(403, 'ACCOUNT_IS_SUSPENDED');
 	}
 
 	c.set('user', {
@@ -62,7 +62,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 export const adminMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
 	const user = c.get('user');
 	if (!user.isAdmin) {
-		throw new HTTPException(403, { message: 'Forbidden' });
+		throw apiError(403, 'FORBIDDEN');
 	}
 	await next();
 });

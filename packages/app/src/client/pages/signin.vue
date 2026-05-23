@@ -84,9 +84,9 @@ async function handleGoogleCallback(): Promise<void> {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ googleToken }),
 		});
-		const data = (await res.json()) as { token?: string; error?: string };
+		const data = (await res.json()) as { token?: string; message?: string };
 		if (!res.ok) {
-			error.value = data.error ?? 'Googleサインインに失敗しました';
+			error.value = data.message ?? 'Googleサインインに失敗しました';
 			return;
 		}
 		if (data.token) {
@@ -145,9 +145,9 @@ async function handleIndieAuthCallback(): Promise<void> {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ indieauthToken }),
 		});
-		const data = (await res.json()) as { token?: string; error?: string };
+		const data = (await res.json()) as { token?: string; message?: string };
 		if (!res.ok) {
-			error.value = data.error ?? 'IndieAuthサインインに失敗しました';
+			error.value = data.message ?? 'IndieAuthサインインに失敗しました';
 			return;
 		}
 		if (data.token) {
@@ -177,7 +177,7 @@ async function submit({ valid }: { valid: boolean }): Promise<void> {
 			turnstileToken: turnstileEnabled.value && turnstileToken.value ? turnstileToken.value : undefined,
 		});
 		if (!result.ok) {
-			error.value = result.data.error;
+			error.value = result.data.message;
 			return;
 		}
 		if (result.data.token) {
@@ -198,7 +198,7 @@ async function signinWithPasskey(): Promise<void> {
 	try {
 		const beginResult = await apiPost('/api/passkey/authenticate/begin');
 		if (!beginResult.ok) {
-			error.value = beginResult.data.error || 'パスキー認証の開始に失敗しました';
+			error.value = beginResult.data.message || 'パスキー認証の開始に失敗しました';
 			return;
 		}
 		const { challengeId, options } = beginResult.data;
@@ -216,7 +216,7 @@ async function signinWithPasskey(): Promise<void> {
 			credential: credential as unknown as ApiReq<'/api/passkey/authenticate/finish'>['credential'],
 		});
 		if (!finishResult.ok) {
-			error.value = finishResult.data.error || 'パスキー認証に失敗しました';
+			error.value = finishResult.data.message || 'パスキー認証に失敗しました';
 			return;
 		}
 		if (finishResult.data.token) {
@@ -242,7 +242,7 @@ async function signinWithBackupCode({ valid }: { valid: boolean }): Promise<void
 			code: backupForm.code,
 		});
 		if (!result.ok) {
-			backupError.value = result.data.error || 'バックアップコードの認証に失敗しました';
+			backupError.value = result.data.message || 'バックアップコードの認証に失敗しました';
 			return;
 		}
 		if (result.data.token) {
