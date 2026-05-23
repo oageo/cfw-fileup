@@ -15,6 +15,7 @@ import { isValidFilePath } from '../../shared/name-validation';
 import { UploadTree, type UploadDirectory, type UploadEntry } from '@/utils/upload-tree';
 import { enqueueUploadJob } from '@/store/upload-worker';
 import { buildUploadConflictDirectoryPlan, findUploadConflictsInDirectory, getEffectiveUploadEntries, isPathUnderMissingDirectory } from '@/utils/upload-paths';
+import { readBlobTextPreview } from '@/utils/text-preview';
 import type { ZipExtractWorkerMessage } from '@/workers/zip-extract.worker';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
@@ -707,7 +708,7 @@ watch(selectedEntry, async (entry) => {
 	if (isTextLike(entry)) {
 		previewLoading.value = true;
 		try {
-			previewText.value = await entry.file.slice(0, 64 * 1024).text();
+			previewText.value = (await readBlobTextPreview(entry.file)).text;
 		} finally {
 			previewLoading.value = false;
 		}

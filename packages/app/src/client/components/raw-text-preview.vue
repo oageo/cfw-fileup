@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { authHeaders } from '@/store/auth';
+import { readTextPreview } from '@/utils/text-preview';
 
 const props = defineProps<{
 	url: string;
@@ -10,14 +11,14 @@ const props = defineProps<{
 const loading = ref(false);
 const error = ref('');
 const source = ref('');
-const copied = ref(false);
-let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+const truncated = ref(false);
 
 watch(
 	() => props.url,
 	async (url) => {
 		source.value = '';
 		error.value = '';
+		truncated.value = false;
 		if (!url) return;
 		loading.value = true;
 		try {
@@ -26,7 +27,9 @@ watch(
 				error.value = `テキストを読み込めませんでした (${res.status})`;
 				return;
 			}
-			source.value = await res.text();
+			const preview = await readTextPreview(res);
+			source.value = preview.text;
+			truncated.value = preview.truncated;
 		} catch (err) {
 			error.value = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -35,32 +38,12 @@ watch(
 	},
 	{ immediate: true },
 );
-
-async function copyRaw(): Promise<void> {
-	if (!source.value) return;
-	await navigator.clipboard.writeText(source.value);
-	copied.value = true;
-	if (copiedTimer !== null) clearTimeout(copiedTimer);
-	copiedTimer = setTimeout(() => {
-		copied.value = false;
-		copiedTimer = null;
-	}, 1600);
-}
-
-onBeforeUnmount(() => {
-	if (copiedTimer !== null) clearTimeout(copiedTimer);
-});
 </script>
 
 <template>
   <section class="raw-text-preview-wrap" :aria-label="`${filename} のRawプレビュー`">
-    <div v-if="!loading && !error" class="raw-text-preview-toolbar">
-      <button
-        type="button"
-        class="btn btn-secondary raw-text-preview-copy"
-        :disabled="source.length === 0"
-        @click="copyRaw"
-      >{{ copied ? 'コピー済み' : '全部コピー' }}</button>
+    <div v-if="!loading && !error && truncated" class="raw-text-preview-toolbar">
+      <p class="raw-text-preview-note">ファイルが大きすぎるため、プレビューを省略しています。</p>
     </div>
     <div v-if="loading" class="page-loading">
       <span class="spinner"></span>読み込み中...
@@ -79,12 +62,14 @@ onBeforeUnmount(() => {
 
 .raw-text-preview-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   margin-bottom: 12px;
 }
 
-.raw-text-preview-copy {
-  flex-shrink: 0;
+.raw-text-preview-note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
 }
 
 .raw-text-preview {
