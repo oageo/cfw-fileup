@@ -8,7 +8,7 @@ test.describe('Bucket management', () => {
 	});
 
 	test('can create a bucket', async ({ loggedInPage }) => {
-		const bucketName = `e2e-bucket-${Date.now().toString(36)}`;
+		const bucketName = `e2e_bucket_${Date.now().toString(36)}`;
 
 		await loggedInPage.goto('/my/buckets');
 

@@ -25,7 +25,7 @@ export const test = base.extend<E2EFixtures>({
 		}
 		const { token } = await signinRes.json() as { token: string };
 
-		const meRes = await request.get('/api/account/me', {
+		const meRes = await request.post('/api/account/me', {
 			headers: { Authorization: `Bearer ${token}` },
 		});
 		const user = await meRes.json() as { id: string; username: string; isAdmin: boolean };
