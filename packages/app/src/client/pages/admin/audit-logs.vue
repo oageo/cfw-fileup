@@ -28,6 +28,7 @@ const actionLabels: Record<string, string> = {
 	admin_bucket_deleted: 'バケット削除',
 	admin_worker_cache_purged: 'Workerキャッシュパージ',
 	admin_user_quota_set: 'ユーザークォータ設定',
+	admin_user_quota_recalculated: 'ユーザークォータ再計算',
 	admin_global_quota_set: 'グローバルクォータ設定',
 	admin_user_quota_deleted: 'ユーザークォータ削除',
 	admin_setting_updated: '設定更新',

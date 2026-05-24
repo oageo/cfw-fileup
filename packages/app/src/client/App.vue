@@ -124,6 +124,9 @@ function toggleTheme(): void {
                   <Button.Root :as="NirA" to="/my/downloads" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>ダウンロード状況</Button.Content>
                   </Button.Root>
+                  <Button.Root :as="NirA" to="/my/quota" class="btn btn-ghost w-full" @click="closeAppNav">
+                    <Button.Content>クォータ</Button.Content>
+                  </Button.Root>
                   <Button.Root :as="NirA" to="/my/passkeys" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>パスキー</Button.Content>
                   </Button.Root>

@@ -11,6 +11,7 @@ import { validateUsername } from '../utils/name-validation';
 import { apiDef, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
+import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -80,8 +81,10 @@ app.post(
 			}
 		}
 
-		const userId = genEaidx(Date.now());
+		const now = Date.now();
+		const userId = genEaidx(now);
 		const passwordHash = await hashPassword(password);
+		const initialQuota = await getInitialEffectiveQuotaForUser(c.env, now);
 
 		await db.insert(users).values({
 			id: userId,
@@ -89,6 +92,14 @@ app.post(
 			passwordHash,
 			isAdmin: isFirstUser,
 			isSuspended: false,
+			effectiveMaxBuckets: initialQuota.maxBuckets,
+			effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
+			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
+			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
+			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
+			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
+			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 		});
 
 		// lowercaseで used_usernames に登録（削除後も同名再利用不可）

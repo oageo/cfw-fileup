@@ -19,6 +19,7 @@ import { verifyTurnstile } from '../utils/turnstile';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
+import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -612,7 +613,22 @@ app.post(
 
 		const { credential: cred } = verification.registrationInfo;
 
-		await db.insert(users).values({ id: userId, username, passwordHash: null, isAdmin: isFirstUser, isSuspended: false });
+		const initialQuota = await getInitialEffectiveQuotaForUser(c.env);
+		await db.insert(users).values({
+			id: userId,
+			username,
+			passwordHash: null,
+			isAdmin: isFirstUser,
+			isSuspended: false,
+			effectiveMaxBuckets: initialQuota.maxBuckets,
+			effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
+			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
+			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
+			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
+			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
+			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
+		});
 		await db
 			.insert(usedUsernames)
 			.values({ username: username.toLowerCase() })

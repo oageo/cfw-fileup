@@ -15,6 +15,20 @@ const QuotaResponse = v.pipe(
 	}),
 	v.metadata({ ref: 'Quota' }),
 );
+const EffectiveQuotaSource = v.picklist(['plan', 'custom', 'global', 'default']);
+const EffectiveQuotaResponse = v.pipe(
+	v.object({
+		maxBuckets: v.nullable(v.number()),
+		maxBucketSizeBytes: v.nullable(v.number()),
+		maxFilesPerBucket: v.nullable(v.number()),
+		maxDailyUploads: v.nullable(v.number()),
+		canUseDownloadCount: v.boolean(),
+		effectiveQuotaExpiresAt: v.nullable(v.number()),
+		effectiveQuotaUpdatedAt: v.nullable(v.number()),
+		effectiveQuotaSource: v.nullable(EffectiveQuotaSource),
+	}),
+	v.metadata({ ref: 'EffectiveQuota' }),
+);
 const UserCustomQuotaResponse = v.pipe(
 	v.object({
 		exists: v.boolean(),
@@ -234,6 +248,18 @@ export const adminApiDef = {
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
 		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: QuotaResponse } } }, ...AdminErrors, 404: UserNotFound },
+	},
+	'/api/admin/get-user-effective-quota': {
+		summary: 'Get stored effective quota for a user',
+		tags: ['admin'],
+		req: v.object({ userId: IdString }),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: EffectiveQuotaResponse } } }, ...AdminErrors, 404: UserNotFound },
+	},
+	'/api/admin/recalculate-user-effective-quota': {
+		summary: 'Recalculate effective quota for a user',
+		tags: ['admin'],
+		req: v.object({ userId: IdString }),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: EffectiveQuotaResponse } } }, ...AdminErrors, 404: UserNotFound },
 	},
 	'/api/admin/get-user-custom-quota': {
 		summary: 'Get custom quota for a user',

@@ -11,6 +11,7 @@ import { omitResAndReq } from '../utils/omit';
 import { apiError } from '../utils/api-error';
 import { parseEaidx } from '../../shared/eaid-x';
 import { idPage, pageParams } from '../utils/pagination';
+import { getEffectiveQuotaForUser } from '../utils/rate-limit';
 import type { JsonCtx } from '../../shared/api';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -43,6 +44,17 @@ app.post(
 		await db.update(users).set({ termsAgreedAt: body.agreedAt }).where(eq(users.id, user.id));
 		return c.json({ ok: true, termsAgreedAt: body.agreedAt }, 200);
 	}, getResponseDefWithAuth('/api/account/agree-terms')),
+);
+
+app.post(
+	'/effective-quota',
+	describeRoute(omitResAndReq(apiDef['/api/account/effective-quota'])),
+	validator('json', apiDef['/api/account/effective-quota'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/effective-quota', Env>) => {
+		const user = c.get('user');
+		const quota = await getEffectiveQuotaForUser(c.env, user.id);
+		return c.json(quota, 200);
+	}, getResponseDefWithAuth('/api/account/effective-quota')),
 );
 
 app.post(

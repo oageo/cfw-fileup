@@ -7,7 +7,14 @@ import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { apiError } from '../utils/api-error';
 import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments, ipBans, fileReports, moderationEvents, moderationAuditLogs } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { getQuotaForUser, getGlobalQuota } from '../utils/rate-limit';
+import {
+	getQuotaForUser,
+	getGlobalQuota,
+	getStoredEffectiveQuotaForUser,
+	refreshEffectiveQuotaForUser,
+	refreshEffectiveQuotaForPlanUsers,
+	refreshEffectiveQuotaForGlobalFallbackUsers,
+} from '../utils/rate-limit';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { KNOWN_SETTINGS, KnownSettingRecordSchema } from '../../shared/app-settings';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -612,6 +619,7 @@ app.post(
 					updatedAt: now,
 				},
 			});
+		await refreshEffectiveQuotaForUser(c.env, userId, now);
 		await recordModerationAuditLog(c, 'admin_user_quota_set', {
 			targetUserId: userId,
 			data: {
@@ -635,34 +643,27 @@ app.post(
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
 
+		const quota = {
+			maxBuckets: body.maxBuckets ?? null,
+			maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
+			maxFilesPerBucket: body.maxFilesPerBucket ?? null,
+			maxDailyUploads: body.maxDailyUploads ?? null,
+			canUseDownloadCount: body.canUseDownloadCount ?? false,
+		};
+
 		await db
 			.insert(globalQuotas)
 			.values({
 				key: 'default',
-				maxBuckets: body.maxBuckets ?? null,
-				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
-				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
-				maxDailyUploads: body.maxDailyUploads ?? null,
-				canUseDownloadCount: body.canUseDownloadCount ?? false,
+				...quota,
 			})
 			.onConflictDoUpdate({
 				target: globalQuotas.key,
-				set: {
-					maxBuckets: body.maxBuckets ?? null,
-					maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
-					maxFilesPerBucket: body.maxFilesPerBucket ?? null,
-					maxDailyUploads: body.maxDailyUploads ?? null,
-					canUseDownloadCount: body.canUseDownloadCount ?? false,
-				},
+				set: quota,
 			});
+		await refreshEffectiveQuotaForGlobalFallbackUsers(c.env, quota);
 		await recordModerationAuditLog(c, 'admin_global_quota_set', {
-			data: {
-				maxBuckets: body.maxBuckets ?? null,
-				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
-				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
-				maxDailyUploads: body.maxDailyUploads ?? null,
-				canUseDownloadCount: body.canUseDownloadCount ?? false,
-			},
+			data: quota,
 		});
 
 		return c.json({ ok: true }, 200);
@@ -679,6 +680,50 @@ app.post(
 
 		return c.json(quota, 200);
 	}, getResponseDefWithAuth('/api/admin/get-user-quota')),
+);
+
+app.post(
+	'/get-user-effective-quota',
+	describeRoute(omitResAndReq(apiDef['/api/admin/get-user-effective-quota'])),
+	validator('json', apiDef['/api/admin/get-user-effective-quota'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/get-user-effective-quota', Env>) => {
+		const body = c.req.valid('json');
+		const quota = await getStoredEffectiveQuotaForUser(c.env, body.userId);
+		if (!quota) {
+			throw apiError(404, 'USER_NOT_FOUND');
+		}
+
+		return c.json(quota, 200);
+	}, getResponseDefWithAuth('/api/admin/get-user-effective-quota')),
+);
+
+app.post(
+	'/recalculate-user-effective-quota',
+	describeRoute(omitResAndReq(apiDef['/api/admin/recalculate-user-effective-quota'])),
+	validator('json', apiDef['/api/admin/recalculate-user-effective-quota'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/recalculate-user-effective-quota', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+		const user = await db.select({ id: users.id }).from(users).where(eq(users.id, body.userId)).get();
+		if (!user) {
+			throw apiError(404, 'USER_NOT_FOUND');
+		}
+
+		const quota = await refreshEffectiveQuotaForUser(c.env, body.userId);
+		await recordModerationAuditLog(c, 'admin_user_quota_recalculated', {
+			targetUserId: body.userId,
+			data: {
+				maxBuckets: quota.maxBuckets,
+				maxBucketSizeBytes: quota.maxBucketSizeBytes,
+				maxFilesPerBucket: quota.maxFilesPerBucket,
+				maxDailyUploads: quota.maxDailyUploads,
+				canUseDownloadCount: quota.canUseDownloadCount,
+				effectiveQuotaExpiresAt: quota.effectiveQuotaExpiresAt,
+				effectiveQuotaSource: quota.effectiveQuotaSource,
+			},
+		});
+		return c.json(quota, 200);
+	}, getResponseDefWithAuth('/api/admin/recalculate-user-effective-quota')),
 );
 
 app.post(
@@ -732,6 +777,7 @@ app.post(
 		}
 
 		await db.delete(userQuotas).where(eq(userQuotas.userId, body.userId));
+		await refreshEffectiveQuotaForUser(c.env, body.userId);
 		await recordModerationAuditLog(c, 'admin_user_quota_deleted', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
@@ -873,6 +919,7 @@ app.post(
 			canUseDownloadCount: updated.canUseDownloadCount,
 			updatedAt: updated.updatedAt,
 		}).where(eq(plans.id, body.planId));
+		await refreshEffectiveQuotaForPlanUsers(c.env, body.planId, updated.updatedAt);
 		await recordModerationAuditLog(c, 'admin_plan_updated', {
 			data: { planId: body.planId, name: updated.name },
 		});
@@ -893,7 +940,14 @@ app.post(
 			throw apiError(404, 'PLAN_NOT_FOUND');
 		}
 
+		const assignedUsers = await db
+			.select({ userId: userPlanAssignments.userId })
+			.from(userPlanAssignments)
+			.where(eq(userPlanAssignments.planId, body.planId));
 		await db.delete(plans).where(eq(plans.id, body.planId));
+		for (const assignedUser of assignedUsers) {
+			await refreshEffectiveQuotaForUser(c.env, assignedUser.userId);
+		}
 		await recordModerationAuditLog(c, 'admin_plan_deleted', { data: { planId: body.planId } });
 
 		return c.json({ ok: true }, 200);
@@ -936,6 +990,7 @@ app.post(
 					updatedAt: now,
 				},
 			});
+		await refreshEffectiveQuotaForUser(c.env, body.userId, now);
 		await recordModerationAuditLog(c, 'admin_user_plan_assigned', {
 			targetUserId: body.userId,
 			data: { planId: body.planId, expiresAt: body.expiresAt },
@@ -988,6 +1043,7 @@ app.post(
 		}
 
 		await db.delete(userPlanAssignments).where(eq(userPlanAssignments.userId, body.userId));
+		await refreshEffectiveQuotaForUser(c.env, body.userId);
 		await recordModerationAuditLog(c, 'admin_user_plan_deleted', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);

@@ -7,6 +7,7 @@ import { apiPost, type ApiResult } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import EffectiveQuotaDetails from '@/components/EffectiveQuotaDetails.vue';
 import SettingItem from '@/components/SettingItem.vue';
 
 const props = defineProps<{ userId: string }>();
@@ -33,7 +34,15 @@ interface UserPlanAssignment {
 	updatedAt: number;
 }
 
-type ActiveTab = 'billing' | 'custom' | 'reset';
+type EffectiveQuotaSource = 'plan' | 'custom' | 'global' | 'default';
+
+interface EffectiveQuota extends QuotaForm {
+	effectiveQuotaExpiresAt: number | null;
+	effectiveQuotaUpdatedAt: number | null;
+	effectiveQuotaSource: EffectiveQuotaSource | null;
+}
+
+type ActiveTab = 'billing' | 'custom' | 'effective';
 
 const quotaValueSchema = v.nullable(v.pipe(
 	v.number(),
@@ -51,24 +60,27 @@ const canUseDownloadCountSetting = computed<'true' | 'false'>({
 });
 const plans = ref<Plan[]>([]);
 const userPlan = ref<UserPlanAssignment | null>(null);
+const effectiveQuota = ref<EffectiveQuota | null>(null);
 const selectedPlanId = ref('');
 const planExpiresAt = ref('');
 const username = ref('');
-const activeTab = ref<ActiveTab>('billing');
+const activeTab = ref<ActiveTab>('effective');
 const loading = ref(true);
 const saving = ref(false);
 const assigningPlan = ref(false);
+const recalculating = ref(false);
 const deleting = ref(false);
 const deletingPlan = ref(false);
 const error = ref('');
 const success = ref('');
 const hasUserQuota = ref(false);
+const editingCustomQuota = ref(false);
 const resetDialog = ref(false);
 const removePlanDialog = ref(false);
 const activeUserPlan = computed(() => userPlan.value != null && userPlan.value.expiresAt > Date.now());
 
 onMounted(async () => {
-	await Promise.all([fetchQuota(), fetchPlansAndAssignment(), fetchUser()]);
+	await Promise.all([fetchQuota(), fetchEffectiveQuota(), fetchPlansAndAssignment(), fetchUser()]);
 });
 
 async function fetchQuota(): Promise<void> {
@@ -78,6 +90,7 @@ async function fetchQuota(): Promise<void> {
 		const result = await apiPost('/api/admin/get-user-custom-quota', { userId: props.userId });
 		if (!result.ok) throw new Error('クォータの取得に失敗しました');
 		hasUserQuota.value = result.data.exists;
+		editingCustomQuota.value = result.data.exists;
 		const userData = result.data.quota;
 
 		quota.value = {
@@ -91,6 +104,17 @@ async function fetchQuota(): Promise<void> {
 		error.value = String(e);
 	} finally {
 		loading.value = false;
+	}
+}
+
+async function fetchEffectiveQuota(): Promise<void> {
+	error.value = '';
+	try {
+		const result = await apiPost('/api/admin/get-user-effective-quota', { userId: props.userId });
+		if (!result.ok) throw new Error('実効クォータの取得に失敗しました');
+		effectiveQuota.value = result.data;
+	} catch (e) {
+		error.value = String(e);
 	}
 }
 
@@ -138,7 +162,9 @@ async function saveQuota(): Promise<void> {
 		const result = await apiPost('/api/admin/set-user-quota', { userId: props.userId, ...quota.value });
 		if (!result.ok) throw new Error('保存に失敗しました');
 		hasUserQuota.value = true;
+		editingCustomQuota.value = true;
 		success.value = 'ユーザークォータを保存しました';
+		await fetchEffectiveQuota();
 	} catch (e) {
 		error.value = String(e);
 	} finally {
@@ -165,6 +191,18 @@ function formatDateTime(timestamp: number): string {
 	}).format(new Date(timestamp));
 }
 
+function startCustomQuota(): void {
+	const sourceQuota = effectiveQuota.value ?? quota.value;
+	quota.value = {
+		maxBuckets: sourceQuota.maxBuckets,
+		maxBucketSizeBytes: sourceQuota.maxBucketSizeBytes,
+		maxFilesPerBucket: sourceQuota.maxFilesPerBucket,
+		maxDailyUploads: sourceQuota.maxDailyUploads,
+		canUseDownloadCount: sourceQuota.canUseDownloadCount,
+	};
+	editingCustomQuota.value = true;
+}
+
 async function assignPlan(): Promise<void> {
 	const expiresAt = getExpiresAtTimestamp();
 	if (!selectedPlanId.value || expiresAt == null) {
@@ -179,7 +217,7 @@ async function assignPlan(): Promise<void> {
 		const result = await apiPost('/api/admin/assign-user-plan', { userId: props.userId, planId: selectedPlanId.value, expiresAt });
 		if (!result.ok) throw new Error('プラン割当に失敗しました');
 		success.value = 'プランを割り当てました';
-		await Promise.all([fetchQuota(), fetchPlansAndAssignment()]);
+		await Promise.all([fetchQuota(), fetchEffectiveQuota(), fetchPlansAndAssignment()]);
 	} catch (e) {
 		error.value = String(e);
 	} finally {
@@ -198,7 +236,7 @@ async function executeRemovePlan(): Promise<void> {
 		userPlan.value = null;
 		planExpiresAt.value = '';
 		success.value = 'プラン割当を解除しました';
-		await fetchQuota();
+		await Promise.all([fetchQuota(), fetchEffectiveQuota()]);
 	} catch (e) {
 		error.value = String(e);
 	} finally {
@@ -215,12 +253,29 @@ async function executeReset(): Promise<void> {
 		const result = await apiPost('/api/admin/delete-user-quota', { userId: props.userId });
 		if (!result.ok) throw new Error('リセットに失敗しました');
 		hasUserQuota.value = false;
+		editingCustomQuota.value = false;
 		success.value = 'クォータをリセットしました（グローバルデフォルト適用中）';
-		await fetchQuota();
+		await Promise.all([fetchQuota(), fetchEffectiveQuota()]);
 	} catch (e) {
 		error.value = String(e);
 	} finally {
 		deleting.value = false;
+	}
+}
+
+async function recalculateEffectiveQuota(): Promise<void> {
+	recalculating.value = true;
+	error.value = '';
+	success.value = '';
+	try {
+		const result = await apiPost('/api/admin/recalculate-user-effective-quota', { userId: props.userId });
+		if (!result.ok) throw new Error('実効クォータの再計算に失敗しました');
+		effectiveQuota.value = result.data;
+		success.value = '実効クォータを再計算しました';
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		recalculating.value = false;
 	}
 }
 </script>
@@ -262,9 +317,9 @@ async function executeReset(): Promise<void> {
       </div>
       <div v-else :class="$style.settingsGrid">
         <div class="tab-bar" role="tablist" aria-label="ユーザークォータ設定">
+          <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'effective' }" @click="activeTab = 'effective'">実効</button>
           <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'billing' }" @click="activeTab = 'billing'">課金</button>
           <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'custom' }" @click="activeTab = 'custom'">カスタム</button>
-          <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'reset' }" @click="activeTab = 'reset'">リセット</button>
         </div>
 
         <div v-if="activeTab === 'billing'" :class="[$style.panel, 'card']">
@@ -301,72 +356,86 @@ async function executeReset(): Promise<void> {
           <div v-if="activeUserPlan" class="alert alert-warning">
             課金プラン適用中はカスタム値を保存しても現在のクォータ判定には反映されません。プランの失効または解除後に、このカスタム値が有効になります。
           </div>
-          <p :class="['text-muted', $style.formHint]">空欄は無制限。カスタム設定がない場合はグローバルデフォルトに戻ります。</p>
-          <SettingItem
-            v-model="quota.maxBuckets"
-            :schema="quotaValueSchema"
-            title="バケット数上限"
-            :saving="saving"
-            :show-save-button="false"
-            :save-on-change="false"
-          />
-          <ByteSizeSettingItem
-            v-model="quota.maxBucketSizeBytes"
-            :schema="quotaValueSchema"
-            title="バケットサイズ上限"
-            :saving="saving"
-            :show-save-button="false"
-          />
-          <SettingItem
-            v-model="quota.maxFilesPerBucket"
-            :schema="quotaValueSchema"
-            title="バケットあたりファイル数上限"
-            :saving="saving"
-            :show-save-button="false"
-            :save-on-change="false"
-          />
-          <SettingItem
-            v-model="quota.maxDailyUploads"
-            :schema="quotaValueSchema"
-            title="1日あたりアップロード数上限"
-            :saving="saving"
-            :show-save-button="false"
-            :save-on-change="false"
-          />
-          <SettingItem
-            v-model="canUseDownloadCountSetting"
-            :schema="booleanSettingSchema"
-            title="DL数カウントを許可"
-            :saving="saving"
-            :show-save-button="false"
-            :save-on-change="false"
-          />
-          <div :class="$style.actions">
-            <Button.Root type="button" class="btn btn-primary" :loading="saving" @click="saveQuota">
-              <Button.Loading>保存中...</Button.Loading>
-              <Button.Content>保存</Button.Content>
-            </Button.Root>
+          <div v-if="!editingCustomQuota" :class="[$style.panel, 'card']">
+            <h3 :class="$style.panelTitle">カスタムクォータ未設定</h3>
+            <p :class="['text-muted', $style.formHint]">
+              設定開始時に現在の実効クォータをフォームへ入れます。必要な値だけ変更して保存してください。
+            </p>
+            <div :class="$style.actionsStart">
+              <Button.Root type="button" class="btn btn-primary" @click="startCustomQuota">
+                <Button.Content>カスタム設定を開始</Button.Content>
+              </Button.Root>
+            </div>
           </div>
+          <template v-else>
+            <p :class="['text-muted', $style.formHint]">空欄は無制限。カスタム設定がない場合はグローバルデフォルトに戻ります。</p>
+            <SettingItem
+              v-model="quota.maxBuckets"
+              :schema="quotaValueSchema"
+              title="バケット数上限"
+              :saving="saving"
+              :show-save-button="false"
+              :save-on-change="false"
+            />
+            <ByteSizeSettingItem
+              v-model="quota.maxBucketSizeBytes"
+              :schema="quotaValueSchema"
+              title="バケットサイズ上限"
+              :saving="saving"
+              :show-save-button="false"
+            />
+            <SettingItem
+              v-model="quota.maxFilesPerBucket"
+              :schema="quotaValueSchema"
+              title="バケットあたりファイル数上限"
+              :saving="saving"
+              :show-save-button="false"
+              :save-on-change="false"
+            />
+            <SettingItem
+              v-model="quota.maxDailyUploads"
+              :schema="quotaValueSchema"
+              title="1日あたりアップロード数上限"
+              :saving="saving"
+              :show-save-button="false"
+              :save-on-change="false"
+            />
+            <SettingItem
+              v-model="canUseDownloadCountSetting"
+              :schema="booleanSettingSchema"
+              title="DL数カウントを許可"
+              :saving="saving"
+              :show-save-button="false"
+              :save-on-change="false"
+            />
+            <div :class="$style.actions">
+              <Button.Root
+                v-if="hasUserQuota"
+                type="button"
+                class="btn btn-ghost-danger"
+                :loading="deleting"
+                @click="resetDialog = true"
+              >
+                <Button.Loading>リセット中...</Button.Loading>
+                <Button.Content>カスタムクォータをリセット</Button.Content>
+              </Button.Root>
+              <Button.Root type="button" class="btn btn-primary" :loading="saving" @click="saveQuota">
+                <Button.Loading>保存中...</Button.Loading>
+                <Button.Content>保存</Button.Content>
+              </Button.Root>
+            </div>
+          </template>
         </div>
 
-        <div v-else :class="[$style.panel, 'card']">
-          <h3 :class="$style.panelTitle">リセット</h3>
-          <p :class="['text-muted', $style.formHint]">
-            カスタムクォータを削除してグローバルデフォルトに戻します。課金プラン割当は解除されません。
-          </p>
-          <div class="flex gap-2">
-            <Button.Root
-              v-if="hasUserQuota"
-              type="button"
-              class="btn btn-ghost-danger"
-              :loading="deleting"
-              @click="resetDialog = true"
-            >
-              <Button.Loading>リセット中...</Button.Loading>
-              <Button.Content>カスタムクォータをリセット</Button.Content>
-            </Button.Root>
-            <span v-else class="text-muted">リセットできるカスタム設定はありません。</span>
-          </div>
+        <div v-else-if="activeTab === 'effective'" :class="[$style.panel, 'card']">
+          <EffectiveQuotaDetails :quota="effectiveQuota">
+            <template #actions>
+              <Button.Root type="button" class="btn btn-secondary" :loading="recalculating" @click="recalculateEffectiveQuota">
+                <Button.Loading>再計算中...</Button.Loading>
+                <Button.Content>再計算</Button.Content>
+              </Button.Root>
+            </template>
+          </EffectiveQuotaDetails>
         </div>
       </div>
     </template>
@@ -449,6 +518,13 @@ async function executeReset(): Promise<void> {
 .actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.actionsStart {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .panelTitle {

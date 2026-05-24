@@ -8,6 +8,20 @@
       "when": 1779644774984,
       "tag": "0000_smooth_maximus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779645437771,
+      "tag": "0001_clean_vulture",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779646391510,
+      "tag": "0002_third_gateway",
+      "breakpoints": true
     }
   ]
 }

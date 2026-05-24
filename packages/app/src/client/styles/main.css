@@ -306,6 +306,42 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 .bucket-usage-pct { font-size: 0.75rem; color: var(--color-text-subtle); }
 .data-table .col-muted { color: var(--color-text-muted); }
 
+/* ===== Detail List ===== */
+.detail-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0;
+  font-size: 0.875rem;
+}
+.detail-list dt {
+  min-width: 120px;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.detail-list dd {
+  margin: 0;
+  min-width: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.detail-list--compact {
+  gap: 8px 12px;
+}
+
+@media (max-width: 520px) {
+  .detail-list {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .detail-list dd {
+    margin-bottom: 8px;
+  }
+}
+
 /* ===== Progress ===== */
 .progress-root { width: 100%; }
 .progress-track {

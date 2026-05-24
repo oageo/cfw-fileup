@@ -10,6 +10,14 @@ export const users = sqliteTable('users', {
 	isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
 	isSuspended: integer('is_suspended', { mode: 'boolean' }).notNull().default(false),
 	termsAgreedAt: integer('terms_agreed_at'),
+	effectiveMaxBuckets: integer('effective_max_buckets'),
+	effectiveMaxBucketSizeBytes: integer('effective_max_bucket_size_bytes'),
+	effectiveMaxFilesPerBucket: integer('effective_max_files_per_bucket'),
+	effectiveMaxDailyUploads: integer('effective_max_daily_uploads'),
+	effectiveCanUseDownloadCount: integer('effective_can_use_download_count', { mode: 'boolean' }).notNull().default(false),
+	effectiveQuotaExpiresAt: integer('effective_quota_expires_at'),
+	effectiveQuotaUpdatedAt: integer('effective_quota_updated_at'),
+	effectiveQuotaSource: text('effective_quota_source'),
 });
 
 export const tokens = sqliteTable('tokens', {

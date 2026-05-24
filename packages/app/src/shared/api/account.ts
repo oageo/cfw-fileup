@@ -14,6 +14,20 @@ const AccountTokenResponse = v.pipe(
 	}),
 	v.metadata({ ref: 'AccountToken' }),
 );
+const EffectiveQuotaSource = v.picklist(['plan', 'custom', 'global', 'default']);
+const EffectiveQuotaResponse = v.pipe(
+	v.object({
+		maxBuckets: v.nullable(v.number()),
+		maxBucketSizeBytes: v.nullable(v.number()),
+		maxFilesPerBucket: v.nullable(v.number()),
+		maxDailyUploads: v.nullable(v.number()),
+		canUseDownloadCount: v.boolean(),
+		effectiveQuotaExpiresAt: v.nullable(v.number()),
+		effectiveQuotaUpdatedAt: v.nullable(v.number()),
+		effectiveQuotaSource: v.nullable(EffectiveQuotaSource),
+	}),
+	v.metadata({ ref: 'AccountEffectiveQuota' }),
+);
 
 export const accountApiDef = {
 	'/api/account/me': {
@@ -30,6 +44,14 @@ export const accountApiDef = {
 		req: v.object({ agreedAt: v.number() }),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true), termsAgreedAt: v.number() }) } } },
+		},
+	},
+	'/api/account/effective-quota': {
+		summary: 'Get effective quota for the current account',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: EffectiveQuotaResponse } } },
 		},
 	},
 	'/api/account/update': {

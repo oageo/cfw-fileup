@@ -289,3 +289,29 @@ describe('POST /api/account/agree-terms', () => {
 		expect(me.termsAgreedAt).toBe(agreedAt);
 	});
 });
+
+describe('POST /api/account/effective-quota', () => {
+	test('returns current user effective quota', async () => {
+		const { data: adminData } = await signup('firstuser');
+		const { data: userData } = await signup('user1');
+		const adminToken = String(adminData.token);
+		const userToken = String(userData.token);
+		const userId = String(userData.userId);
+
+		await app.request('/api/admin/set-user-quota', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, maxBuckets: 4 }),
+		}, env);
+
+		const res = await app.request('/api/account/effective-quota', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({}),
+		}, env);
+		expect(res.status).toBe(200);
+		const quota = await res.json() as Record<string, unknown>;
+		expect(quota.maxBuckets).toBe(4);
+		expect(quota.effectiveQuotaSource).toBe('custom');
+	});
+});

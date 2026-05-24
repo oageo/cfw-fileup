@@ -25,6 +25,7 @@ export type ModerationAuditAction =
 	| 'admin_bucket_deleted'
 	| 'admin_worker_cache_purged'
 	| 'admin_user_quota_set'
+	| 'admin_user_quota_recalculated'
 	| 'admin_global_quota_set'
 	| 'admin_user_quota_deleted'
 	| 'admin_setting_updated'

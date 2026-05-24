@@ -9,6 +9,7 @@ import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
 import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
 import { recordModerationEvent } from '../utils/moderation';
+import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MISSKEY_OAUTH_SCOPE = 'read:account';
@@ -482,7 +483,9 @@ app.get('/callback', async (c) => {
 			}
 		}
 
-		const userId = genEaidx(Date.now());
+		const now = Date.now();
+		const userId = genEaidx(now);
+		const initialQuota = await getInitialEffectiveQuotaForUser(c.env, now);
 		await db.insert(users).values({
 			id: userId,
 			username,
@@ -491,6 +494,14 @@ app.get('/callback', async (c) => {
 			misskeyId,
 			isAdmin: isFirstUser,
 			isSuspended: false,
+			effectiveMaxBuckets: initialQuota.maxBuckets,
+			effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
+			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
+			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
+			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
+			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
+			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 		});
 
 		await db

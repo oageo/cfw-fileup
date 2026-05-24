@@ -36,6 +36,8 @@ describe('Admin access control', () => {
 			{ path: '/api/admin/delete-file', body: { fileId: 'x' } },
 			{ path: '/api/admin/delete-bucket', body: { bucketId: 'x' } },
 			{ path: '/api/admin/purge-worker-cache', body: {} },
+			{ path: '/api/admin/get-user-effective-quota', body: { userId: 'x' } },
+			{ path: '/api/admin/recalculate-user-effective-quota', body: { userId: 'x' } },
 			{ path: '/api/admin/update-setting', body: { key: 'registration_mode', value: 'closed' } },
 			{ path: '/api/admin/list-plans', body: {} },
 			{ path: '/api/admin/create-plan', body: { name: 'Pro' } },
@@ -565,6 +567,37 @@ describe('Quota management', () => {
 		expect(quota.maxBuckets).toBe(3);
 	});
 
+	test('admin can inspect and recalculate effective quota source', async () => {
+		const { adminToken, userId } = await setupAdminAndUser();
+
+		await app.request('/api/admin/set-user-quota', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, maxBuckets: 3 }),
+		}, env);
+
+		const effectiveRes = await app.request('/api/admin/get-user-effective-quota', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId }),
+		}, env);
+		expect(effectiveRes.status).toBe(200);
+		const effective = await effectiveRes.json() as Record<string, unknown>;
+		expect(effective.maxBuckets).toBe(3);
+		expect(effective.effectiveQuotaSource).toBe('custom');
+		expect(typeof effective.effectiveQuotaUpdatedAt).toBe('number');
+
+		const recalcRes = await app.request('/api/admin/recalculate-user-effective-quota', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId }),
+		}, env);
+		expect(recalcRes.status).toBe(200);
+		const recalculated = await recalcRes.json() as Record<string, unknown>;
+		expect(recalculated.maxBuckets).toBe(3);
+		expect(recalculated.effectiveQuotaSource).toBe('custom');
+	});
+
 	test('global bucket quota enforced on create', async () => {
 		const { adminToken, userToken } = await setupAdminAndUser();
 
@@ -714,6 +747,52 @@ describe('Quota management', () => {
 			body: JSON.stringify({ bucketName: 'bucket_3' }),
 		}, env);
 		expect(third.status).toBe(429);
+	});
+
+	test('plan quota update propagates to assigned users', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+
+		const createPlanRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Pro', maxBuckets: 2 }),
+		}, env);
+		const plan = await createPlanRes.json() as { id: string };
+		await app.request('/api/admin/assign-user-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, planId: plan.id, expiresAt: Date.now() + 86_400_000 }),
+		}, env);
+
+		const first = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ bucketName: 'bucket_1' }),
+		}, env);
+		expect(first.status).toBe(200);
+
+		const updateRes = await app.request('/api/admin/update-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ planId: plan.id, name: 'Pro', maxBuckets: 1 }),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const quotaRes = await app.request('/api/admin/get-user-quota', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId }),
+		}, env);
+		expect(quotaRes.status).toBe(200);
+		const quota = await quotaRes.json() as Record<string, unknown>;
+		expect(quota.maxBuckets).toBe(1);
+
+		const second = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ bucketName: 'bucket_2' }),
+		}, env);
+		expect(second.status).toBe(429);
 	});
 
 	test('expired plan quota is ignored and falls back to per-user quota', async () => {
