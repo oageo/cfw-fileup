@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import * as v from 'valibot';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { apiError } from '../utils/api-error';
-import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments, ipBans } from '../scheme/index';
+import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments, ipBans, fileReports, moderationEvents } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser, getGlobalQuota } from '../utils/rate-limit';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
@@ -170,6 +171,144 @@ app.post(
 		await db.delete(ipBans).where(eq(ipBans.id, body.banId));
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-ip-ban')),
+);
+
+app.post(
+	'/list-file-reports',
+	describeRoute(omitResAndReq(apiDef['/api/admin/list-file-reports'])),
+	validator('json', apiDef['/api/admin/list-file-reports'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/list-file-reports', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+		const fileOwners = alias(users, 'file_owners');
+		const query = db
+			.select({
+				id: fileReports.id,
+				fileId: fileReports.fileId,
+				bucketName: buckets.name,
+				filePath: files.path,
+				fileSize: files.size,
+				fileMimeType: files.mimeType,
+				fileOwnerId: files.userId,
+				fileOwnerUsername: fileOwners.username,
+				reporterUserId: fileReports.reporterUserId,
+				reporterName: fileReports.reporterName,
+				reporterEmail: fileReports.reporterEmail,
+				reasonId: fileReports.reasonId,
+				relationshipId: fileReports.relationshipId,
+				contact: fileReports.contact,
+				summary: fileReports.summary,
+				detail: fileReports.detail,
+				status: fileReports.status,
+				adminNote: fileReports.adminNote,
+				reporterIpAddress: fileReports.reporterIpAddress,
+				reporterUserAgent: fileReports.reporterUserAgent,
+				createdAt: fileReports.createdAt,
+				updatedAt: fileReports.updatedAt,
+			})
+			.from(fileReports)
+			.leftJoin(files, eq(fileReports.fileId, files.id))
+			.leftJoin(buckets, eq(files.bucketId, buckets.id))
+			.leftJoin(fileOwners, eq(files.userId, fileOwners.id))
+			.orderBy(desc(fileReports.id));
+
+		const rows = body.status ? await query.where(eq(fileReports.status, body.status)) : await query;
+		return c.json(rows.map(row => ({
+			...row,
+			uploadEventId: null,
+			uploadIpAddress: null,
+			uploadUserAgent: null,
+			uploadedAt: null,
+		})), 200);
+	}, getResponseDefWithAuth('/api/admin/list-file-reports')),
+);
+
+app.post(
+	'/get-file-report',
+	describeRoute(omitResAndReq(apiDef['/api/admin/get-file-report'])),
+	validator('json', apiDef['/api/admin/get-file-report'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/get-file-report', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+		const fileOwners = alias(users, 'file_owners');
+		const row = await db
+			.select({
+				id: fileReports.id,
+				fileId: fileReports.fileId,
+				bucketName: buckets.name,
+				filePath: files.path,
+				fileSize: files.size,
+				fileMimeType: files.mimeType,
+				fileOwnerId: files.userId,
+				fileOwnerUsername: fileOwners.username,
+				reporterUserId: fileReports.reporterUserId,
+				reporterName: fileReports.reporterName,
+				reporterEmail: fileReports.reporterEmail,
+				reasonId: fileReports.reasonId,
+				relationshipId: fileReports.relationshipId,
+				contact: fileReports.contact,
+				summary: fileReports.summary,
+				detail: fileReports.detail,
+				status: fileReports.status,
+				adminNote: fileReports.adminNote,
+				reporterIpAddress: fileReports.reporterIpAddress,
+				reporterUserAgent: fileReports.reporterUserAgent,
+				createdAt: fileReports.createdAt,
+				updatedAt: fileReports.updatedAt,
+			})
+			.from(fileReports)
+			.leftJoin(files, eq(fileReports.fileId, files.id))
+			.leftJoin(buckets, eq(files.bucketId, buckets.id))
+			.leftJoin(fileOwners, eq(files.userId, fileOwners.id))
+			.where(eq(fileReports.id, body.reportId))
+			.get();
+
+		if (!row) throw apiError(404, 'FILE_REPORT_NOT_FOUND');
+		const uploadEvent = await db
+			.select({
+				id: moderationEvents.id,
+				ipAddress: moderationEvents.ipAddress,
+				userAgent: moderationEvents.userAgent,
+			})
+			.from(moderationEvents)
+			.where(and(
+				eq(moderationEvents.action, 'file_uploaded'),
+				sql`json_extract(${moderationEvents.data}, '$.fileId') = ${row.fileId}`,
+			))
+			.orderBy(desc(moderationEvents.id))
+			.get();
+
+		return c.json({
+			...row,
+			uploadEventId: uploadEvent?.id ?? null,
+			uploadIpAddress: uploadEvent?.ipAddress ?? null,
+			uploadUserAgent: uploadEvent?.userAgent ?? null,
+			uploadedAt: uploadEvent ? parseEaidx(uploadEvent.id).date.getTime() : null,
+		}, 200);
+	}, getResponseDefWithAuth('/api/admin/get-file-report')),
+);
+
+app.post(
+	'/update-file-report',
+	describeRoute(omitResAndReq(apiDef['/api/admin/update-file-report'])),
+	validator('json', apiDef['/api/admin/update-file-report'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/update-file-report', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+		const report = await db.select({ id: fileReports.id }).from(fileReports).where(eq(fileReports.id, body.reportId)).get();
+		if (!report) throw apiError(404, 'FILE_REPORT_NOT_FOUND');
+
+		await db
+			.update(fileReports)
+			.set({
+				status: body.status,
+				adminNote: body.adminNote,
+				updatedAt: Date.now(),
+			})
+			.where(eq(fileReports.id, body.reportId));
+
+		return c.json({ ok: true }, 200);
+	}, getResponseDefWithAuth('/api/admin/update-file-report')),
 );
 
 app.post(
