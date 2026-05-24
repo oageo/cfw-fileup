@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, and, like, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { buckets, files, directories } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
@@ -14,6 +14,7 @@ import { apiError } from '../utils/api-error';
 import { hasFileDirectoryConflictForDirectory } from '../utils/path-conflicts';
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReferences } from '../utils/file-mutation-reference';
+import { likePrefix } from '../utils/sql-like';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -77,7 +78,7 @@ app.post(
 		const childFiles = await db
 			.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size, path: files.path, isTar: files.isTar, isTargz: files.isTargz })
 			.from(files)
-			.where(and(eq(files.bucketId, bucket.id), like(files.path, `${body.path}%`)));
+			.where(and(eq(files.bucketId, bucket.id), likePrefix(files.path, body.path)));
 		const purgeFiles = await toFileMutationReferences(db, childFiles);
 
 		for (const f of childFiles) {
@@ -96,7 +97,7 @@ app.post(
 			}
 		}
 
-		await db.delete(directories).where(and(eq(directories.bucketId, bucket.id), like(directories.path, `${body.path}%`)));
+		await db.delete(directories).where(and(eq(directories.bucketId, bucket.id), likePrefix(directories.path, body.path)));
 
 		fileMutationEvents.emit('directory:deleted', {
 			env: c.env,

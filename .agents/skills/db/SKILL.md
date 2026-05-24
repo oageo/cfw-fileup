@@ -22,7 +22,7 @@ tags: [d1, migrations, drizzle, db, schema, scheme]
 **絶対に、自分でsqlファイルを生成しないように！！**
 
 ```bash
-`pnpm run --filter app db:generate
+pnpm run --filter app db:generate
 ```
 
 ### マイグレーション/初期導入実行

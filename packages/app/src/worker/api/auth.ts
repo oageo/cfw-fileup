@@ -4,7 +4,7 @@ import { eq, count, and } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, usedUsernames, passkeys, backupCodes } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { hashPassword, tokenToBytes, verifyPassword, generateToken } from '../utils/crypto';
+import { hashPassword, tokenToDigest, verifyPassword, generateToken } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { verifyTurnstile } from '../utils/turnstile';
 import { validateUsername } from '../utils/name-validation';
@@ -99,7 +99,7 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		const tokenBytes = tokenToBytes(tokenValue);
+		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 		await db.insert(tokens).values({
@@ -185,7 +185,7 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		const tokenBytes = tokenToBytes(tokenValue);
+		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 		await db.insert(tokens).values({

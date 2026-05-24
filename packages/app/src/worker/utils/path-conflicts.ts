@@ -1,6 +1,7 @@
-import { and, eq, like, or } from 'drizzle-orm';
-import type { getDb } from './db';
+import { and, eq, or } from 'drizzle-orm';
 import { directories, files } from '../scheme/index';
+import { likePrefix } from './sql-like';
+import type { getDb } from './db';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -39,7 +40,7 @@ export async function hasFileDirectoryConflictForFile(db: Db, bucketId: string, 
 	const directoryConflict = await db
 		.select({ id: directories.id })
 		.from(directories)
-		.where(and(eq(directories.bucketId, bucketId), like(directories.path, `${directoryPath}%`)))
+		.where(and(eq(directories.bucketId, bucketId), likePrefix(directories.path, directoryPath)))
 		.get();
 	if (directoryConflict) return true;
 

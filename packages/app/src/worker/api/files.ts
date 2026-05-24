@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, and, gte, desc, sql, count, like, lt } from 'drizzle-orm';
+import { eq, and, gte, desc, sql, count, lt } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
 import { apiError } from '../utils/api-error';
 import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
@@ -19,8 +19,9 @@ import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, has
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 import { recordModerationAuditLog, recordModerationEvent } from '../utils/moderation';
-import { tokenToBytes } from '../utils/crypto';
+import { hashPassword, tokenToDigest } from '../utils/crypto';
 import { pageParams, type PageInput } from '../utils/pagination';
+import { likePrefix, prefixLikePattern } from '../utils/sql-like';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -100,7 +101,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const authorization = c.req.header('Authorization');
 		if (authorization?.startsWith('Bearer ')) {
 			const token = authorization.slice(7);
-			const tokenBytes = tokenToBytes(token);
+			const tokenBytes = await tokenToDigest(token);
 			const tokenRecord = await db
 				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
@@ -119,8 +120,8 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		if (!isOwnerOrAdmin && dirExists && !dirExists.isListed) throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		if (!dirExists) {
 			const hasFileCondition = isOwnerOrAdmin
-				? and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true))
-				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true), eq(files.isModerationForcedPrivate, false));
+				? and(eq(files.bucketId, bucket.id), likePrefix(files.path, normalizedPath), eq(files.isClosed, true))
+				: and(eq(files.bucketId, bucket.id), likePrefix(files.path, normalizedPath), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true), eq(files.isModerationForcedPrivate, false));
 			const hasFile = await db.select({ path: files.path }).from(files).where(hasFileCondition).get();
 			if (!hasFile) throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		}
@@ -131,7 +132,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	const cursorSortType = decodedCursor?.type === 'file' ? 1 : decodedCursor?.type === 'dir' ? 0 : null;
 	const cursorName = decodedCursor?.name ?? null;
 	const cursorKey = decodedCursor?.key ?? null;
-	const prefixLike = `${normalizedPath}%`;
+	const prefixLike = prefixLikePattern(normalizedPath);
 	const childStart = normalizedPath.length + 1;
 	const ownerVisibilitySql = isOwnerOrAdmin
 		? '1 = 1'
@@ -139,7 +140,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			SELECT 1 FROM directories hidden
 			WHERE hidden.bucket_id = ?
 				AND hidden.is_listed = 0
-				AND candidate_path LIKE hidden.path || '%'
+					AND substr(candidate_path, 1, length(hidden.path)) = hidden.path
 		)`;
 	const publicExtraBind = isOwnerOrAdmin ? [] : [bucket.id];
 	const sqlText = `
@@ -167,7 +168,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 				NULL AS is_download_count_visible
 			FROM directories
 			WHERE bucket_id = ?
-				AND path LIKE ?
+				AND path LIKE ? ESCAPE '\\'
 				AND path != ?
 				${isOwnerOrAdmin ? '' : 'AND is_listed = 1'}
 		),
@@ -197,7 +198,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			FROM files
 			WHERE bucket_id = ?
 				AND is_closed = 1
-				AND path LIKE ?
+				AND path LIKE ? ESCAPE '\\'
 				AND path != ?
 				${isOwnerOrAdmin ? '' : 'AND visibility = \'public\' AND is_listed = 1 AND is_moderation_forced_private = 0'}
 		),
@@ -240,11 +241,11 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	const restArgs = [
 		childStart, childStart, childStart, childStart,
 		bucket.id, prefixLike, normalizedPath,
-			childStart, childStart, childStart, childStart, childStart, childStart,
-			childStart, normalizedPath.length, childStart, childStart,
-			childStart, childStart, childStart, childStart, childStart, childStart,
-			childStart, childStart, childStart, childStart, childStart,
-			bucket.id, prefixLike, normalizedPath,
+		childStart, childStart, childStart, childStart, childStart, childStart,
+		childStart, normalizedPath.length, childStart, childStart,
+		childStart, childStart, childStart, childStart, childStart, childStart,
+		childStart, childStart, childStart, childStart, childStart,
+		bucket.id, prefixLike, normalizedPath,
 		...publicExtraBind,
 		cursorSortType, cursorSortType, cursorSortType, cursorName, cursorName, cursorKey,
 		limit + 1,
@@ -329,7 +330,7 @@ app.get('/meta', async (c) => {
 	const authorization = c.req.header('Authorization');
 	if (authorization?.startsWith('Bearer ')) {
 		const token = authorization.slice(7);
-		const tokenBytes = tokenToBytes(token);
+		const tokenBytes = await tokenToDigest(token);
 		const tokenRecord = await db
 			.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 			.from(tokens)
@@ -380,7 +381,7 @@ app.get('/meta', async (c) => {
 		});
 	}
 	if (fileToken) {
-		const fileTokenBytes = tokenToBytes(fileToken);
+		const fileTokenBytes = await tokenToDigest(fileToken);
 		const fileTokenRecord = await db
 			.select()
 			.from(fileAccessTokens)
@@ -459,11 +460,10 @@ app.post(
 		const quota = await getQuotaForUser(c.env, user.id);
 
 		if (quota.maxFilesPerBucket !== null) {
-			const fileCount = await db
-				.select()
+			const [{ fileCount }] = await db
+				.select({ fileCount: count() })
 				.from(files)
-				.where(eq(files.bucketId, bucket.id))
-				.then((result) => result.length);
+				.where(eq(files.bucketId, bucket.id));
 
 			if (fileCount >= quota.maxFilesPerBucket) {
 				throw apiError(429, 'FILE_LIMIT_EXCEEDED');
@@ -472,11 +472,10 @@ app.post(
 
 		if (quota.maxDailyUploads !== null) {
 			const dayStart = Date.now() - 24 * 60 * 60 * 1000;
-			const dailyUploadCount = await db
-				.select()
+			const [{ dailyUploadCount }] = await db
+				.select({ dailyUploadCount: count() })
 				.from(files)
-				.where(and(eq(files.userId, user.id), gte(files.id, genEaidx(dayStart))))
-				.then((result) => result.length);
+				.where(and(eq(files.userId, user.id), gte(files.id, genEaidx(dayStart))));
 
 			if (dailyUploadCount >= quota.maxDailyUploads) {
 				throw apiError(429, 'DAILY_UPLOAD_LIMIT_EXCEEDED');
@@ -728,7 +727,7 @@ app.post(
 				isClosed: true,
 				visibility: body.visibility,
 				isListed: body.isListed ?? true,
-				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
+				passphraseHash: body.visibility === 'passphrase' && body.passphrase ? await hashPassword(body.passphrase) : null,
 				isDownloadCountEnabled,
 				isDownloadCountVisible,
 				size: fileSize,
@@ -827,7 +826,7 @@ app.post(
 			.set({
 				visibility: body.visibility,
 				isListed: body.isListed ?? file.isListed,
-				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
+				passphraseHash: body.visibility === 'passphrase' && body.passphrase ? await hashPassword(body.passphrase) : null,
 				isDownloadCountEnabled: nextDownloadCountEnabled,
 				isDownloadCountVisible: nextDownloadCountVisible,
 			})
@@ -893,11 +892,11 @@ app.post(
 			const childFiles = await db
 				.select()
 				.from(files)
-				.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), like(files.path, `${prefix}%`)));
-			const directoryWhereClauses = ['bucket_id = ?', 'path LIKE ?'];
-			const directoryParams: Array<string | number> = [bucket.id, `${prefix}%`];
-			const fileWhereClauses = ['bucket_id = ?', 'is_closed = 1', 'path LIKE ?'];
-			const fileParams: Array<string | number> = [bucket.id, `${prefix}%`];
+				.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), likePrefix(files.path, prefix)));
+			const directoryWhereClauses = ['bucket_id = ?', 'path LIKE ? ESCAPE \'\\\''];
+			const directoryParams: Array<string | number> = [bucket.id, prefixLikePattern(prefix)];
+			const fileWhereClauses = ['bucket_id = ?', 'is_closed = 1', 'path LIKE ? ESCAPE \'\\\''];
+			const fileParams: Array<string | number> = [bucket.id, prefixLikePattern(prefix)];
 			for (const excludedPath of excludePaths) {
 				const normalizedExcludedPath = excludedPath.endsWith('/') ? excludedPath : `${excludedPath}/`;
 				if (normalizedExcludedPath === prefix) {
@@ -905,10 +904,10 @@ app.post(
 					directoryParams.push(normalizedExcludedPath);
 					continue;
 				}
-				directoryWhereClauses.push('path != ?', 'path NOT LIKE ?');
-				directoryParams.push(normalizedExcludedPath, `${normalizedExcludedPath}%`);
-				fileWhereClauses.push('path != ?', 'path NOT LIKE ?');
-				fileParams.push(excludedPath, `${normalizedExcludedPath}%`);
+				directoryWhereClauses.push('path != ?', 'path NOT LIKE ? ESCAPE \'\\\'');
+				directoryParams.push(normalizedExcludedPath, prefixLikePattern(normalizedExcludedPath));
+				fileWhereClauses.push('path != ?', 'path NOT LIKE ? ESCAPE \'\\\'');
+				fileParams.push(excludedPath, prefixLikePattern(normalizedExcludedPath));
 			}
 			const directoryWhereSql = directoryWhereClauses.join(' AND ');
 			const fileWhereSql = fileWhereClauses.join(' AND ');
@@ -1071,7 +1070,7 @@ app.post(
 			const childFiles = await db
 				.select({ id: files.id, r2Key: files.r2Key, isClosed: files.isClosed, size: files.size, path: files.path, isTar: files.isTar, isTargz: files.isTargz })
 				.from(files)
-				.where(and(eq(files.bucketId, bucket.id), like(files.path, `${prefix}%`)));
+				.where(and(eq(files.bucketId, bucket.id), likePrefix(files.path, prefix)));
 
 			for (const file of childFiles) {
 				if (excludePaths.some((excludePath) => {
@@ -1087,7 +1086,7 @@ app.post(
 			const childDirectories = await db
 				.select({ path: directories.path })
 				.from(directories)
-				.where(and(eq(directories.bucketId, bucket.id), like(directories.path, `${prefix}%`)));
+				.where(and(eq(directories.bucketId, bucket.id), likePrefix(directories.path, prefix)));
 			for (const dir of childDirectories) {
 				if (excludePaths.some((excludePath) => {
 					const normalizedExcludePath = excludePath.endsWith('/') ? excludePath : `${excludePath}/`;
@@ -1120,7 +1119,7 @@ app.post(
 		}
 
 		for (const prefix of directoryPrefixes) {
-			await db.delete(directories).where(and(eq(directories.bucketId, bucket.id), like(directories.path, `${prefix}%`)));
+			await db.delete(directories).where(and(eq(directories.bucketId, bucket.id), likePrefix(directories.path, prefix)));
 		}
 
 		fileMutationEvents.emit('file:deleted', {
@@ -1222,7 +1221,7 @@ app.post(
 			? await db
 				.select({ id: files.id })
 				.from(files)
-				.where(and(eq(files.bucketId, targetBucket.id), like(files.path, `${normalizedTargetPath}%`)))
+				.where(and(eq(files.bucketId, targetBucket.id), likePrefix(files.path, normalizedTargetPath)))
 				.get()
 			: null;
 		if (targetFile || targetDirectory || targetVirtualDirectoryFile) {
@@ -1292,11 +1291,11 @@ app.post(
 		const childFiles = await db
 			.select()
 			.from(files)
-			.where(and(eq(files.bucketId, sourceBucket.id), like(files.path, `${normalizedSourcePath}%`)));
+			.where(and(eq(files.bucketId, sourceBucket.id), likePrefix(files.path, normalizedSourcePath)));
 		const childDirectories = await db
 			.select()
 			.from(directories)
-			.where(and(eq(directories.bucketId, sourceBucket.id), like(directories.path, `${normalizedSourcePath}%`)));
+			.where(and(eq(directories.bucketId, sourceBucket.id), likePrefix(directories.path, normalizedSourcePath)));
 		if (!sourceDirectory && childFiles.length === 0 && childDirectories.length === 0) {
 			throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		}

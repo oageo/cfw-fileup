@@ -1,6 +1,7 @@
 import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { buckets } from './buckets';
 import { users } from './users';
+import { binaryBlob } from './binary-blob';
 
 export const files = sqliteTable('files', {
 	id: text('id').primaryKey(),
@@ -16,7 +17,7 @@ export const files = sqliteTable('files', {
 	downloadCount: integer('download_count').notNull().default(0),
 	isDownloadCountEnabled: integer('is_download_count_enabled', { mode: 'boolean' }).notNull().default(false),
 	isDownloadCountVisible: integer('is_download_count_visible', { mode: 'boolean' }).notNull().default(false),
-	passphrase: text('passphrase'),
+	passphraseHash: binaryBlob('passphrase_hash'),
 	uploadExpiresAt: integer('upload_expires_at').notNull(),
 	isClosed: integer('is_closed', { mode: 'boolean' }).notNull().default(false),
 	isTargz: integer('is_targz', { mode: 'boolean' }).notNull().default(false),
@@ -55,7 +56,9 @@ export const uploadParts = sqliteTable('upload_parts', {
 	fileId: text('file_id').notNull().references(() => files.id, { onDelete: 'cascade' }),
 	partNumber: integer('part_number').notNull(),
 	etag: text('etag').notNull(),
-});
+}, (table) => [
+	uniqueIndex('upload_parts_file_part_idx').on(table.fileId, table.partNumber),
+]);
 
 /** デフォルトのパートサイズ: 32MiB
  * R2のマルチパートアップロードはパートごとにClass A操作となるため、

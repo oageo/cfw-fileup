@@ -9,7 +9,7 @@ import { apiError } from '../utils/api-error';
 import { omitResAndReq } from '../utils/omit';
 import { verifyTurnstile } from '../utils/turnstile';
 import { getRequestIp } from '../utils/request-ip';
-import { tokenToBytes } from '../utils/crypto';
+import { tokenToDigest } from '../utils/crypto';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -18,7 +18,7 @@ async function getOptionalReporterUser(c: JsonCtx<'/api/file-reports/create', En
 	if (!authorization?.startsWith('Bearer ')) return null;
 
 	const token = authorization.slice(7);
-	const tokenBytes = tokenToBytes(token);
+	const tokenBytes = await tokenToDigest(token);
 	const db = getDb(c.env);
 	const tokenRecord = await db
 		.select({

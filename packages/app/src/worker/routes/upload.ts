@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { eq, max, sql } from 'drizzle-orm';
-import { files, uploadParts } from '../scheme/index';
+import { buckets, files, uploadParts } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { abortUpload } from '../utils/abort-upload';
 import { authMiddleware } from '../middleware/auth';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiError } from '../utils/api-error';
+import { getQuotaForUser } from '../utils/rate-limit';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -83,6 +84,9 @@ app.patch('/upload/:fileId/resume', async (c) => {
 	}
 
 	const contentLength = parseInt(c.req.header('Content-Length') ?? '0', 10);
+	if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER');
+	}
 
 	if (currentOffset === 0 && !file.uploadId) {
 		const multipartUpload = await c.env.R2.createMultipartUpload(file.r2Key);
@@ -98,10 +102,23 @@ app.patch('/upload/:fileId/resume', async (c) => {
 		.select({ maxPartNumber: max(uploadParts.partNumber) })
 		.from(uploadParts)
 		.where(eq(uploadParts.fileId, fileId));
+	const expectedOffset = (maxPartNumber ?? 0) * file.partSize;
+	if (currentOffset !== expectedOffset) {
+		throw apiError(409, 'INVALID_UPLOAD_OFFSET_HEADER', `Expected Upload-Offset ${expectedOffset}`);
+	}
 
 	// ファイル作成時にクライアントが宣言したパートサイズをDBから取得して検証
 	if (contentLength > file.partSize) {
 		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER', `All parts except the last must be at most ${file.partSize} bytes`);
+	}
+
+	const [bucket, quota] = await Promise.all([
+		db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get(),
+		getQuotaForUser(c.env, file.userId),
+	]);
+	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+	if (quota.maxBucketSizeBytes !== null && bucket.usedBytes + currentOffset + contentLength > quota.maxBucketSizeBytes) {
+		throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
 	}
 
 	const nextPartNumber = (maxPartNumber ?? 0) + 1;

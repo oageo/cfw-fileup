@@ -138,9 +138,11 @@ describe('POST /api/passkey/backup-codes', () => {
 		expect(useRes.status).toBe(200);
 		const useBody = await useRes.json() as { token: string };
 
+		const tokenBytes = base64UrlToBytes(useBody.token);
+		const tokenDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', tokenBytes));
 		const tokenRow = await env.DB
 			.prepare('SELECT typeof(token) AS type, length(token) AS length FROM tokens WHERE token = ?')
-			.bind(base64UrlToBytes(useBody.token))
+			.bind(tokenDigest)
 			.first<{ type: string; length: number }>();
 
 		expect(tokenRow).toEqual({ type: 'blob', length: 32 });

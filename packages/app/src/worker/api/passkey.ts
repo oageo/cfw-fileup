@@ -12,7 +12,7 @@ import { passkeys, passkeysChallenges, backupCodes, tokens, users, appSettings, 
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
-import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes, verifyPassword } from '../utils/crypto';
+import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToDigest, verifyPassword } from '../utils/crypto';
 import { isValidNameFormat } from '../../shared/name-validation';
 import { validateUsername } from '../utils/name-validation';
 import { verifyTurnstile } from '../utils/turnstile';
@@ -298,7 +298,7 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		const tokenBytes = tokenToBytes(tokenValue);
+		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey' }, user.id, tokenId);
@@ -451,7 +451,7 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		const tokenBytes = tokenToBytes(tokenValue);
+		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'backup_code' }, user.id, tokenId);
@@ -632,7 +632,7 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		const tokenBytes = tokenToBytes(tokenValue);
+		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		await db.insert(tokens).values({ id: tokenId, userId, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey_signup' }, userId, tokenId);

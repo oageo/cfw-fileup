@@ -10,8 +10,8 @@ import { apiDef, getResponseDefWithAuth } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { apiError } from '../utils/api-error';
 import { parseEaidx } from '../../shared/eaid-x';
-import type { JsonCtx } from '../../shared/api';
 import { idPage, pageParams } from '../utils/pagination';
+import type { JsonCtx } from '../../shared/api';
 
 const app = new Hono<{ Bindings: Env }>();
 

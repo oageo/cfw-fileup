@@ -3,7 +3,7 @@ import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, desc, lt } from 'drizzle-orm';
 import { buckets, files, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { generateToken, tokenToBytes } from '../utils/crypto';
+import { generateToken, tokenToDigest, verifyPassword } from '../utils/crypto';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { authMiddleware } from '../middleware/auth';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -44,7 +44,7 @@ app.post(
 
 		const id = genEaidx(Date.now());
 		const token = generateToken();
-		const tokenBytes = tokenToBytes(token);
+		const tokenBytes = await tokenToDigest(token);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		const expiresAt = body.expiresIn != null ? Date.now() + body.expiresIn * 1000 : null;
 
@@ -93,10 +93,10 @@ app.post(
 			.limit(limit + 1);
 
 		return c.json(idPage(rows, limit, r => ({
-				id: r.id,
-				expiresAt: r.expiresAt,
-				createdAt: parseEaidx(r.id).date.getTime(),
-			})), 200);
+			id: r.id,
+			expiresAt: r.expiresAt,
+			createdAt: parseEaidx(r.id).date.getTime(),
+		})), 200);
 	}, getResponseDefWithAuth('/api/file-tokens/list')),
 );
 
@@ -161,11 +161,13 @@ app.post(
 		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
 		if (!file.isClosed) throw apiError(400, 'FILE_IS_NOT_CLOSED');
 		if (file.visibility !== 'passphrase') throw apiError(403, 'NO_PASSPHRASE_SET_FOR_THIS_FILE');
-		if (body.passphrase !== file.passphrase) throw apiError(403, 'INVALID_PASSPHRASE');
+		if (file.passphraseHash === null || !await verifyPassword(body.passphrase, file.passphraseHash)) {
+			throw apiError(403, 'INVALID_PASSPHRASE');
+		}
 
 		const id = genEaidx(Date.now());
 		const token = generateToken();
-		const tokenBytes = tokenToBytes(token);
+		const tokenBytes = await tokenToDigest(token);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		const expiresAt = Date.now() + 3600 * 1000;
 

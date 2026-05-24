@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8c2ba76f-a48a-4503-8108-52a120796ad6",
+  "id": "803cb306-a7a4-40b3-a446-8ef6fbb51924",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "buckets": {
@@ -455,9 +455,9 @@
           "autoincrement": false,
           "default": false
         },
-        "passphrase": {
-          "name": "passphrase",
-          "type": "text",
+        "passphrase_hash": {
+          "name": "passphrase_hash",
+          "type": "blob",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -750,7 +750,16 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "upload_parts_file_part_idx": {
+          "name": "upload_parts_file_part_idx",
+          "columns": [
+            "file_id",
+            "part_number"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "upload_parts_file_id_files_id_fk": {
           "name": "upload_parts_file_id_files_id_fk",

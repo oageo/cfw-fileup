@@ -62,7 +62,7 @@ CREATE TABLE `files` (
 	`download_count` integer DEFAULT 0 NOT NULL,
 	`is_download_count_enabled` integer DEFAULT false NOT NULL,
 	`is_download_count_visible` integer DEFAULT false NOT NULL,
-	`passphrase` text,
+	`passphrase_hash` blob,
 	`upload_expires_at` integer NOT NULL,
 	`is_closed` integer DEFAULT false NOT NULL,
 	`is_targz` integer DEFAULT false NOT NULL,
@@ -107,6 +107,7 @@ CREATE TABLE `upload_parts` (
 	FOREIGN KEY (`file_id`) REFERENCES `files`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `upload_parts_file_part_idx` ON `upload_parts` (`file_id`,`part_number`);--> statement-breakpoint
 CREATE TABLE `oauth_states` (
 	`id` text PRIMARY KEY NOT NULL,
 	`state` blob NOT NULL,

@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { eq, and, like, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { createBgzfBlock } from 'bgzf';
 import parseRange from 'range-parser';
 import { aidxRegExp, genEaidx, parseEaidx } from '../../shared/eaid-x';
@@ -9,7 +9,8 @@ import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 import { apiError, createApiErrorResponse } from '../utils/api-error';
-import { tokenToBytes } from '../utils/crypto';
+import { tokenToDigest } from '../utils/crypto';
+import { likePrefix } from '../utils/sql-like';
 
 const app = new Hono<{ Bindings: Env }>();
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
@@ -487,12 +488,13 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 	const rangeHeader = c.req.header('Range') ?? null;
 	const ifRangeHeader = c.req.header('If-Range') ?? null;
 	let requesterIsOwnerPromise: Promise<boolean> | null = null;
+
 	function requesterIsOwner(): Promise<boolean> {
 		requesterIsOwnerPromise ??= (async () => {
 			const authorization = c.req.header('Authorization');
 			if (!authorization?.startsWith('Bearer ')) return false;
 			const token = authorization.slice(7);
-			const tokenBytes = tokenToBytes(token);
+			const tokenBytes = await tokenToDigest(token);
 			const tokenRecord = await db
 				.select({ userId: tokens.userId, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
@@ -503,6 +505,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		})();
 		return requesterIsOwnerPromise;
 	}
+
 	async function countDownload(resolvedRange: ResolvedRangeRequest = { type: 'none' }): Promise<void> {
 		if (!fileRecord.isDownloadCountEnabled) return;
 		if (!shouldCountDownload(resolvedRange)) return;
@@ -512,20 +515,9 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			.set({ downloadCount: sql`${files.downloadCount} + 1` })
 			.where(eq(files.id, fileRecord.id));
 	}
+
 	if (download.entryPath !== null && download.entryPath.length > MAX_FILE_PATH_LENGTH) {
 		throw apiError(400, 'INVALID_FILE_PATH', `file must be at most ${MAX_FILE_PATH_LENGTH} characters`);
-	}
-
-	if (download.isMetaMode) {
-		return c.json({
-			type: 'file',
-			path: file.path,
-			size: file.size,
-			mimeType: file.mimeType,
-			isTargz: file.isTargz,
-			isTar: file.isTar,
-			visibility: file.visibility,
-		});
 	}
 
 	async function matchDownloadCache(
@@ -588,7 +580,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		const fileToken = c.req.query('token');
 		if (fileToken && !file.isModerationForcedPrivate) {
 			if (fileToken.length > MAX_ID_LENGTH) throw apiError(400, 'TOKEN_IS_REQUIRED', `token must be at most ${MAX_ID_LENGTH} characters`);
-			const fileTokenBytes = tokenToBytes(fileToken);
+			const fileTokenBytes = await tokenToDigest(fileToken);
 			const fileTokenRecord = await db
 				.select()
 				.from(fileAccessTokens)
@@ -611,7 +603,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			const authorization = c.req.header('Authorization');
 			if (!authorization?.startsWith('Bearer ')) throw apiError(403, 'FORBIDDEN');
 			const token = authorization.slice(7);
-			const tokenBytes = tokenToBytes(token);
+			const tokenBytes = await tokenToDigest(token);
 			const tokenRecord = await db
 				.select({ tokenId: tokens.id, userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
@@ -639,6 +631,18 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 				});
 			}
 		}
+	}
+
+	if (download.isMetaMode) {
+		return c.json({
+			type: 'file',
+			path: file.path,
+			size: file.size,
+			mimeType: file.mimeType,
+			isTargz: file.isTargz,
+			isTar: file.isTar,
+			visibility: file.visibility,
+		});
 	}
 
 	const cacheTarget = download.cacheTarget;
@@ -673,14 +677,14 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		if (file.isTargz) {
 			const index = await db.select().from(targzFiles).where(
 				listPath
-					? and(eq(targzFiles.fileId, file.id), like(targzFiles.path, `${listPath}%`))
+					? and(eq(targzFiles.fileId, file.id), likePrefix(targzFiles.path, listPath))
 					: eq(targzFiles.fileId, file.id),
 			);
 			return c.json(index);
 		} else {
 			const index = await db.select().from(tarFiles).where(
 				listPath
-					? and(eq(tarFiles.fileId, file.id), like(tarFiles.path, `${listPath}%`))
+					? and(eq(tarFiles.fileId, file.id), likePrefix(tarFiles.path, listPath))
 					: eq(tarFiles.fileId, file.id),
 			);
 			return c.json(index);

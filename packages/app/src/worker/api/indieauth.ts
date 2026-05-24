@@ -3,7 +3,7 @@ import { eq, count, lt, sql } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes } from '../utils/crypto';
+import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes, tokenToDigest } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
@@ -507,7 +507,7 @@ app.get('/callback', async (c) => {
 	// Issue session token
 	const tokenId = genEaidx(Date.now());
 	const tokenValue = generateToken();
-	const tokenBytes = tokenToBytes(tokenValue);
+	const tokenBytes = await tokenToDigest(tokenValue);
 	if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 	await db.insert(tokens).values({
@@ -529,7 +529,7 @@ app.post('/complete', async (c) => {
 	}
 
 	const db = getDb(c.env);
-	const tokenBytes = tokenToBytes(body.indieauthToken);
+	const tokenBytes = await tokenToDigest(body.indieauthToken);
 	const tokenRecord = await db.select().from(tokens).where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes)).get();
 	if (!tokenRecord || tokenRecord.isRevoked) {
 		throw apiError(401, 'INVALID_TOKEN');

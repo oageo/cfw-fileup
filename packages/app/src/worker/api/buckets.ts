@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import { buckets, files, usedBucketNames } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser } from '../utils/rate-limit';
@@ -40,9 +40,10 @@ app.post(
 
 		const quota = await getQuotaForUser(c.env, user.id);
 		if (quota.maxBuckets !== null) {
-			const userBucketCount = await db.query.buckets
-				.findMany({ where: eq(buckets.userId, user.id) })
-				.then((result) => result.length);
+			const [{ userBucketCount }] = await db
+				.select({ userBucketCount: count() })
+				.from(buckets)
+				.where(eq(buckets.userId, user.id));
 
 			if (userBucketCount >= quota.maxBuckets) {
 				throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');

@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import app from '../../src/worker/index';
-import migration0000 from '../../migrations/0000_oval_klaw.sql?raw';
+import migration0000 from '../../migrations/0000_smooth_maximus.sql?raw';
 
 export { env, app };
 

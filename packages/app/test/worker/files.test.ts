@@ -264,7 +264,7 @@ describe('POST /api/files/ls', () => {
 		expect(second.hasMore).toBe(false);
 		expect(second.nextCursor).toBeNull();
 	});
-	});
+});
 
 describe('POST /api/files/create/targz-index', () => {
 	test('registers targz index entries', async () => {

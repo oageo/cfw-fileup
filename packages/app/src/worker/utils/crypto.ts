@@ -93,3 +93,14 @@ export function tokenToBytes(token: string): Uint8Array<ArrayBuffer> | null {
 	const bytes = base64UrlToBytes(token);
 	return bytes?.length === 32 ? bytes : null;
 }
+
+export async function digestBytes(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
+	const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+	return new Uint8Array(digest);
+}
+
+export async function tokenToDigest(token: string): Promise<Uint8Array<ArrayBuffer> | null> {
+	const bytes = tokenToBytes(token);
+	if (bytes === null) return null;
+	return digestBytes(bytes);
+}
