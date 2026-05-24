@@ -17,6 +17,8 @@ export interface UploadJobRequest {
 	visibility: FileVisibility;
 	isListed: boolean;
 	passphrase?: string;
+	isDownloadCountEnabled?: boolean;
+	isDownloadCountVisible?: boolean;
 	files: UploadWorkerFileEntry[];
 	totalBytes: number;
 	authToken: string | null;

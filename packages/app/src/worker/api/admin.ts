@@ -579,6 +579,7 @@ app.post(
 				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 				maxDailyUploads: body.maxDailyUploads ?? null,
+				canUseDownloadCount: body.canUseDownloadCount ?? false,
 				updatedAt: now,
 			})
 			.onConflictDoUpdate({
@@ -588,6 +589,7 @@ app.post(
 					maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 					maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 					maxDailyUploads: body.maxDailyUploads ?? null,
+					canUseDownloadCount: body.canUseDownloadCount ?? false,
 					updatedAt: now,
 				},
 			});
@@ -598,6 +600,7 @@ app.post(
 				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 				maxDailyUploads: body.maxDailyUploads ?? null,
+				canUseDownloadCount: body.canUseDownloadCount ?? false,
 			},
 		});
 
@@ -621,6 +624,7 @@ app.post(
 				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 				maxDailyUploads: body.maxDailyUploads ?? null,
+				canUseDownloadCount: body.canUseDownloadCount ?? false,
 			})
 			.onConflictDoUpdate({
 				target: globalQuotas.key,
@@ -629,6 +633,7 @@ app.post(
 					maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 					maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 					maxDailyUploads: body.maxDailyUploads ?? null,
+					canUseDownloadCount: body.canUseDownloadCount ?? false,
 				},
 			});
 		await recordModerationAuditLog(c, 'admin_global_quota_set', {
@@ -637,6 +642,7 @@ app.post(
 				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 				maxDailyUploads: body.maxDailyUploads ?? null,
+				canUseDownloadCount: body.canUseDownloadCount ?? false,
 			},
 		});
 
@@ -676,6 +682,7 @@ app.post(
 				maxBucketSizeBytes: userQuota?.maxBucketSizeBytes ?? null,
 				maxFilesPerBucket: userQuota?.maxFilesPerBucket ?? null,
 				maxDailyUploads: userQuota?.maxDailyUploads ?? null,
+				canUseDownloadCount: userQuota?.canUseDownloadCount ?? false,
 			},
 		}, 200);
 	}, getResponseDefWithAuth('/api/admin/get-user-custom-quota')),
@@ -795,6 +802,7 @@ app.post(
 			maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 			maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 			maxDailyUploads: body.maxDailyUploads ?? null,
+			canUseDownloadCount: body.canUseDownloadCount ?? false,
 			createdAt: now,
 			updatedAt: now,
 		};
@@ -827,6 +835,7 @@ app.post(
 			maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
 			maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 			maxDailyUploads: body.maxDailyUploads ?? null,
+			canUseDownloadCount: body.canUseDownloadCount ?? false,
 			createdAt: existing.createdAt,
 			updatedAt: Date.now(),
 		};
@@ -837,6 +846,7 @@ app.post(
 			maxBucketSizeBytes: updated.maxBucketSizeBytes,
 			maxFilesPerBucket: updated.maxFilesPerBucket,
 			maxDailyUploads: updated.maxDailyUploads,
+			canUseDownloadCount: updated.canUseDownloadCount,
 			updatedAt: updated.updatedAt,
 		}).where(eq(plans.id, body.planId));
 		await recordModerationAuditLog(c, 'admin_plan_updated', {

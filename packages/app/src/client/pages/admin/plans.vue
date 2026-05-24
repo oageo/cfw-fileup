@@ -15,11 +15,12 @@ interface Plan {
 	maxBucketSizeBytes: number | null;
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
+	canUseDownloadCount: boolean;
 	createdAt: number;
 	updatedAt: number;
 }
 
-type PlanForm = Pick<Plan, 'name' | 'maxBuckets' | 'maxBucketSizeBytes' | 'maxFilesPerBucket' | 'maxDailyUploads'>;
+type PlanForm = Pick<Plan, 'name' | 'maxBuckets' | 'maxBucketSizeBytes' | 'maxFilesPerBucket' | 'maxDailyUploads' | 'canUseDownloadCount'>;
 
 const quotaValueSchema = v.nullable(v.pipe(
 	v.number(),
@@ -70,10 +71,11 @@ function emptyForm(): PlanForm {
 		maxBucketSizeBytes: null,
 		maxFilesPerBucket: null,
 		maxDailyUploads: null,
+		canUseDownloadCount: false,
 	};
 }
 
-function onNumberInput(key: keyof Omit<PlanForm, 'name'>, e: Event): void {
+function onNumberInput(key: Exclude<keyof PlanForm, 'name' | 'canUseDownloadCount'>, e: Event): void {
 	const raw = (e.target as HTMLInputElement).value;
 	form.value[key] = raw === '' ? null : Number(raw);
 }
@@ -134,6 +136,7 @@ function startEdit(plan: Plan): void {
 		maxBucketSizeBytes: plan.maxBucketSizeBytes,
 		maxFilesPerBucket: plan.maxFilesPerBucket,
 		maxDailyUploads: plan.maxDailyUploads,
+		canUseDownloadCount: plan.canUseDownloadCount,
 	};
 	syncBucketSizeInput(plan.maxBucketSizeBytes);
 	success.value = '';
@@ -241,6 +244,10 @@ async function executeDelete(): Promise<void> {
               <span>1日あたりアップロード数上限</span>
               <input :value="form.maxDailyUploads ?? ''" class="form-input" type="number" min="0" placeholder="無制限" @input="onNumberInput('maxDailyUploads', $event)">
             </label>
+            <label :class="$style.checkboxField">
+              <input v-model="form.canUseDownloadCount" type="checkbox">
+              <span>DL数カウントを許可</span>
+            </label>
           </div>
           <p v-if="quotaError" :class="$style.validationError">{{ quotaError }}</p>
           <div class="flex gap-2">
@@ -265,6 +272,7 @@ async function executeDelete(): Promise<void> {
                   <th>サイズ</th>
                   <th>ファイル</th>
                   <th>日次</th>
+                  <th>DL数</th>
                   <th class="col-actions">操作</th>
                 </tr>
               </thead>
@@ -275,6 +283,11 @@ async function executeDelete(): Promise<void> {
                   <td>{{ formatQuota(plan.maxBucketSizeBytes, formatBytes) }}</td>
                   <td>{{ formatQuota(plan.maxFilesPerBucket) }}</td>
                   <td>{{ formatQuota(plan.maxDailyUploads) }}</td>
+                  <td>
+                    <span :class="plan.canUseDownloadCount ? 'badge badge-success' : 'badge badge-muted'">
+                      {{ plan.canUseDownloadCount ? '許可' : '不可' }}
+                    </span>
+                  </td>
                   <td class="col-actions">
                     <div class="flex gap-2">
                       <button type="button" class="btn btn-secondary" @click="startEdit(plan)">編集</button>
@@ -286,7 +299,7 @@ async function executeDelete(): Promise<void> {
                   </td>
                 </tr>
                 <tr v-if="plans.length === 0">
-                  <td colspan="6" class="text-muted">プランはまだありません。</td>
+                  <td colspan="7" class="text-muted">プランはまだありません。</td>
                 </tr>
               </tbody>
             </table>
@@ -336,6 +349,14 @@ async function executeDelete(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.checkboxField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.875rem;
   font-weight: 500;
 }

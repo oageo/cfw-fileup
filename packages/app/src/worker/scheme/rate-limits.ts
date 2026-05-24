@@ -8,6 +8,7 @@ export const plans = sqliteTable('plans', {
 	maxBucketSizeBytes: integer('max_bucket_size_bytes'),
 	maxFilesPerBucket: integer('max_files_per_bucket'),
 	maxDailyUploads: integer('max_daily_uploads'),
+	canUseDownloadCount: integer('can_use_download_count', { mode: 'boolean' }).notNull().default(false),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
 });
@@ -26,6 +27,7 @@ export const userQuotas = sqliteTable('user_quotas', {
 	maxBucketSizeBytes: integer('max_bucket_size_bytes'),
 	maxFilesPerBucket: integer('max_files_per_bucket'),
 	maxDailyUploads: integer('max_daily_uploads'),
+	canUseDownloadCount: integer('can_use_download_count', { mode: 'boolean' }).notNull().default(false),
 	updatedAt: integer('updated_at').notNull(),
 });
 
@@ -35,4 +37,5 @@ export const globalQuotas = sqliteTable('global_quotas', {
 	maxBucketSizeBytes: integer('max_bucket_size_bytes'),
 	maxFilesPerBucket: integer('max_files_per_bucket'),
 	maxDailyUploads: integer('max_daily_uploads'),
+	canUseDownloadCount: integer('can_use_download_count', { mode: 'boolean' }).notNull().default(false),
 });

@@ -11,6 +11,7 @@ const QuotaResponse = v.pipe(
 		maxBucketSizeBytes: v.nullable(v.number()),
 		maxFilesPerBucket: v.nullable(v.number()),
 		maxDailyUploads: v.nullable(v.number()),
+		canUseDownloadCount: v.boolean(),
 	}),
 	v.metadata({ ref: 'Quota' }),
 );
@@ -26,6 +27,7 @@ const QuotaInput = {
 	maxBucketSizeBytes: v.optional(v.nullable(v.number())),
 	maxFilesPerBucket: v.optional(v.nullable(v.number())),
 	maxDailyUploads: v.optional(v.nullable(v.number())),
+	canUseDownloadCount: v.optional(v.boolean()),
 } as const;
 const PlanResponse = v.pipe(
 	v.object({
@@ -35,6 +37,7 @@ const PlanResponse = v.pipe(
 		maxBucketSizeBytes: v.nullable(v.number()),
 		maxFilesPerBucket: v.nullable(v.number()),
 		maxDailyUploads: v.nullable(v.number()),
+		canUseDownloadCount: v.boolean(),
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	}),

@@ -72,13 +72,16 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			visibility: files.visibility,
 			isListed: files.isListed,
 			isModerationForcedPrivate: files.isModerationForcedPrivate,
+			downloadCount: files.downloadCount,
+			isDownloadCountEnabled: files.isDownloadCountEnabled,
+			isDownloadCountVisible: files.isDownloadCountVisible,
 		})
 		.from(files)
 		.where(fileCondition);
 	const allDirs = await db.select({ path: directories.path, isListed: directories.isListed }).from(directories).where(eq(directories.bucketId, bucket.id));
 	const hiddenDirPaths = isOwnerOrAdmin ? new Set<string>() : new Set(allDirs.filter(dir => !dir.isListed).map(dir => dir.path));
 
-	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean; isModerationForcedPrivate?: boolean }> = [];
+	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean; isModerationForcedPrivate?: boolean; downloadCount?: number; isDownloadCountEnabled?: boolean; isDownloadCountVisible?: boolean }> = [];
 	const seenDirs = new Set<string>();
 	for (const d of allDirs) {
 		if (!d.path.startsWith(normalizedPath)) continue;
@@ -98,7 +101,19 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const rest = f.path.slice(normalizedPath.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
-			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility, ...(isOwnerOrAdmin ? { isListed: f.isListed, isModerationForcedPrivate: f.isModerationForcedPrivate } : {}) });
+			entries.push({
+				type: 'file',
+				name: rest,
+				path: f.path,
+				fileId: f.id,
+				size: f.size ?? undefined,
+				mimeType: f.mimeType ?? undefined,
+				isTargz: f.isTargz,
+				isTar: f.isTar,
+				visibility: f.visibility,
+				...((f.isDownloadCountEnabled && (isOwnerOrAdmin || f.isDownloadCountVisible)) ? { downloadCount: f.downloadCount } : {}),
+				...(isOwnerOrAdmin ? { isListed: f.isListed, isModerationForcedPrivate: f.isModerationForcedPrivate, isDownloadCountEnabled: f.isDownloadCountEnabled, isDownloadCountVisible: f.isDownloadCountVisible } : {}),
+			});
 		} else {
 			const dirName = rest.slice(0, slashIdx);
 			if (hiddenDirPaths.has(`${normalizedPath}${dirName}/`)) continue;
@@ -182,9 +197,23 @@ app.get('/meta', async (c) => {
 		hasMimeTypeMismatch: hasMimeMismatch,
 		hasExecutableContent: hasMimeMismatch && isExecutableMimeType(file.mimeType ?? undefined),
 		isOwner,
+		...((file.isDownloadCountEnabled && (isOwnerOrAdmin || file.isDownloadCountVisible)) ? { downloadCount: file.downloadCount } : {}),
 	};
 	if ((file.visibility === 'public' && !file.isModerationForcedPrivate) || isOwnerOrAdmin) {
-		return c.json({ ...base, fileId: file.id, bucketId: bucket.id, ...(isOwnerOrAdmin ? { isListed: file.isListed } : {}) });
+		const quota = isOwnerOrAdmin ? await getQuotaForUser(c.env, file.userId) : null;
+		return c.json({
+			...base,
+			fileId: file.id,
+			bucketId: bucket.id,
+			...(isOwnerOrAdmin
+				? {
+					isListed: file.isListed,
+					isDownloadCountEnabled: file.isDownloadCountEnabled,
+					isDownloadCountVisible: file.isDownloadCountVisible,
+					canUseDownloadCount: quota?.canUseDownloadCount ?? false,
+				}
+				: {}),
+		});
 	}
 	if (fileToken) {
 		const fileTokenRecord = await db
@@ -494,6 +523,11 @@ app.post(
 				throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
 			}
 		}
+		if (body.isDownloadCountEnabled && !quota.canUseDownloadCount) {
+			throw apiError(403, 'FORBIDDEN');
+		}
+		const isDownloadCountEnabled = body.isDownloadCountEnabled ?? false;
+		const isDownloadCountVisible = isDownloadCountEnabled ? body.isDownloadCountVisible ?? false : false;
 
 		const fileSize = r2Object.size;
 
@@ -530,6 +564,8 @@ app.post(
 				visibility: body.visibility,
 				isListed: body.isListed ?? true,
 				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
+				isDownloadCountEnabled,
+				isDownloadCountVisible,
 				size: fileSize,
 				mimeType,
 			})
@@ -612,6 +648,14 @@ app.post(
 		if (file.visibility === 'public' && body.visibility !== 'public') {
 			throw apiError(400, 'PUBLIC_FILES_CANNOT_CHANGE_VISIBILITY');
 		}
+		const nextDownloadCountEnabled = body.isDownloadCountEnabled ?? file.isDownloadCountEnabled;
+		if (nextDownloadCountEnabled && !file.isDownloadCountEnabled) {
+			const quota = await getQuotaForUser(c.env, file.userId);
+			if (!quota.canUseDownloadCount) throw apiError(403, 'FORBIDDEN');
+		}
+		const nextDownloadCountVisible = nextDownloadCountEnabled
+			? body.isDownloadCountVisible ?? file.isDownloadCountVisible
+			: false;
 
 		await db
 			.update(files)
@@ -619,6 +663,8 @@ app.post(
 				visibility: body.visibility,
 				isListed: body.isListed ?? file.isListed,
 				passphrase: body.visibility === 'passphrase' ? (body.passphrase ?? null) : null,
+				isDownloadCountEnabled: nextDownloadCountEnabled,
+				isDownloadCountVisible: nextDownloadCountVisible,
 			})
 			.where(eq(files.id, file.id));
 

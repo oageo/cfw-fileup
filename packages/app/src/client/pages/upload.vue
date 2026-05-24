@@ -51,6 +51,9 @@ const libraryName = ref('');
 const visibility = ref<FileVisibility>('public');
 const isListed = ref(true);
 const passphrase = ref('');
+const isDownloadCountEnabled = ref(false);
+const isDownloadCountVisible = ref(false);
+const canUseDownloadCount = ref(false);
 const isDragOver = ref(false);
 const selectionError = ref('');
 const previewUrl = ref('');
@@ -193,6 +196,11 @@ async function loadBucket(): Promise<void> {
 	}
 	buckets.value = result.data.buckets;
 	maxBucketSizeBytes.value = result.data.maxBucketSizeBytes;
+	canUseDownloadCount.value = result.data.canUseDownloadCount;
+	if (!canUseDownloadCount.value) {
+		isDownloadCountEnabled.value = false;
+		isDownloadCountVisible.value = false;
+	}
 	if (!selectedBucketName.value && buckets.value.length > 0) {
 		selectedBucketName.value = buckets.value[0].name;
 	}
@@ -863,7 +871,14 @@ async function openUpload(path: string): Promise<OpenUploadResult | null> {
 }
 
 async function closeUpload(fileId: string): Promise<boolean> {
-	const result = await apiPost('/api/files/create/close', { fileId, visibility: visibility.value, isListed: isListed.value, passphrase: passphrase.value || undefined });
+	const result = await apiPost('/api/files/create/close', {
+		fileId,
+		visibility: visibility.value,
+		isListed: isListed.value,
+		passphrase: passphrase.value || undefined,
+		isDownloadCountEnabled: isDownloadCountEnabled.value,
+		isDownloadCountVisible: isDownloadCountEnabled.value ? isDownloadCountVisible.value : false,
+	});
 	if (!result.ok) {
 		uploadError.value = result.data.message;
 		return false;
@@ -1210,6 +1225,8 @@ async function executeUpload(): Promise<void> {
 		visibility: visibility.value,
 		isListed: isListed.value,
 		passphrase: passphrase.value || undefined,
+		isDownloadCountEnabled: isDownloadCountEnabled.value,
+		isDownloadCountVisible: isDownloadCountEnabled.value ? isDownloadCountVisible.value : false,
 		files,
 		totalBytes: tree.totalSize,
 		authToken: authStore.token,
@@ -1469,6 +1486,10 @@ onMounted(async () => {
           v-model:visibility="visibility"
           v-model:isListed="isListed"
           v-model:passphrase="passphrase"
+          v-model:isDownloadCountEnabled="isDownloadCountEnabled"
+          v-model:isDownloadCountVisible="isDownloadCountVisible"
+          :can-use-download-count="canUseDownloadCount"
+          :show-download-count-settings="true"
           passphrase-autocomplete="off"
         />
       </div>

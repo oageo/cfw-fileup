@@ -7,6 +7,7 @@ export interface RateLimitConfig {
 	maxBucketSizeBytes: number | null;
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
+	canUseDownloadCount: boolean;
 }
 
 export async function getQuotaForUser(env: Env, userId: string): Promise<RateLimitConfig> {
@@ -19,6 +20,7 @@ export async function getQuotaForUser(env: Env, userId: string): Promise<RateLim
 			maxBucketSizeBytes: plans.maxBucketSizeBytes,
 			maxFilesPerBucket: plans.maxFilesPerBucket,
 			maxDailyUploads: plans.maxDailyUploads,
+			canUseDownloadCount: plans.canUseDownloadCount,
 		})
 		.from(userPlanAssignments)
 		.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
@@ -34,6 +36,7 @@ export async function getQuotaForUser(env: Env, userId: string): Promise<RateLim
 			maxBucketSizeBytes: activePlan.maxBucketSizeBytes,
 			maxFilesPerBucket: activePlan.maxFilesPerBucket,
 			maxDailyUploads: activePlan.maxDailyUploads,
+			canUseDownloadCount: activePlan.canUseDownloadCount,
 		};
 	}
 
@@ -45,6 +48,7 @@ export async function getQuotaForUser(env: Env, userId: string): Promise<RateLim
 			maxBucketSizeBytes: userQuota.maxBucketSizeBytes,
 			maxFilesPerBucket: userQuota.maxFilesPerBucket,
 			maxDailyUploads: userQuota.maxDailyUploads,
+			canUseDownloadCount: userQuota.canUseDownloadCount,
 		};
 	}
 
@@ -60,6 +64,7 @@ export async function getQuotaForUser(env: Env, userId: string): Promise<RateLim
 			maxBucketSizeBytes: globalQuota.maxBucketSizeBytes,
 			maxFilesPerBucket: globalQuota.maxFilesPerBucket,
 			maxDailyUploads: globalQuota.maxDailyUploads,
+			canUseDownloadCount: globalQuota.canUseDownloadCount,
 		};
 	}
 
@@ -68,6 +73,7 @@ export async function getQuotaForUser(env: Env, userId: string): Promise<RateLim
 		maxBucketSizeBytes: null,
 		maxFilesPerBucket: null,
 		maxDailyUploads: null,
+		canUseDownloadCount: false,
 	};
 }
 
@@ -86,6 +92,7 @@ export async function getGlobalQuota(env: Env): Promise<RateLimitConfig> {
 			maxBucketSizeBytes: globalQuota.maxBucketSizeBytes,
 			maxFilesPerBucket: globalQuota.maxFilesPerBucket,
 			maxDailyUploads: globalQuota.maxDailyUploads,
+			canUseDownloadCount: globalQuota.canUseDownloadCount,
 		};
 	}
 
@@ -94,5 +101,6 @@ export async function getGlobalQuota(env: Env): Promise<RateLimitConfig> {
 		maxBucketSizeBytes: null,
 		maxFilesPerBucket: null,
 		maxDailyUploads: null,
+		canUseDownloadCount: false,
 	};
 }

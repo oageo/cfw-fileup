@@ -5,10 +5,20 @@ withDefaults(defineProps<{
 	visibility: FileVisibility;
 	isListed: boolean;
 	passphrase?: string;
+	isDownloadCountEnabled?: boolean;
+	isDownloadCountVisible?: boolean;
+	canUseDownloadCount?: boolean;
+	showDownloadCountSettings?: boolean;
+	downloadCount?: number | null;
 	lockVisibility?: boolean;
 	passphraseAutocomplete?: string;
 }>(), {
 	passphrase: '',
+	isDownloadCountEnabled: false,
+	isDownloadCountVisible: false,
+	canUseDownloadCount: false,
+	showDownloadCountSettings: false,
+	downloadCount: null,
 	lockVisibility: false,
 	passphraseAutocomplete: undefined,
 });
@@ -17,6 +27,8 @@ const emit = defineEmits<{
 	(e: 'update:visibility', value: FileVisibility): void;
 	(e: 'update:isListed', value: boolean): void;
 	(e: 'update:passphrase', value: string): void;
+	(e: 'update:isDownloadCountEnabled', value: boolean): void;
+	(e: 'update:isDownloadCountVisible', value: boolean): void;
 }>();
 
 function onVisibilityInput(event: Event): void {
@@ -29,6 +41,16 @@ function onIsListedInput(event: Event): void {
 
 function onPassphraseInput(event: Event): void {
 	emit('update:passphrase', (event.target as HTMLInputElement).value);
+}
+
+function onDownloadCountEnabledInput(event: Event): void {
+	const enabled = (event.target as HTMLInputElement).checked;
+	emit('update:isDownloadCountEnabled', enabled);
+	if (!enabled) emit('update:isDownloadCountVisible', false);
+}
+
+function onDownloadCountVisibleInput(event: Event): void {
+	emit('update:isDownloadCountVisible', (event.target as HTMLInputElement).checked);
 }
 </script>
 
@@ -77,6 +99,36 @@ function onPassphraseInput(event: Event): void {
       <input type="checkbox" :checked="isListed" @input="onIsListedInput">
       ファイル一覧とActivityPubに表示
     </label>
+
+    <div v-if="showDownloadCountSettings" :class="$style.downloadCountSettings">
+      <div :class="$style.groupTitleRow">
+        <div :class="$style.groupTitle">DL数</div>
+        <span v-if="downloadCount != null" class="badge badge-info">
+          {{ downloadCount.toLocaleString() }} 回
+        </span>
+      </div>
+      <label class="checkbox-label">
+        <input
+          type="checkbox"
+          :checked="isDownloadCountEnabled"
+          :disabled="!canUseDownloadCount && !isDownloadCountEnabled"
+          @input="onDownloadCountEnabledInput"
+        >
+        DL数をカウント
+      </label>
+      <label class="checkbox-label" :class="!isDownloadCountEnabled && $style.disabledOption">
+        <input
+          type="checkbox"
+          :checked="isDownloadCountVisible"
+          :disabled="!isDownloadCountEnabled"
+          @input="onDownloadCountVisibleInput"
+        >
+        DL数を公開表示
+      </label>
+      <div v-if="!canUseDownloadCount && !isDownloadCountEnabled" class="form-hint">
+        現在のクォータではDL数カウントを有効化できません。
+      </div>
+    </div>
   </div>
 </template>
 
@@ -103,5 +155,30 @@ function onPassphraseInput(event: Event): void {
 
 .passphraseGroup {
   max-width: 320px;
+}
+
+.downloadCountSettings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.groupTitle {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.groupTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.disabledOption {
+  color: var(--color-text-muted);
 }
 </style>

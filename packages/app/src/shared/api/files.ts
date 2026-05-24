@@ -47,6 +47,9 @@ const FileListEntry = v.pipe(
 		visibility: v.optional(fileVisibilitySchema),
 		isListed: v.optional(v.boolean()),
 		isModerationForcedPrivate: v.optional(v.boolean()),
+		downloadCount: v.optional(v.number()),
+		isDownloadCountEnabled: v.optional(v.boolean()),
+		isDownloadCountVisible: v.optional(v.boolean()),
 	}),
 	v.metadata({ ref: 'FileListEntry' }),
 );
@@ -118,6 +121,8 @@ export const filesApiDef = {
 			visibility: fileVisibilitySchema,
 			isListed: v.optional(v.boolean()),
 			passphrase: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+			isDownloadCountEnabled: v.optional(v.boolean()),
+			isDownloadCountVisible: v.optional(v.boolean()),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
@@ -163,6 +168,8 @@ export const filesApiDef = {
 			visibility: fileVisibilitySchema,
 			isListed: v.optional(v.boolean()),
 			passphrase: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+			isDownloadCountEnabled: v.optional(v.boolean()),
+			isDownloadCountVisible: v.optional(v.boolean()),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
@@ -248,6 +255,10 @@ export const filesApiDef = {
 				hasMimeTypeMismatch: v.boolean(),
 				hasExecutableContent: v.boolean(),
 				isListed: v.optional(v.boolean()),
+				downloadCount: v.optional(v.number()),
+				isDownloadCountEnabled: v.optional(v.boolean()),
+				isDownloadCountVisible: v.optional(v.boolean()),
+				canUseDownloadCount: v.optional(v.boolean()),
 				fileId: v.optional(v.string()),
 				bucketId: v.optional(v.string()),
 			}) } } },

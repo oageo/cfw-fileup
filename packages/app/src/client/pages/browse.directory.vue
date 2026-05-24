@@ -47,6 +47,9 @@ interface DisplayEntry {
 	visibility?: FileVisibility;
 	isListed?: boolean;
 	isModerationForcedPrivate?: boolean;
+	downloadCount?: number;
+	isDownloadCountEnabled?: boolean;
+	isDownloadCountVisible?: boolean;
 	previewUrl?: string;
 }
 
@@ -162,9 +165,9 @@ const selectionBadgeLabel = computed(() => {
 
 const tableColspan = computed(() => {
 	if (isArchive.value) return 3;
-	if (authStore.user && bucketId.value) return 6;
-	if (authStore.user) return 5;
-	return 4;
+	if (authStore.user && bucketId.value) return 7;
+	if (authStore.user) return 6;
+	return 5;
 });
 
 const archiveProgressLabel = computed(() => {
@@ -855,6 +858,9 @@ async function load(): Promise<void> {
 					visibility: e.visibility,
 					isListed: e.isListed,
 					isModerationForcedPrivate: e.isModerationForcedPrivate,
+					downloadCount: e.downloadCount,
+					isDownloadCountEnabled: e.isDownloadCountEnabled,
+					isDownloadCountVisible: e.isDownloadCountVisible,
 					previewUrl,
 				};
 			});
@@ -942,7 +948,7 @@ async function executeDeleteArchive(): Promise<void> {
 async function fetchPublicDirectoryEntries(): Promise<{
 	entries: Array<{
 		type: 'dir' | 'file'; name: string; path?: string;
-		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean;
+		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean; downloadCount?: number; isDownloadCountEnabled?: boolean; isDownloadCountVisible?: boolean;
 	}>;
 } | null> {
 	const lsUrl = `/api/files/ls?bucketName=${encodeURIComponent(props.bucketName)}&path=${encodeURIComponent(props.filePath)}`;
@@ -954,7 +960,7 @@ async function fetchPublicDirectoryEntries(): Promise<{
 	return await res.json() as {
 		entries: Array<{
 			type: 'dir' | 'file'; name: string; path?: string;
-			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean;
+			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean; downloadCount?: number; isDownloadCountEnabled?: boolean; isDownloadCountVisible?: boolean;
 		}>;
 	};
 }
@@ -1122,6 +1128,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
                 </th>
                 <th>名前</th>
                 <th class="col-right">サイズ</th>
+                <th v-if="!isArchive" class="col-right">DL</th>
                 <th>種類</th>
                 <th v-if="!isArchive && authStore.user">公開</th>
                 <th v-if="!isArchive && authStore.user && bucketId" class="col-actions"></th>
@@ -1150,6 +1157,9 @@ watch([isPartiallySelected, isAllSelected], async () => {
                 </td>
                 <td :class="[$style.sizeCell, 'col-right', 'col-muted']">
                   {{ entry.size != null ? formatSize(entry.size) : '' }}
+                </td>
+                <td v-if="!isArchive" :class="[$style.sizeCell, 'col-right', 'col-muted']">
+                  {{ !entry.isDir && entry.downloadCount != null ? entry.downloadCount.toLocaleString() : '' }}
                 </td>
                 <td :class="$style.labelCell">
                   <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
@@ -1270,6 +1280,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
                 <div :class="$style.gridCardName" :title="entry.name">{{ entry.name }}</div>
                 <div :class="$style.gridCardMeta">
                   <span v-if="entry.size != null" :class="$style.gridCardSize">{{ formatSize(entry.size) }}</span>
+                  <span v-if="!entry.isDir && entry.downloadCount != null" class="badge badge-info">DL {{ entry.downloadCount.toLocaleString() }}</span>
                   <span v-if="entry.label" class="badge badge-muted">{{ entry.label }}</span>
                   <span v-if="!entry.isDir && entry.visibility != null && !isArchive" :class="entry.visibility === 'public' ? 'badge badge-success' : entry.visibility === 'passphrase' ? 'badge badge-warning' : 'badge badge-muted'">
                     {{ entry.visibility === 'public' ? '公開' : entry.visibility === 'passphrase' ? '合言葉' : '非公開' }}

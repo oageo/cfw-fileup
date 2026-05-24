@@ -138,6 +138,8 @@ async function closeUpload(fileId: string, request: UploadJobRequest): Promise<v
 		visibility: request.visibility,
 		isListed: request.isListed,
 		passphrase: request.passphrase || undefined,
+		isDownloadCountEnabled: request.isDownloadCountEnabled ?? false,
+		isDownloadCountVisible: request.isDownloadCountEnabled ? request.isDownloadCountVisible ?? false : false,
 	}, request.authToken);
 }
 

@@ -159,6 +159,10 @@ const fileVisibility = ref<FileVisibility>('public');
 const fileIsListed = ref(true);
 const fileIsModerationForcedPrivate = ref(false);
 const fileIsOwner = ref(false);
+const fileDownloadCount = ref<number | null>(null);
+const fileIsDownloadCountEnabled = ref(false);
+const fileIsDownloadCountVisible = ref(false);
+const canUseDownloadCount = ref(false);
 
 const activeTab = ref<'info' | 'tokens'>('info');
 const autoToken = ref<string | null>(null);
@@ -303,6 +307,10 @@ async function fetchMeta(): Promise<void> {
 	fileBucketId.value = null;
 	fileIsOwner.value = false;
 	fileIsModerationForcedPrivate.value = false;
+	fileDownloadCount.value = null;
+	fileIsDownloadCountEnabled.value = false;
+	fileIsDownloadCountVisible.value = false;
+	canUseDownloadCount.value = false;
 	try {
 		const metaUrl = new URL('/api/files/meta', location.origin);
 		metaUrl.searchParams.set('bucketName', props.bucketName);
@@ -324,6 +332,10 @@ async function fetchMeta(): Promise<void> {
 			hasExecutableContent?: boolean;
 			isListed?: boolean;
 			isModerationForcedPrivate?: boolean;
+			downloadCount?: number;
+			isDownloadCountEnabled?: boolean;
+			isDownloadCountVisible?: boolean;
+			canUseDownloadCount?: boolean;
 			isOwner?: boolean;
 			fileId?: string;
 			bucketId?: string;
@@ -339,6 +351,10 @@ async function fetchMeta(): Promise<void> {
 		fileIsListed.value = data.isListed ?? true;
 		fileIsModerationForcedPrivate.value = data.isModerationForcedPrivate ?? false;
 		fileIsOwner.value = data.isOwner ?? false;
+		fileDownloadCount.value = data.downloadCount ?? null;
+		fileIsDownloadCountEnabled.value = data.isDownloadCountEnabled ?? false;
+		fileIsDownloadCountVisible.value = data.isDownloadCountVisible ?? false;
+		canUseDownloadCount.value = data.canUseDownloadCount ?? false;
 		fileId.value = data.fileId ?? null;
 		fileBucketId.value = data.bucketId ?? null;
 
@@ -495,6 +511,14 @@ function fileIsModerationForcedPrivateChanged(v: boolean) {
 	fileIsModerationForcedPrivate.value = v;
 }
 
+function fileDownloadCountEnabledChanged(v: boolean) {
+	fileIsDownloadCountEnabled.value = v;
+}
+
+function fileDownloadCountVisibleChanged(v: boolean) {
+	fileIsDownloadCountVisible.value = v;
+}
+
 function tokenDeleted(tokenId: string) {
 	if (autoTokenId.value !== tokenId) return;
 	autoToken.value = null;
@@ -516,6 +540,10 @@ watch(() => [props.bucketName, props.filePath], () => {
 	fileExtensionMimeType.value = null;
 	hasMimeTypeMismatch.value = false;
 	hasExecutableContent.value = false;
+	fileDownloadCount.value = null;
+	fileIsDownloadCountEnabled.value = false;
+	fileIsDownloadCountVisible.value = false;
+	canUseDownloadCount.value = false;
 	clearExpiryTimer();
 	fetchBrowseTerms();
 });
@@ -560,6 +588,9 @@ watch(() => [entryPath.value, queryToken.value], () => {
         :class="'badge badge-muted'"
       >
         {{ formatSize((isEntryFile ? innerMeta?.size : fileSize) ?? 0) }}
+      </span>
+      <span v-if="!isDirectory && !metaLoading && !metaError && fileDownloadCount != null" class="badge badge-info">
+        DL {{ fileDownloadCount.toLocaleString() }}
       </span>
       <span v-if="passphraseTokenExpiresAt" class="badge badge-info" :title="`${passphraseTokenExpiryStr} まで有効`">
         合言葉認証済み（{{ passphraseTokenExpiryStr }} まで）
@@ -634,9 +665,15 @@ watch(() => [entryPath.value, queryToken.value], () => {
           :filePath="baseFilePath"
           :fileVisibility="fileVisibility"
           :isListed="fileIsListed"
+          :downloadCount="fileDownloadCount"
+          :isDownloadCountEnabled="fileIsDownloadCountEnabled"
+          :isDownloadCountVisible="fileIsDownloadCountVisible"
+          :canUseDownloadCount="canUseDownloadCount"
           :autoTokenId="autoTokenId"
           @update:fileVisibility="fileVisibilityChanged"
           @update:isListed="fileIsListedChanged"
+          @update:isDownloadCountEnabled="fileDownloadCountEnabledChanged"
+          @update:isDownloadCountVisible="fileDownloadCountVisibleChanged"
           @tokenDeleted="tokenDeleted"
         />
       </template>

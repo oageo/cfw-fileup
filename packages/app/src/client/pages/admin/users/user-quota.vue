@@ -16,6 +16,7 @@ interface QuotaForm {
 	maxBucketSizeBytes: number | null;
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
+	canUseDownloadCount: boolean;
 }
 
 interface Plan {
@@ -39,8 +40,15 @@ const quotaValueSchema = v.nullable(v.pipe(
 	v.integer('整数を入力してください'),
 	v.minValue(0, '0以上の数値を入力してください'),
 ));
+const booleanSettingSchema = v.picklist(['true', 'false']);
 
-const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null });
+const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null, canUseDownloadCount: false });
+const canUseDownloadCountSetting = computed<'true' | 'false'>({
+	get: () => quota.value.canUseDownloadCount ? 'true' : 'false',
+	set: value => {
+		quota.value.canUseDownloadCount = value === 'true';
+	},
+});
 const plans = ref<Plan[]>([]);
 const userPlan = ref<UserPlanAssignment | null>(null);
 const selectedPlanId = ref('');
@@ -77,6 +85,7 @@ async function fetchQuota(): Promise<void> {
 			maxBucketSizeBytes: userData.maxBucketSizeBytes ?? null,
 			maxFilesPerBucket: userData.maxFilesPerBucket ?? null,
 			maxDailyUploads: userData.maxDailyUploads ?? null,
+			canUseDownloadCount: userData.canUseDownloadCount ?? false,
 		};
 	} catch (e) {
 		error.value = String(e);
@@ -311,6 +320,14 @@ async function executeReset(): Promise<void> {
             v-model="quota.maxDailyUploads"
             :schema="quotaValueSchema"
             title="1日あたりアップロード数上限"
+            :saving="saving"
+            :show-save-button="false"
+            :save-on-change="false"
+          />
+          <SettingItem
+            v-model="canUseDownloadCountSetting"
+            :schema="booleanSettingSchema"
+            title="DL数カウントを許可"
             :saving="saving"
             :show-save-button="false"
             :save-on-change="false"

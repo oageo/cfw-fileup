@@ -12,11 +12,17 @@ const props = defineProps<{
 	filePath: string;
 	fileVisibility: FileVisibility;
 	isListed: boolean;
+	downloadCount: number | null;
+	isDownloadCountEnabled: boolean;
+	isDownloadCountVisible: boolean;
+	canUseDownloadCount: boolean;
 	autoTokenId?: string | null;
 }>();
 const emit = defineEmits<{
 	(e: 'update:fileVisibility', value: FileVisibility): void;
 	(e: 'update:isListed', value: boolean): void;
+	(e: 'update:isDownloadCountEnabled', value: boolean): void;
+	(e: 'update:isDownloadCountVisible', value: boolean): void;
 	(e: 'tokenDeleted', tokenId: string): void;
 }>();
 
@@ -47,6 +53,8 @@ const deleteError = ref('');
 
 const editVisibility = ref<FileVisibility>(props.fileVisibility);
 const editIsListed = ref(props.isListed);
+const editIsDownloadCountEnabled = ref(props.isDownloadCountEnabled);
+const editIsDownloadCountVisible = ref(props.isDownloadCountVisible);
 const editPassphrase = ref('');
 const visibilitySaving = ref(false);
 const visibilityError = ref('');
@@ -170,6 +178,8 @@ async function saveVisibility(): Promise<void> {
 			visibility: editVisibility.value,
 			isListed: editIsListed.value,
 			passphrase: editPassphrase.value || undefined,
+			isDownloadCountEnabled: editIsDownloadCountEnabled.value,
+			isDownloadCountVisible: editIsDownloadCountEnabled.value ? editIsDownloadCountVisible.value : false,
 		});
 		if (!result.ok) {
 			visibilityError.value = result.data.message;
@@ -177,6 +187,8 @@ async function saveVisibility(): Promise<void> {
 		}
 		emit('update:fileVisibility', editVisibility.value);
 		emit('update:isListed', editIsListed.value);
+		emit('update:isDownloadCountEnabled', editIsDownloadCountEnabled.value);
+		emit('update:isDownloadCountVisible', editIsDownloadCountEnabled.value ? editIsDownloadCountVisible.value : false);
 	} catch (e) {
 		visibilityError.value = String(e);
 	} finally {
@@ -189,6 +201,12 @@ watch(() => props.fileVisibility, (value) => {
 });
 watch(() => props.isListed, (value) => {
 	editIsListed.value = value;
+});
+watch(() => props.isDownloadCountEnabled, (value) => {
+	editIsDownloadCountEnabled.value = value;
+});
+watch(() => props.isDownloadCountVisible, (value) => {
+	editIsDownloadCountVisible.value = value;
 });
 
 onMounted(loadTokens);
@@ -203,6 +221,11 @@ onMounted(loadTokens);
           v-model:visibility="editVisibility"
           v-model:isListed="editIsListed"
           v-model:passphrase="editPassphrase"
+          v-model:isDownloadCountEnabled="editIsDownloadCountEnabled"
+          v-model:isDownloadCountVisible="editIsDownloadCountVisible"
+          :can-use-download-count="canUseDownloadCount"
+          :show-download-count-settings="true"
+          :download-count="downloadCount"
           :lock-visibility="fileVisibility === 'public'"
           passphrase-autocomplete="off"
         />

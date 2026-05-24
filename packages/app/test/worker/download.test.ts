@@ -40,6 +40,23 @@ async function setupPublicFile() {
 	return { token, bucketId, fileId };
 }
 
+async function setDownloadCountQuota(token: string, canUseDownloadCount: boolean): Promise<void> {
+	const res = await app.request('/api/admin/set-global-quota', {
+		method: 'POST',
+		headers: authHeaders(token),
+		body: JSON.stringify({ canUseDownloadCount }),
+	}, env);
+	expect(res.status).toBe(200);
+}
+
+async function getDownloadCount(fileId: string): Promise<number> {
+	const row = await env.DB
+		.prepare('SELECT download_count AS downloadCount FROM files WHERE id = ?')
+		.bind(fileId)
+		.first<{ downloadCount: number }>();
+	return row?.downloadCount ?? 0;
+}
+
 async function setupBucket(username: string) {
 	const { data } = await signup(username);
 	const token = String(data.token);
@@ -196,6 +213,126 @@ describe('GET /d/:fileId', () => {
 		expect(cachedRes.headers.get('Content-Type')).toMatch(/^multipart\/byteranges; boundary=cfw-fileup-[0-9a-f-]+$/);
 		const cachedBody = new TextDecoder().decode(await cachedRes.arrayBuffer());
 		expect(cachedBody).toContain('Content-Range: bytes 6-10/11\r\n\r\nWorld');
+	});
+
+	test('counts downloads when enabled and visible in metadata', async () => {
+		const { token, fileId } = await setupPublicFile();
+		await env.DB.prepare('UPDATE users SET is_admin = 1').run();
+		await setDownloadCountQuota(token, true);
+
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketName: 'test_bucket',
+				filePath: 'hello.txt',
+				visibility: 'public',
+				isDownloadCountEnabled: true,
+				isDownloadCountVisible: true,
+			}),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const res = await app.request(`/d/${fileId}`, {}, env);
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('Hello World');
+		expect(await getDownloadCount(fileId)).toBe(1);
+
+		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=hello.txt', {}, env);
+		expect(metaRes.status).toBe(200);
+		const meta = await metaRes.json() as Record<string, unknown>;
+		expect(meta.downloadCount).toBe(1);
+	});
+
+	test('does not enable download count when quota disallows it', async () => {
+		const { token } = await setupPublicFile();
+
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketName: 'test_bucket',
+				filePath: 'hello.txt',
+				visibility: 'public',
+				isDownloadCountEnabled: true,
+			}),
+		}, env);
+		expect(updateRes.status).toBe(403);
+	});
+
+	test('counts only byte ranges that include the first byte', async () => {
+		const { token, fileId } = await setupPublicFile();
+		await env.DB.prepare('UPDATE users SET is_admin = 1').run();
+		await setDownloadCountQuota(token, true);
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketName: 'test_bucket',
+				filePath: 'hello.txt',
+				visibility: 'public',
+				isDownloadCountEnabled: true,
+			}),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const middleRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=6-10' },
+		}, env);
+		expect(middleRangeRes.status).toBe(206);
+		expect(await middleRangeRes.text()).toBe('World');
+		expect(await getDownloadCount(fileId)).toBe(0);
+
+		const firstRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=0-4' },
+		}, env);
+		expect(firstRangeRes.status).toBe(206);
+		expect(await firstRangeRes.text()).toBe('Hello');
+		expect(await getDownloadCount(fileId)).toBe(1);
+	});
+
+	test('does not count downloads by the authenticated file owner', async () => {
+		const { token, fileId } = await setupPublicFile();
+		await env.DB.prepare('UPDATE users SET is_admin = 1').run();
+		await setDownloadCountQuota(token, true);
+		const updateRes = await app.request('/api/files/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				bucketName: 'test_bucket',
+				filePath: 'hello.txt',
+				visibility: 'public',
+				isDownloadCountEnabled: true,
+			}),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const ownerRes = await app.request(`/d/${fileId}`, {
+			headers: authHeaders(token),
+		}, env);
+		expect(ownerRes.status).toBe(200);
+		expect(await ownerRes.text()).toBe('Hello World');
+		expect(await getDownloadCount(fileId)).toBe(0);
+	});
+
+	test('does not expose download count when counting is disabled', async () => {
+		const { token, fileId } = await setupPublicFile();
+		await env.DB
+			.prepare('UPDATE files SET download_count = 7, is_download_count_enabled = 0, is_download_count_visible = 1 WHERE id = ?')
+			.bind(fileId)
+			.run();
+
+		const ownerMetaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=hello.txt', {
+			headers: authHeaders(token),
+		}, env);
+		expect(ownerMetaRes.status).toBe(200);
+		const ownerMeta = await ownerMetaRes.json() as Record<string, unknown>;
+		expect(ownerMeta.downloadCount).toBeUndefined();
+
+		const publicMetaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=hello.txt', {}, env);
+		expect(publicMetaRes.status).toBe(200);
+		const publicMeta = await publicMetaRes.json() as Record<string, unknown>;
+		expect(publicMeta.downloadCount).toBeUndefined();
 	});
 
 	test('combines overlapping byte ranges before streaming multipart response', async () => {

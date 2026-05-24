@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import * as v from 'valibot';
 import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -12,6 +12,7 @@ interface QuotaForm {
 	maxBucketSizeBytes: number | null;
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
+	canUseDownloadCount: boolean;
 }
 
 const quotaValueSchema = v.nullable(v.pipe(
@@ -19,8 +20,15 @@ const quotaValueSchema = v.nullable(v.pipe(
 	v.integer('整数を入力してください'),
 	v.minValue(0, '0以上の数値を入力してください'),
 ));
+const booleanSettingSchema = v.picklist(['true', 'false']);
 
-const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null });
+const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null, canUseDownloadCount: false });
+const canUseDownloadCountSetting = computed<'true' | 'false'>({
+	get: () => quota.value.canUseDownloadCount ? 'true' : 'false',
+	set: value => {
+		quota.value.canUseDownloadCount = value === 'true';
+	},
+});
 const loading = ref(true);
 const saving = ref(false);
 const error = ref('');
@@ -39,6 +47,7 @@ async function fetchQuota(): Promise<void> {
 			maxBucketSizeBytes: result.data.maxBucketSizeBytes ?? null,
 			maxFilesPerBucket: result.data.maxFilesPerBucket ?? null,
 			maxDailyUploads: result.data.maxDailyUploads ?? null,
+			canUseDownloadCount: result.data.canUseDownloadCount ?? false,
 		};
 	} catch (e) {
 		error.value = String(e);
@@ -118,6 +127,14 @@ async function saveQuota(): Promise<void> {
           :show-save-button="false"
           :save-on-change="false"
         />
+        <SettingItem
+          v-model="canUseDownloadCountSetting"
+          :schema="booleanSettingSchema"
+          title="DL数カウントを許可"
+          :saving="saving"
+          :show-save-button="false"
+          :save-on-change="false"
+        />
         <div :class="$style.actions">
           <button type="button" class="btn btn-primary" :disabled="saving" @click="saveQuota">
             {{ saving ? '保存中…' : '保存' }}
@@ -144,4 +161,5 @@ async function saveQuota(): Promise<void> {
   display: flex;
   justify-content: flex-end;
 }
+
 </style>

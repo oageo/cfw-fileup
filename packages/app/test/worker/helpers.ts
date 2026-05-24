@@ -12,6 +12,7 @@ import migration0008 from '../../migrations/0008_slim_terror.sql?raw';
 import migration0009 from '../../migrations/0009_secret_bishop.sql?raw';
 import migration0010 from '../../migrations/0010_mean_maestro.sql?raw';
 import migration0011 from '../../migrations/0011_icy_lorna_dane.sql?raw';
+import migration0012 from '../../migrations/0012_overjoyed_sphinx.sql?raw';
 
 export { env, app };
 
@@ -28,6 +29,7 @@ const migrations = [
 	migration0009,
 	migration0010,
 	migration0011,
+	migration0012,
 ] as const;
 
 const tables = [

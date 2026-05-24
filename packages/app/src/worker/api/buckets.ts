@@ -134,6 +134,7 @@ app.post(
 		return c.json({
 			buckets: userBuckets,
 			maxBucketSizeBytes: quota.maxBucketSizeBytes,
+			canUseDownloadCount: quota.canUseDownloadCount,
 		}, 200);
 	}, getResponseDefWithAuth('/api/buckets/list')),
 );

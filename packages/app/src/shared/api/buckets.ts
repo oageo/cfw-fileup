@@ -38,6 +38,7 @@ export const bucketsApiDef = {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
 				buckets: v.array(v.object({ id: v.string(), name: v.string(), usedBytes: v.number() })),
 				maxBucketSizeBytes: v.nullable(v.number()),
+				canUseDownloadCount: v.boolean(),
 			}) } } },
 		},
 	},
