@@ -275,14 +275,10 @@ function applyRangeRequest(response: Response, rangeHeader: string | null, ifRan
 	);
 }
 
-function shouldCountDownload(rangeHeader: string | null, size: number | null | undefined): boolean {
-	if (rangeHeader === null) return true;
-	const safeSize = size ?? 0;
-	if (!Number.isSafeInteger(safeSize) || safeSize < 0) return false;
-	const range = parseByteRange(rangeHeader, safeSize);
-	if (range.type === 'ignore') return true;
-	if (range.type === 'invalid') return false;
-	return range.ranges.some(r => r.start === 0);
+function shouldCountDownload(resolvedRange: ResolvedRangeRequest): boolean {
+	if (resolvedRange.type === 'none') return true;
+	if (resolvedRange.type === 'invalid') return false;
+	return resolvedRange.ranges.some(r => r.start === 0);
 }
 
 function createMultipartRangeStreamFromR2(options: {
@@ -482,6 +478,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		putMissingFileCache(c.env, fileId, response, (promise) => c.executionCtx.waitUntil(promise));
 		return response;
 	}
+	const fileRecord = file;
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 
@@ -500,18 +497,18 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 				.innerJoin(users, eq(tokens.userId, users.id))
 				.where(eq(tokens.token, token))
 				.get();
-			return !!tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended && tokenRecord.userId === file.userId;
+			return !!tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended && tokenRecord.userId === fileRecord.userId;
 		})();
 		return requesterIsOwnerPromise;
 	}
-	async function countDownload(size: number | null | undefined = file.size): Promise<void> {
-		if (!file.isDownloadCountEnabled) return;
-		if (!shouldCountDownload(rangeHeader, size)) return;
+	async function countDownload(resolvedRange: ResolvedRangeRequest = { type: 'none' }): Promise<void> {
+		if (!fileRecord.isDownloadCountEnabled) return;
+		if (!shouldCountDownload(resolvedRange)) return;
 		if (await requesterIsOwner()) return;
 		await db
 			.update(files)
 			.set({ downloadCount: sql`${files.downloadCount} + 1` })
-			.where(eq(files.id, file.id));
+			.where(eq(files.id, fileRecord.id));
 	}
 	if (download.entryPath !== null && download.entryPath.length > MAX_FILE_PATH_LENGTH) {
 		throw apiError(400, 'INVALID_FILE_PATH', `file must be at most ${MAX_FILE_PATH_LENGTH} characters`);
@@ -658,7 +655,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		if (!shouldBypassCache) {
 			const cached = await matchDownloadCache(cacheTarget.mode, cacheTarget.entryPath);
 			if (cached !== null) {
-				await countDownload(file.size);
+				await countDownload(plainRange);
 				return cached;
 			}
 		}
@@ -713,7 +710,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			}),
 		});
 		putDownloadCache(response, 'tar-entry', requestedEntryPath);
-		await countDownload(indexEntry.size);
+		await countDownload();
 		return response;
 	}
 
@@ -799,7 +796,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', requestedEntryPath);
-			await countDownload(indexEntry.aEnd - indexEntry.aStart);
+			await countDownload();
 			return response;
 		} catch (error) {
 			console.error('Failed to fetch from R2:', error);
@@ -829,7 +826,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			if (!rangeObject?.body) {
 				const cached = await matchDownloadCache('plain');
 				if (cached !== null) {
-					await countDownload(plainSize);
+					await countDownload(plainRange);
 					return cached;
 				}
 				throw apiError(404, 'FILE_NOT_FOUND_IN_STORAGE');
@@ -839,7 +836,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			plainHeaders.set('Content-Range', `bytes ${singleRange.start}-${singleRange.end}/${plainSize}`);
 			plainHeaders.set('Content-Length', String(singleRange.end - singleRange.start + 1));
 
-			await countDownload(plainSize);
+			await countDownload(plainRange);
 			return new Response(rangeObject.body, {
 				status: 206,
 				statusText: 'Partial Content',
@@ -851,7 +848,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		if (rangeSource === null) {
 			const cached = await matchDownloadCache('plain');
 			if (cached !== null) {
-				await countDownload(plainSize);
+				await countDownload(plainRange);
 				return cached;
 			}
 			throw apiError(404, 'FILE_NOT_FOUND_IN_STORAGE');
@@ -865,7 +862,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		plainHeaders.delete('Content-Range');
 		plainHeaders.set('Content-Length', String(multipartRangeContentLength(boundary, contentType, plainRange.ranges, plainSize)));
 
-		await countDownload(plainSize);
+		await countDownload(plainRange);
 		return new Response(createMultipartRangeStreamFromR2({
 			r2: c.env.R2,
 			key: file.r2Key,
@@ -890,7 +887,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		headers: plainHeaders,
 	});
 	putDownloadCache(response, 'plain');
-	await countDownload(plainSize);
+	await countDownload(plainRange);
 	return rangeHeader === null && ifRangeHeader === null
 		? addAcceptRangesForFullResponse(response)
 		: applyRangeRequest(response, rangeHeader, ifRangeHeader);

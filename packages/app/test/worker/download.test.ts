@@ -289,6 +289,13 @@ describe('GET /d/:fileId', () => {
 		expect(firstRangeRes.status).toBe(206);
 		expect(await firstRangeRes.text()).toBe('Hello');
 		expect(await getDownloadCount(fileId)).toBe(1);
+
+		const staleIfRangeRes = await app.request(`/d/${fileId}`, {
+			headers: { Range: 'bytes=6-10', 'If-Range': new Date(0).toUTCString() },
+		}, env);
+		expect(staleIfRangeRes.status).toBe(200);
+		expect(await staleIfRangeRes.text()).toBe('Hello World');
+		expect(await getDownloadCount(fileId)).toBe(2);
 	});
 
 	test('does not count downloads by the authenticated file owner', async () => {
