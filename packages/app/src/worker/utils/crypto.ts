@@ -1,8 +1,34 @@
 const ITERATIONS = 100_000;
-const HASH_LENGTH = 256;
+const HASH_LENGTH_BITS = 256;
+const HASH_LENGTH_BYTES = HASH_LENGTH_BITS / 8;
 const SALT_LENGTH = 16;
 
-export async function hashPassword(password: string): Promise<string> {
+// workerd supports Uint8Array base64 helpers, but Node v24.16.0 does not yet.
+// Keep this btoa/atob path until the local test runtime catches up.
+export function bytesToBase64Url(bytes: Uint8Array): string {
+	let binary = '';
+	for (let i = 0; i < bytes.length; i++) {
+		binary += String.fromCharCode(bytes[i]!);
+	}
+	return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> | null {
+	try {
+		const normalized = value.replaceAll('-', '+').replaceAll('_', '/');
+		const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+		const binary = atob(padded);
+		const bytes = new Uint8Array(binary.length);
+		for (let i = 0; i < binary.length; i++) {
+			bytes[i] = binary.charCodeAt(i);
+		}
+		return bytes;
+	} catch {
+		return null;
+	}
+}
+
+export async function hashPassword(password: string): Promise<Uint8Array> {
 	const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
 	const encoder = new TextEncoder();
 	const keyMaterial = await crypto.subtle.importKey(
@@ -21,26 +47,20 @@ export async function hashPassword(password: string): Promise<string> {
 			iterations: ITERATIONS,
 		},
 		keyMaterial,
-		HASH_LENGTH,
+		HASH_LENGTH_BITS,
 	);
 
-	const saltHex = Array.from(salt)
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
-	const hashHex = Array.from(new Uint8Array(derivedBits))
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
-
-	return `${saltHex}:${hashHex}`;
+	const result = new Uint8Array(SALT_LENGTH + HASH_LENGTH_BYTES);
+	result.set(salt, 0);
+	result.set(new Uint8Array(derivedBits), SALT_LENGTH);
+	return result;
 }
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-	const [saltHex, expectedHashHex] = stored.split(':');
-	if (!saltHex || !expectedHashHex) return false;
+export async function verifyPassword(password: string, stored: Uint8Array): Promise<boolean> {
+	if (stored.length !== SALT_LENGTH + HASH_LENGTH_BYTES) return false;
 
-	const salt = Uint8Array.from(
-		(saltHex.match(/.{2}/g) ?? []).map((byte) => parseInt(byte, 16)),
-	);
+	const salt = stored.slice(0, SALT_LENGTH);
+	const expectedHash = stored.slice(SALT_LENGTH);
 	const encoder = new TextEncoder();
 	const keyMaterial = await crypto.subtle.importKey(
 		'raw',
@@ -58,18 +78,18 @@ export async function verifyPassword(password: string, stored: string): Promise<
 			iterations: ITERATIONS,
 		},
 		keyMaterial,
-		HASH_LENGTH,
+		HASH_LENGTH_BITS,
 	);
 
-	const hashHex = Array.from(new Uint8Array(derivedBits))
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
-
-	return hashHex === expectedHashHex;
+	const hash = new Uint8Array(derivedBits);
+	return hash.length === expectedHash.length && hash.every((byte, i) => byte === expectedHash[i]);
 }
 
 export function generateToken(): string {
-	return Array.from(crypto.getRandomValues(new Uint8Array(32)))
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
+	return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+export function tokenToBytes(token: string): Uint8Array<ArrayBuffer> | null {
+	const bytes = base64UrlToBytes(token);
+	return bytes?.length === 32 ? bytes : null;
 }

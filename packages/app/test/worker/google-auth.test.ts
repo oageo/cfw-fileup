@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
-import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
+import { env, app, setupDb, clearDb, signup, signin, authHeaders, base64UrlToBytes } from './helpers';
 
 beforeAll(async () => {
 	await setupDb();
@@ -46,7 +46,7 @@ describe('GET /api/auth/google', () => {
 
 		const row = await env.DB
 			.prepare('SELECT signup_passphrase, signup_username FROM oauth_states WHERE state = ?')
-			.bind(state)
+			.bind(base64UrlToBytes(state ?? ''))
 			.first<{ signup_passphrase: string | null; signup_username: string | null }>();
 		expect(row?.signup_passphrase).toBe('secret');
 		expect(row?.signup_username).toBe('alice');

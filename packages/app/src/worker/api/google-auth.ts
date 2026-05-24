@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { eq, count, lt } from 'drizzle-orm';
+import { eq, count, lt, sql } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { generateToken } from '../utils/crypto';
+import { generateToken, tokenToBytes } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
@@ -62,10 +62,12 @@ app.get('/', async (c) => {
 	await db.delete(oauthStates).where(lt(oauthStates.expiresAt, Date.now()));
 
 	const state = generateToken();
+	const stateBytes = tokenToBytes(state);
+	if (stateBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 	const stateId = genEaidx(Date.now());
 	const expiresAt = Date.now() + STATE_TTL_MS;
 
-	await db.insert(oauthStates).values({ id: stateId, state, signupPassphrase: passphrase, signupUsername, expiresAt });
+	await db.insert(oauthStates).values({ id: stateId, state: stateBytes, signupPassphrase: passphrase, signupUsername, expiresAt });
 
 	const url = new URL(c.req.url);
 	const redirectUri = getRedirectUri(c.env, url);
@@ -101,10 +103,11 @@ app.get('/callback', async (c) => {
 	}
 
 	// Validate state (CSRF protection)
+	const stateBytes = tokenToBytes(state);
 	const storedState = await db
 		.select()
 		.from(oauthStates)
-		.where(eq(oauthStates.state, state))
+		.where(stateBytes === null ? sql`false` : eq(oauthStates.state, stateBytes))
 		.get();
 
 	if (!storedState || storedState.expiresAt < Date.now()) {
@@ -229,11 +232,13 @@ app.get('/callback', async (c) => {
 	// Issue session token
 	const tokenId = genEaidx(Date.now());
 	const tokenValue = generateToken();
+	const tokenBytes = tokenToBytes(tokenValue);
+	if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 	await db.insert(tokens).values({
 		id: tokenId,
 		userId: user.id,
-		token: tokenValue,
+		token: tokenBytes,
 	});
 	await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'google' }, user.id, tokenId);
 
@@ -251,7 +256,8 @@ app.post('/complete', async (c) => {
 
 	const db = getDb(c.env);
 
-	const tokenRecord = await db.select().from(tokens).where(eq(tokens.token, body.googleToken)).get();
+	const tokenBytes = tokenToBytes(body.googleToken);
+	const tokenRecord = await db.select().from(tokens).where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes)).get();
 	if (!tokenRecord || tokenRecord.isRevoked) {
 		throw apiError(401, 'INVALID_TOKEN');
 	}

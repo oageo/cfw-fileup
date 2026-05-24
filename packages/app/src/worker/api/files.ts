@@ -19,6 +19,7 @@ import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, has
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 import { recordModerationAuditLog, recordModerationEvent } from '../utils/moderation';
+import { tokenToBytes } from '../utils/crypto';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -33,11 +34,12 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const authorization = c.req.header('Authorization');
 		if (authorization?.startsWith('Bearer ')) {
 			const token = authorization.slice(7);
+			const tokenBytes = tokenToBytes(token);
 			const tokenRecord = await db
 				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
-				.where(eq(tokens.token, token))
+				.where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes))
 				.get();
 			isOwnerOrAdmin = !!tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended && (tokenRecord.isAdmin || tokenRecord.userId === bucket.userId);
 		}
@@ -166,11 +168,12 @@ app.get('/meta', async (c) => {
 	const authorization = c.req.header('Authorization');
 	if (authorization?.startsWith('Bearer ')) {
 		const token = authorization.slice(7);
+		const tokenBytes = tokenToBytes(token);
 		const tokenRecord = await db
 			.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 			.from(tokens)
 			.innerJoin(users, eq(tokens.userId, users.id))
-			.where(eq(tokens.token, token))
+			.where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes))
 			.get();
 		if (tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended) {
 			isOwner = tokenRecord.userId === bucket.userId;
@@ -216,10 +219,11 @@ app.get('/meta', async (c) => {
 		});
 	}
 	if (fileToken) {
+		const fileTokenBytes = tokenToBytes(fileToken);
 		const fileTokenRecord = await db
 			.select()
 			.from(fileAccessTokens)
-			.where(and(eq(fileAccessTokens.token, fileToken), eq(fileAccessTokens.fileId, file.id)))
+			.where(and(fileTokenBytes === null ? sql`false` : eq(fileAccessTokens.token, fileTokenBytes), eq(fileAccessTokens.fileId, file.id)))
 			.get();
 		if (!fileTokenRecord) throw apiError(403, 'FORBIDDEN');
 		if (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now()) {

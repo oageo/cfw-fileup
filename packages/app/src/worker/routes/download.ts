@@ -9,6 +9,7 @@ import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
 import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 import { apiError, createApiErrorResponse } from '../utils/api-error';
+import { tokenToBytes } from '../utils/crypto';
 
 const app = new Hono<{ Bindings: Env }>();
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
@@ -491,11 +492,12 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			const authorization = c.req.header('Authorization');
 			if (!authorization?.startsWith('Bearer ')) return false;
 			const token = authorization.slice(7);
+			const tokenBytes = tokenToBytes(token);
 			const tokenRecord = await db
 				.select({ userId: tokens.userId, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
-				.where(eq(tokens.token, token))
+				.where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes))
 				.get();
 			return !!tokenRecord && !tokenRecord.isRevoked && !tokenRecord.isSuspended && tokenRecord.userId === fileRecord.userId;
 		})();
@@ -586,10 +588,11 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		const fileToken = c.req.query('token');
 		if (fileToken && !file.isModerationForcedPrivate) {
 			if (fileToken.length > MAX_ID_LENGTH) throw apiError(400, 'TOKEN_IS_REQUIRED', `token must be at most ${MAX_ID_LENGTH} characters`);
+			const fileTokenBytes = tokenToBytes(fileToken);
 			const fileTokenRecord = await db
 				.select()
 				.from(fileAccessTokens)
-				.where(and(eq(fileAccessTokens.token, fileToken), eq(fileAccessTokens.fileId, file.id)))
+				.where(and(fileTokenBytes === null ? sql`false` : eq(fileAccessTokens.token, fileTokenBytes), eq(fileAccessTokens.fileId, file.id)))
 				.get();
 			if (!fileTokenRecord) throw apiError(403, 'FORBIDDEN');
 			if (fileTokenRecord.expiresAt !== null && fileTokenRecord.expiresAt < Date.now()) {
@@ -608,11 +611,12 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			const authorization = c.req.header('Authorization');
 			if (!authorization?.startsWith('Bearer ')) throw apiError(403, 'FORBIDDEN');
 			const token = authorization.slice(7);
+			const tokenBytes = tokenToBytes(token);
 			const tokenRecord = await db
 				.select({ tokenId: tokens.id, userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
-				.where(eq(tokens.token, token))
+				.where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes))
 				.get();
 			if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended || (!tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId)) {
 				throw apiError(403, 'FORBIDDEN');

@@ -4,7 +4,7 @@ import { eq, count, and } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, usedUsernames, passkeys, backupCodes } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { hashPassword, verifyPassword, generateToken } from '../utils/crypto';
+import { hashPassword, tokenToBytes, verifyPassword, generateToken } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { verifyTurnstile } from '../utils/turnstile';
 import { validateUsername } from '../utils/name-validation';
@@ -14,19 +14,10 @@ import { recordModerationEvent } from '../utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
-function uint8ArrayToBase64(arr: Uint8Array): string {
-	let binary = '';
-	for (let i = 0; i < arr.length; i++) {
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		binary += String.fromCharCode(arr[i]!);
-	}
-	return btoa(binary);
-}
-
-async function hashBackupCode(code: string): Promise<string> {
+async function hashBackupCode(code: string): Promise<Uint8Array> {
 	const data = new TextEncoder().encode(code);
 	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-	return uint8ArrayToBase64(new Uint8Array(hashBuffer));
+	return new Uint8Array(hashBuffer);
 }
 
 app.post(
@@ -108,11 +99,13 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
+		const tokenBytes = tokenToBytes(tokenValue);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 		await db.insert(tokens).values({
 			id: tokenId,
 			userId,
-			token: tokenValue,
+			token: tokenBytes,
 		});
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'signup' }, userId, tokenId);
 
@@ -192,11 +185,13 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
+		const tokenBytes = tokenToBytes(tokenValue);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 		await db.insert(tokens).values({
 			id: tokenId,
 			userId: user.id,
-			token: tokenValue,
+			token: tokenBytes,
 		});
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'signin' }, user.id, tokenId);
 

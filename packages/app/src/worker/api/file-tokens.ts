@@ -3,7 +3,7 @@ import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and } from 'drizzle-orm';
 import { buckets, files, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { generateToken } from '../utils/crypto';
+import { generateToken, tokenToBytes } from '../utils/crypto';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { authMiddleware } from '../middleware/auth';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -43,9 +43,11 @@ app.post(
 
 		const id = genEaidx(Date.now());
 		const token = generateToken();
+		const tokenBytes = tokenToBytes(token);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		const expiresAt = body.expiresIn != null ? Date.now() + body.expiresIn * 1000 : null;
 
-		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token, expiresAt });
+		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token: tokenBytes, expiresAt });
 		await recordModerationEvent(c, 'file_token_created', {
 			tokenId: id,
 			fileId: file.id,
@@ -161,9 +163,11 @@ app.post(
 
 		const id = genEaidx(Date.now());
 		const token = generateToken();
+		const tokenBytes = tokenToBytes(token);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		const expiresAt = Date.now() + 3600 * 1000;
 
-		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token, expiresAt });
+		await db.insert(fileAccessTokens).values({ id, fileId: file.id, token: tokenBytes, expiresAt });
 		await recordModerationEvent(c, 'file_token_created', {
 			tokenId: id,
 			fileId: file.id,

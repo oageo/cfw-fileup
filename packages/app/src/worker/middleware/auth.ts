@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { tokens, users } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { apiError } from '../utils/api-error';
+import { tokenToBytes } from '../utils/crypto';
 
 export type AuthUser = {
 	id: string;
@@ -26,6 +27,8 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 	}
 
 	const token = authorization.slice(7);
+	const tokenBytes = tokenToBytes(token);
+	if (tokenBytes === null) throw apiError(401, 'UNAUTHORIZED');
 	const db = getDb(c.env);
 
 	const tokenRecord = await db
@@ -40,7 +43,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 		})
 		.from(tokens)
 		.innerJoin(users, eq(tokens.userId, users.id))
-		.where(eq(tokens.token, token))
+		.where(eq(tokens.token, tokenBytes))
 		.get();
 
 	if (!tokenRecord) {

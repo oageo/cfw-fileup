@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { eq, count, lt } from 'drizzle-orm';
+import { eq, count, lt, sql } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
 import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { generateToken } from '../utils/crypto';
+import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
 import { validateUsername } from '../utils/name-validation';
 import { isValidNameFormat } from '../../shared/name-validation';
@@ -45,10 +45,7 @@ interface MisskeyAccount {
  */
 function generateCodeVerifier(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
-	return btoa(String.fromCharCode(...bytes))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=/g, '');
+	return bytesToBase64Url(bytes);
 }
 
 /**
@@ -58,10 +55,7 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
 	const encoder = new TextEncoder();
 	const data = encoder.encode(verifier);
 	const digest = await crypto.subtle.digest('SHA-256', data);
-	return btoa(String.fromCharCode(...new Uint8Array(digest)))
-		.replace(/\+/g, '-')
-		.replace(/\//g, '_')
-		.replace(/=/g, '');
+	return bytesToBase64Url(new Uint8Array(digest));
 }
 
 function getOrigin(urlString: string): string | null {
@@ -316,15 +310,19 @@ app.get('/begin', async (c) => {
 	await db.delete(oauthStates).where(lt(oauthStates.expiresAt, Date.now()));
 
 	const state = generateToken();
+	const stateBytes = tokenToBytes(state);
+	if (stateBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 	const codeVerifier = generateCodeVerifier();
+	const codeVerifierBytes = base64UrlToBytes(codeVerifier);
+	if (codeVerifierBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 	const codeChallenge = await generateCodeChallenge(codeVerifier);
 	const stateId = genEaidx(Date.now());
 	const expiresAt = Date.now() + STATE_TTL_MS;
 
 	await db.insert(oauthStates).values({
 		id: stateId,
-		state,
-		codeVerifier,
+		state: stateBytes,
+		codeVerifier: codeVerifierBytes,
 		profileUrl,
 		signupPassphrase: passphrase,
 		signupUsername,
@@ -363,22 +361,24 @@ app.get('/callback', async (c) => {
 	}
 
 	// Validate state (CSRF protection)
+	const stateBytes = tokenToBytes(state);
 	const storedState = await db
 		.select()
 		.from(oauthStates)
-		.where(eq(oauthStates.state, state))
+		.where(stateBytes === null ? sql`false` : eq(oauthStates.state, stateBytes))
 		.get();
 
 	if (!storedState || storedState.expiresAt < Date.now()) {
 		return c.redirect('/signin?indieauth_error=invalid_state', 302);
 	}
 
-	const { codeVerifier, profileUrl } = storedState;
+	const { codeVerifier: storedCodeVerifier, profileUrl } = storedState;
 
-	if (!codeVerifier || !profileUrl) {
+	if (!storedCodeVerifier || !profileUrl) {
 		await db.delete(oauthStates).where(eq(oauthStates.id, storedState.id));
 		return c.redirect('/signin?indieauth_error=missing_verifier', 302);
 	}
+	const codeVerifier = bytesToBase64Url(storedCodeVerifier);
 
 	// Delete the used state
 	await db.delete(oauthStates).where(eq(oauthStates.id, storedState.id));
@@ -507,11 +507,13 @@ app.get('/callback', async (c) => {
 	// Issue session token
 	const tokenId = genEaidx(Date.now());
 	const tokenValue = generateToken();
+	const tokenBytes = tokenToBytes(tokenValue);
+	if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 
 	await db.insert(tokens).values({
 		id: tokenId,
 		userId: user.id,
-		token: tokenValue,
+		token: tokenBytes,
 	});
 	await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'indieauth' }, user.id, tokenId);
 
@@ -527,7 +529,8 @@ app.post('/complete', async (c) => {
 	}
 
 	const db = getDb(c.env);
-	const tokenRecord = await db.select().from(tokens).where(eq(tokens.token, body.indieauthToken)).get();
+	const tokenBytes = tokenToBytes(body.indieauthToken);
+	const tokenRecord = await db.select().from(tokens).where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes)).get();
 	if (!tokenRecord || tokenRecord.isRevoked) {
 		throw apiError(401, 'INVALID_TOKEN');
 	}

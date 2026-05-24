@@ -1,35 +1,22 @@
 import { env } from 'cloudflare:workers';
 import app from '../../src/worker/index';
-import migration0000 from '../../migrations/0000_rich_gressill.sql?raw';
-import migration0001 from '../../migrations/0001_blushing_sandman.sql?raw';
-import migration0002 from '../../migrations/0002_pretty_talos.sql?raw';
-import migration0003 from '../../migrations/0003_overjoyed_pyro.sql?raw';
-import migration0004 from '../../migrations/0004_parched_hairball.sql?raw';
-import migration0005 from '../../migrations/0005_flashy_inhumans.sql?raw';
-import migration0006 from '../../migrations/0006_easy_scream.sql?raw';
-import migration0007 from '../../migrations/0007_famous_vermin.sql?raw';
-import migration0008 from '../../migrations/0008_slim_terror.sql?raw';
-import migration0009 from '../../migrations/0009_secret_bishop.sql?raw';
-import migration0010 from '../../migrations/0010_mean_maestro.sql?raw';
-import migration0011 from '../../migrations/0011_icy_lorna_dane.sql?raw';
-import migration0012 from '../../migrations/0012_overjoyed_sphinx.sql?raw';
+import migration0000 from '../../migrations/0000_oval_klaw.sql?raw';
 
 export { env, app };
 
+export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+	const normalized = value.replaceAll('-', '+').replaceAll('_', '/');
+	const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+	const binary = atob(padded);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) {
+		bytes[i] = binary.charCodeAt(i);
+	}
+	return bytes;
+}
+
 const migrations = [
 	migration0000,
-	migration0001,
-	migration0002,
-	migration0003,
-	migration0004,
-	migration0005,
-	migration0006,
-	migration0007,
-	migration0008,
-	migration0009,
-	migration0010,
-	migration0011,
-	migration0012,
 ] as const;
 
 const tables = [

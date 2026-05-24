@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, type JsonCtx } from '../../shared/api';
 import { fileReports, files, tokens, users } from '../scheme/index';
@@ -9,6 +9,7 @@ import { apiError } from '../utils/api-error';
 import { omitResAndReq } from '../utils/omit';
 import { verifyTurnstile } from '../utils/turnstile';
 import { getRequestIp } from '../utils/request-ip';
+import { tokenToBytes } from '../utils/crypto';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -17,6 +18,7 @@ async function getOptionalReporterUser(c: JsonCtx<'/api/file-reports/create', En
 	if (!authorization?.startsWith('Bearer ')) return null;
 
 	const token = authorization.slice(7);
+	const tokenBytes = tokenToBytes(token);
 	const db = getDb(c.env);
 	const tokenRecord = await db
 		.select({
@@ -27,7 +29,7 @@ async function getOptionalReporterUser(c: JsonCtx<'/api/file-reports/create', En
 		})
 		.from(tokens)
 		.innerJoin(users, eq(tokens.userId, users.id))
-		.where(eq(tokens.token, token))
+		.where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes))
 		.get();
 
 	if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended) return null;

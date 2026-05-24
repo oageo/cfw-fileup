@@ -12,7 +12,7 @@ import { passkeys, passkeysChallenges, backupCodes, tokens, users, appSettings, 
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
-import { generateToken, verifyPassword } from '../utils/crypto';
+import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes, verifyPassword } from '../utils/crypto';
 import { isValidNameFormat } from '../../shared/name-validation';
 import { validateUsername } from '../utils/name-validation';
 import { verifyTurnstile } from '../utils/turnstile';
@@ -23,29 +23,18 @@ import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 
 const app = new Hono<{ Bindings: Env }>();
 
-/** Encode Uint8Array to base64 string (standard base64) */
-function uint8ArrayToBase64(arr: Uint8Array): string {
-	let binary = '';
-	for (let i = 0; i < arr.length; i++) {
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		binary += String.fromCharCode(arr[i]!);
-	}
-	return btoa(binary);
-}
-
-/** Decode base64 string to Uint8Array<ArrayBuffer> */
-function base64ToUint8Array(b64: string): Uint8Array<ArrayBuffer> {
-	const binary = atob(b64);
-	const buf = new ArrayBuffer(binary.length);
-	const arr = new Uint8Array(buf);
-	for (let i = 0; i < binary.length; i++) {
-		arr[i] = binary.charCodeAt(i);
-	}
-	return arr;
+function requireBase64UrlBytes(value: string): Uint8Array {
+	const bytes = base64UrlToBytes(value);
+	if (bytes === null) throw apiError(400, 'INVALID_CHALLENGE_DATA');
+	return bytes;
 }
 
 function stringToUserId(value: string): Uint8Array<ArrayBuffer> {
 	return new TextEncoder().encode(value);
+}
+
+function toArrayBufferBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+	return new Uint8Array(bytes);
 }
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -73,10 +62,10 @@ function generateBackupCode(): string {
 }
 
 /** Hash a backup code using SHA-256 */
-async function hashBackupCode(code: string): Promise<string> {
+async function hashBackupCode(code: string): Promise<Uint8Array> {
 	const data = new TextEncoder().encode(code);
 	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-	return uint8ArrayToBase64(new Uint8Array(hashBuffer));
+	return new Uint8Array(hashBuffer);
 }
 
 // ─── Register begin (requires auth) ────────────────────────────────────────
@@ -104,7 +93,7 @@ app.post(
 			userDisplayName: user.username,
 			attestationType: 'none',
 			excludeCredentials: existingPasskeys.map((pk) => ({
-				id: pk.credentialId,
+				id: bytesToBase64Url(pk.credentialId),
 				transports: pk.transports
 					? (JSON.parse(pk.transports) as AuthenticatorTransportFuture[])
 					: undefined,
@@ -118,7 +107,7 @@ app.post(
 		const challengeId = genEaidx(Date.now());
 		await db.insert(passkeysChallenges).values({
 			id: challengeId,
-			challenge: options.challenge,
+			challenge: requireBase64UrlBytes(options.challenge),
 			userId: user.id,
 			type: 'register',
 			expiresAt: Date.now() + CHALLENGE_TTL_MS,
@@ -167,7 +156,7 @@ app.post(
 		try {
 			verification = await verifyRegistrationResponse({
 				response: credential,
-				expectedChallenge: challengeRecord.challenge,
+				expectedChallenge: bytesToBase64Url(challengeRecord.challenge),
 				expectedOrigin: origin,
 				expectedRPID: rpID,
 			});
@@ -185,8 +174,8 @@ app.post(
 		await db.insert(passkeys).values({
 			id: passkeyId,
 			userId: user.id,
-			credentialId: cred.id,
-			publicKey: uint8ArrayToBase64(cred.publicKey),
+			credentialId: requireBase64UrlBytes(cred.id),
+			publicKey: cred.publicKey,
 			counter: cred.counter,
 			transports: credential.response.transports
 				? JSON.stringify(credential.response.transports)
@@ -218,7 +207,7 @@ app.post(
 		const challengeId = genEaidx(Date.now());
 		await db.insert(passkeysChallenges).values({
 			id: challengeId,
-			challenge: options.challenge,
+			challenge: requireBase64UrlBytes(options.challenge),
 			userId: null,
 			type: 'authenticate',
 			expiresAt: Date.now() + CHALLENGE_TTL_MS,
@@ -263,7 +252,7 @@ app.post(
 		const passkeyRecord = await db
 			.select()
 			.from(passkeys)
-			.where(eq(passkeys.credentialId, credential.id))
+			.where(eq(passkeys.credentialId, requireBase64UrlBytes(credential.id)))
 			.get();
 
 		if (!passkeyRecord) {
@@ -274,12 +263,12 @@ app.post(
 		try {
 			verification = await verifyAuthenticationResponse({
 				response: credential,
-				expectedChallenge: challengeRecord.challenge,
+				expectedChallenge: bytesToBase64Url(challengeRecord.challenge),
 				expectedOrigin: origin,
 				expectedRPID: rpID,
 				credential: {
-					id: passkeyRecord.credentialId,
-					publicKey: base64ToUint8Array(passkeyRecord.publicKey),
+					id: bytesToBase64Url(passkeyRecord.credentialId),
+					publicKey: toArrayBufferBytes(passkeyRecord.publicKey),
 					counter: passkeyRecord.counter,
 					transports: passkeyRecord.transports
 						? (JSON.parse(passkeyRecord.transports) as AuthenticatorTransportFuture[])
@@ -309,7 +298,9 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenValue });
+		const tokenBytes = tokenToBytes(tokenValue);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
+		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey' }, user.id, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
@@ -460,7 +451,9 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenValue });
+		const tokenBytes = tokenToBytes(tokenValue);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
+		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'backup_code' }, user.id, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
@@ -542,7 +535,7 @@ app.post(
 		const challengeId = genEaidx(Date.now());
 		await db.insert(passkeysChallenges).values({
 			id: challengeId,
-			challenge: options.challenge,
+			challenge: requireBase64UrlBytes(options.challenge),
 			userId: `signup:${tempUserId}:${trimmed}`,
 			type: 'signup',
 			expiresAt: Date.now() + CHALLENGE_TTL_MS,
@@ -605,7 +598,7 @@ app.post(
 		try {
 			verification = await verifyRegistrationResponse({
 				response: credential,
-				expectedChallenge: challengeRecord.challenge,
+				expectedChallenge: bytesToBase64Url(challengeRecord.challenge),
 				expectedOrigin: origin,
 				expectedRPID: rpID,
 			});
@@ -629,8 +622,8 @@ app.post(
 		await db.insert(passkeys).values({
 			id: passkeyId,
 			userId,
-			credentialId: cred.id,
-			publicKey: uint8ArrayToBase64(cred.publicKey),
+			credentialId: requireBase64UrlBytes(cred.id),
+			publicKey: cred.publicKey,
 			counter: cred.counter,
 			transports: credential.response.transports ? JSON.stringify(credential.response.transports) : null,
 			name: body.passkeyName?.trim() ?? null,
@@ -639,7 +632,9 @@ app.post(
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();
-		await db.insert(tokens).values({ id: tokenId, userId, token: tokenValue });
+		const tokenBytes = tokenToBytes(tokenValue);
+		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
+		await db.insert(tokens).values({ id: tokenId, userId, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey_signup' }, userId, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
