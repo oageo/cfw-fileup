@@ -2,8 +2,8 @@ import { Hono, type Context } from 'hono';
 import { eq, and, like } from 'drizzle-orm';
 import { createBgzfBlock } from 'bgzf';
 import parseRange from 'range-parser';
-import { aidxRegExp, parseEaidx } from '../../shared/eaid-x';
-import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens } from '../scheme/index';
+import { aidxRegExp, genEaidx, parseEaidx } from '../../shared/eaid-x';
+import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens, moderationAuditLogs } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
@@ -550,9 +550,9 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		}
 	}
 
-	if (file.visibility !== 'public') {
+	if (file.visibility !== 'public' || file.isModerationForcedPrivate) {
 		const fileToken = c.req.query('token');
-		if (fileToken) {
+		if (fileToken && !file.isModerationForcedPrivate) {
 			if (fileToken.length > MAX_ID_LENGTH) throw apiError(400, 'TOKEN_IS_REQUIRED', `token must be at most ${MAX_ID_LENGTH} characters`);
 			const fileTokenRecord = await db
 				.select()
@@ -577,13 +577,30 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			if (!authorization?.startsWith('Bearer ')) throw apiError(403, 'FORBIDDEN');
 			const token = authorization.slice(7);
 			const tokenRecord = await db
-				.select({ userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
+				.select({ tokenId: tokens.id, userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
 				.where(eq(tokens.token, token))
 				.get();
 			if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended || (!tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId)) {
 				throw apiError(403, 'FORBIDDEN');
+			}
+			if (tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId) {
+				await db.insert(moderationAuditLogs).values({
+					id: genEaidx(Date.now()),
+					adminUserId: tokenRecord.userId,
+					action: 'admin_file_previewed',
+					targetFileId: file.id,
+					targetUserId: file.userId,
+					data: {
+						bucketId: bucket.id,
+						bucketName: bucket.name,
+						path: file.path,
+						visibility: file.visibility,
+						isModerationForcedPrivate: file.isModerationForcedPrivate,
+						entryPath,
+					},
+				});
 			}
 		}
 	}

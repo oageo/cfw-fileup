@@ -64,6 +64,7 @@ async function resolveActivityPubHref(c: AppContext): Promise<string | null> {
 			eq(files.isClosed, true),
 			eq(files.visibility, 'public'),
 			eq(files.isListed, true),
+			eq(files.isModerationForcedPrivate, false),
 		))
 		.get();
 	if (!file) return null;

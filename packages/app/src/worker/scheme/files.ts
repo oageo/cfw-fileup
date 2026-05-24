@@ -12,6 +12,7 @@ export const files = sqliteTable('files', {
 	mimeType: text('mime_type'),
 	visibility: text('visibility', { enum: ['public', 'private', 'passphrase'] }).notNull().default('public'),
 	isListed: integer('is_listed', { mode: 'boolean' }).notNull().default(true),
+	isModerationForcedPrivate: integer('is_moderation_forced_private', { mode: 'boolean' }).notNull().default(false),
 	passphrase: text('passphrase'),
 	uploadExpiresAt: integer('upload_expires_at').notNull(),
 	isClosed: integer('is_closed', { mode: 'boolean' }).notNull().default(false),

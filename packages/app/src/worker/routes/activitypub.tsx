@@ -119,7 +119,7 @@ function fileNote(options: {
 
 async function getPublicFile(db: ReturnType<typeof getDb>, fileId: string) {
 	const file = await db.select().from(files).where(eq(files.id, fileId)).get();
-	if (!file || !file.isClosed || file.visibility !== 'public' || !file.isListed) throw apiError(404, 'FILE_NOT_FOUND');
+	if (!file || !file.isClosed || file.visibility !== 'public' || !file.isListed || file.isModerationForcedPrivate) throw apiError(404, 'FILE_NOT_FOUND');
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 	return { file, bucket };

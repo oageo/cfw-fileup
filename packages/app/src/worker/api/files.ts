@@ -18,7 +18,7 @@ import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, hasFileDirectoryConflictForFile } from '../utils/path-conflicts';
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
-import { recordModerationEvent } from '../utils/moderation';
+import { recordModerationAuditLog, recordModerationEvent } from '../utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -52,7 +52,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		if (!dirExists) {
 			const hasFileCondition = isOwnerOrAdmin
 				? and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true))
-				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true));
+				: and(eq(files.bucketId, bucket.id), like(files.path, `${normalizedPath}%`), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true), eq(files.isModerationForcedPrivate, false));
 			const hasFile = await db.select({ path: files.path }).from(files).where(hasFileCondition).get();
 			if (!hasFile) throw apiError(404, 'DIRECTORY_NOT_FOUND');
 		}
@@ -60,7 +60,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 
 	const fileCondition = isOwnerOrAdmin
 		? and(eq(files.bucketId, bucket.id), eq(files.isClosed, true))
-		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true));
+		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true), eq(files.isModerationForcedPrivate, false));
 	const allFiles = await db
 		.select({
 			id: files.id,
@@ -71,13 +71,14 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 			isTar: files.isTar,
 			visibility: files.visibility,
 			isListed: files.isListed,
+			isModerationForcedPrivate: files.isModerationForcedPrivate,
 		})
 		.from(files)
 		.where(fileCondition);
 	const allDirs = await db.select({ path: directories.path, isListed: directories.isListed }).from(directories).where(eq(directories.bucketId, bucket.id));
 	const hiddenDirPaths = isOwnerOrAdmin ? new Set<string>() : new Set(allDirs.filter(dir => !dir.isListed).map(dir => dir.path));
 
-	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean }> = [];
+	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean; isModerationForcedPrivate?: boolean }> = [];
 	const seenDirs = new Set<string>();
 	for (const d of allDirs) {
 		if (!d.path.startsWith(normalizedPath)) continue;
@@ -97,7 +98,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		const rest = f.path.slice(normalizedPath.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
-			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility, ...(isOwnerOrAdmin ? { isListed: f.isListed } : {}) });
+			entries.push({ type: 'file', name: rest, path: f.path, fileId: f.id, size: f.size ?? undefined, mimeType: f.mimeType ?? undefined, isTargz: f.isTargz, isTar: f.isTar, visibility: f.visibility, ...(isOwnerOrAdmin ? { isListed: f.isListed, isModerationForcedPrivate: f.isModerationForcedPrivate } : {}) });
 		} else {
 			const dirName = rest.slice(0, slashIdx);
 			if (hiddenDirPaths.has(`${normalizedPath}${dirName}/`)) continue;
@@ -172,6 +173,7 @@ app.get('/meta', async (c) => {
 	const hasMimeMismatch = hasSuspiciousFileType(file.path, file.mimeType ?? undefined);
 	const base = {
 		visibility: file.visibility,
+		isModerationForcedPrivate: file.isModerationForcedPrivate,
 		isTargz: file.isTargz,
 		isTar: file.isTar,
 		size: file.size,
@@ -181,7 +183,7 @@ app.get('/meta', async (c) => {
 		hasExecutableContent: hasMimeMismatch && isExecutableMimeType(file.mimeType ?? undefined),
 		isOwner,
 	};
-	if (file.visibility === 'public' || isOwnerOrAdmin) {
+	if ((file.visibility === 'public' && !file.isModerationForcedPrivate) || isOwnerOrAdmin) {
 		return c.json({ ...base, fileId: file.id, bucketId: bucket.id, ...(isOwnerOrAdmin ? { isListed: file.isListed } : {}) });
 	}
 	if (fileToken) {
@@ -899,6 +901,19 @@ app.post(
 			targets,
 			fileIds: Array.from(filesToDelete.keys()),
 		}, user.id, user.tokenId);
+		if (user.isAdmin && bucket.userId !== user.id) {
+			const fileIds = Array.from(filesToDelete.keys());
+			await recordModerationAuditLog(c, 'admin_file_deleted', {
+				targetFileId: fileIds.length === 1 ? fileIds[0] : null,
+				targetUserId: bucket.userId,
+				data: {
+					bucketId: bucket.id,
+					bucketName: bucket.name,
+					targets,
+					fileIds,
+				},
+			});
+		}
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/files/delete')),

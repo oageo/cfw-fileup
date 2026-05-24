@@ -30,6 +30,9 @@ describe('Admin access control', () => {
 			{ path: '/api/admin/suspend-user', body: { userId: 'x' } },
 			{ path: '/api/admin/unsuspend-user', body: { userId: 'x' } },
 			{ path: '/api/admin/make-admin', body: { userId: 'x' } },
+			{ path: '/api/admin/list-files', body: {} },
+			{ path: '/api/admin/list-moderation-audit-logs', body: {} },
+			{ path: '/api/admin/update-file-moderation', body: { fileId: 'x', isModerationForcedPrivate: true } },
 			{ path: '/api/admin/delete-file', body: { fileId: 'x' } },
 			{ path: '/api/admin/delete-bucket', body: { bucketId: 'x' } },
 			{ path: '/api/admin/purge-worker-cache', body: {} },
@@ -100,6 +103,19 @@ describe('POST /api/admin/suspend-user', () => {
 			body: JSON.stringify({ userId: 'nonexistent' }),
 		}, env);
 		expect(res.status).toBe(404);
+	});
+
+	test('admin cannot suspend themself', async () => {
+		const { data } = await signup('firstuser');
+		const adminToken = String(data.token);
+		const adminUserId = String(data.userId);
+
+		const res = await app.request('/api/admin/suspend-user', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId: adminUserId }),
+		}, env);
+		expect(res.status).toBe(403);
 	});
 });
 
@@ -222,6 +238,136 @@ describe('POST /api/admin/delete-file', () => {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({ fileId: 'nonexistent' }),
+		}, env);
+		expect(res.status).toBe(404);
+	});
+});
+
+describe('POST /api/admin/list-files', () => {
+	test('admin can list files regardless of visibility', async () => {
+		const { adminToken, userToken } = await setupAdminAndUser();
+
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ bucketName: 'test_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ bucketId, path: 'private.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(`${bucketId}/private.txt`, 'Content');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ fileId, visibility: 'private' }),
+		}, env);
+
+		const listRes = await app.request('/api/admin/list-files', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({}),
+		}, env);
+		expect(listRes.status).toBe(200);
+		const body = await listRes.json() as Array<{ id: string; path: string; visibility: string; isModerationForcedPrivate: boolean }>;
+		expect(body).toContainEqual(expect.objectContaining({
+			id: fileId,
+			path: 'private.txt',
+			visibility: 'private',
+			isModerationForcedPrivate: false,
+		}));
+	});
+});
+
+describe('POST /api/admin/list-moderation-audit-logs', () => {
+	test('admin can list audit logs', async () => {
+		const { adminToken, userId } = await setupAdminAndUser();
+
+		const suspendRes = await app.request('/api/admin/suspend-user', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId }),
+		}, env);
+		expect(suspendRes.status).toBe(200);
+
+		const listRes = await app.request('/api/admin/list-moderation-audit-logs', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({}),
+		}, env);
+		expect(listRes.status).toBe(200);
+		const body = await listRes.json() as Array<{ action: string; targetUserId: string | null; createdAt: number }>;
+		expect(body[0]).toEqual(expect.objectContaining({
+			action: 'admin_user_suspended',
+			targetUserId: userId,
+		}));
+		expect(body[0].createdAt).toBeGreaterThan(0);
+	});
+});
+
+describe('POST /api/admin/update-file-moderation', () => {
+	test('admin can force a public file private and privileged preview is audited', async () => {
+		const { adminToken, userToken } = await setupAdminAndUser();
+
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ bucketName: 'test_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ bucketId, path: 'file.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(`${bucketId}/file.txt`, 'Content');
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+
+		const updateRes = await app.request('/api/admin/update-file-moderation', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ fileId, isModerationForcedPrivate: true }),
+		}, env);
+		expect(updateRes.status).toBe(200);
+
+		const publicDownloadRes = await app.request(`/d/${fileId}`, {}, env);
+		expect(publicDownloadRes.status).toBe(403);
+
+		const adminDownloadRes = await app.request(`/d/${fileId}`, {
+			headers: authHeaders(adminToken),
+		}, env);
+		expect(adminDownloadRes.status).toBe(200);
+
+		const auditRows = await env.DB.prepare(
+			'SELECT action, target_file_id, data FROM moderation_audit_logs WHERE target_file_id = ? ORDER BY id',
+		).bind(fileId).all<{ action: string; target_file_id: string; data: string | null }>();
+
+		expect(auditRows.results.map(row => row.action)).toEqual([
+			'admin_file_moderation_forced_private_updated',
+			'admin_file_previewed',
+		]);
+		expect(auditRows.results[0].target_file_id).toBe(fileId);
+	});
+
+	test('nonexistent fileId returns 404', async () => {
+		const { adminToken } = await setupAdminAndUser();
+
+		const res = await app.request('/api/admin/update-file-moderation', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ fileId: 'nonexistent', isModerationForcedPrivate: true }),
 		}, env);
 		expect(res.status).toBe(404);
 	});

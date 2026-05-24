@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { Download, Eye, EyeOff, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
+import { Download, EllipsisVertical, Eye, EyeOff, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
 import NirA from '@/components/NirA.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -46,6 +46,7 @@ interface DisplayEntry {
 	label: string;
 	visibility?: FileVisibility;
 	isListed?: boolean;
+	isModerationForcedPrivate?: boolean;
 	previewUrl?: string;
 }
 
@@ -87,6 +88,9 @@ const directoryNameSchema = v.pipe(
 const deleteDialog = ref(false);
 const deleteTarget = ref<DisplayEntry | null>(null);
 const archiveDeleteDialog = ref(false);
+const moderationDialog = ref(false);
+const moderationTarget = ref<DisplayEntry | null>(null);
+const moderationValue = ref(false);
 const moveDialog = ref(false);
 const moveTarget = ref<DisplayEntry | null>(null);
 
@@ -106,6 +110,8 @@ function isImageMime(mime: string): boolean {
 // 一括選択・削除用の状態
 const selectedPaths = ref<Set<string>>(new Set());
 const bulkDeleteDialog = ref(false);
+const bulkModerationDialog = ref(false);
+const bulkModerationValue = ref(false);
 const excludedPaths = ref<Set<string>>(new Set());
 const selectAllMode = ref(false);
 const selectionPopoverOpen = ref(false);
@@ -129,6 +135,15 @@ const selectableEntries = computed(() => entries.value);
 const canSelectEntries = computed(() => !isArchive.value);
 const canDeleteSelectedEntries = computed(() => !isArchive.value && authStore.user != null && bucketId.value != null);
 const canUpdateSelectedListing = computed(() => !isArchive.value && authStore.user != null && bucketId.value != null);
+const selectedFileEntries = computed(() => {
+	const selected = selectAllMode.value
+		? selectableEntries.value.filter(entry => !excludedPaths.value.has(entry.fullPath))
+		: Array.from(selectedPaths.value)
+			.map(path => entries.value.find(entry => entry.fullPath === path))
+			.filter((entry): entry is DisplayEntry => entry != null);
+	return selected.filter(entry => !entry.isDir && entry.fileId != null);
+});
+const canUpdateSelectedModeration = computed(() => !isArchive.value && authStore.user?.isAdmin === true && selectedFileEntries.value.length > 0);
 
 const selectedCount = computed(() => {
 	if (selectAllMode.value) return Math.max(0, selectableEntries.value.length - excludedPaths.value.size);
@@ -233,6 +248,13 @@ function requestBulkDelete(): void {
 	if (!canDeleteSelectedEntries.value) return;
 	selectionPopoverOpen.value = false;
 	bulkDeleteDialog.value = true;
+}
+
+function requestBulkModerationForcedPrivate(value: boolean): void {
+	if (!canUpdateSelectedModeration.value) return;
+	selectionPopoverOpen.value = false;
+	bulkModerationValue.value = value;
+	bulkModerationDialog.value = true;
 }
 
 function getArchiveDownloadWorker(): Worker {
@@ -656,6 +678,68 @@ async function executeEntryUpdateListing(entry: DisplayEntry, isListed: boolean,
 	entries.value = entries.value.map(item => item.fullPath === entry.fullPath ? { ...item, isListed } : item);
 }
 
+async function executeEntryUpdateModerationForcedPrivate(entry: DisplayEntry, isModerationForcedPrivate: boolean, event?: Event): Promise<void> {
+	if (event) stopGridActionEvent(event);
+	moderationTarget.value = entry;
+	moderationValue.value = isModerationForcedPrivate;
+	moderationDialog.value = true;
+}
+
+async function confirmEntryUpdateModerationForcedPrivate(): Promise<void> {
+	const entry = moderationTarget.value;
+	const isModerationForcedPrivate = moderationValue.value;
+	moderationDialog.value = false;
+	deleteError.value = '';
+	if (!entry || entry.isDir || !entry.fileId) {
+		deleteError.value = 'ファイルを選択してください。';
+		return;
+	}
+	const result = await apiPost('/api/admin/update-file-moderation', {
+		fileId: entry.fileId,
+		isModerationForcedPrivate,
+	});
+	if (!result.ok) {
+		deleteError.value = result.data.message ?? '更新失敗';
+		return;
+	}
+	entries.value = entries.value.map(item => item.fullPath === entry.fullPath ? { ...item, isModerationForcedPrivate } : item);
+	moderationTarget.value = null;
+}
+
+async function executeBulkUpdateModerationForcedPrivate(): Promise<void> {
+	bulkModerationDialog.value = false;
+	deleteError.value = '';
+	const targets = selectedFileEntries.value;
+	if (targets.length === 0) {
+		deleteError.value = 'ファイルを選択してください。';
+		return;
+	}
+
+	const failed: string[] = [];
+	for (const entry of targets) {
+		if (!entry.fileId) continue;
+		const result = await apiPost('/api/admin/update-file-moderation', {
+			fileId: entry.fileId,
+			isModerationForcedPrivate: bulkModerationValue.value,
+		});
+		if (!result.ok) {
+			failed.push(entry.name);
+		}
+	}
+
+	if (failed.length > 0) {
+		deleteError.value = `${failed.length} 件の更新に失敗しました。`;
+		return;
+	}
+
+	const targetPaths = new Set(targets.map(entry => entry.fullPath));
+	entries.value = entries.value.map(entry => targetPaths.has(entry.fullPath) ? { ...entry, isModerationForcedPrivate: bulkModerationValue.value } : entry);
+	selectedPaths.value.clear();
+	excludedPaths.value.clear();
+	selectAllMode.value = false;
+	selectionPopoverOpen.value = false;
+}
+
 function buildArchiveEntries(): void {
 	const seenDirs = new Set<string>();
 	const result: DisplayEntry[] = [];
@@ -758,7 +842,7 @@ async function load(): Promise<void> {
 					};
 				}
 				const mime = e.isTargz ? 'application/gzip' : e.isTar ? 'application/x-tar' : (e.mimeType ?? '');
-				const previewUrl = isImageMime(mime) && e.visibility === 'public' && e.fileId ? `/d/${e.fileId}` : undefined;
+				const previewUrl = isImageMime(mime) && e.visibility === 'public' && e.isModerationForcedPrivate !== true && e.fileId ? `/d/${e.fileId}` : undefined;
 				return {
 					key: `file:${e.name}`,
 					name: e.name,
@@ -770,6 +854,7 @@ async function load(): Promise<void> {
 					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : mime,
 					visibility: e.visibility,
 					isListed: e.isListed,
+					isModerationForcedPrivate: e.isModerationForcedPrivate,
 					previewUrl,
 				};
 			});
@@ -857,7 +942,7 @@ async function executeDeleteArchive(): Promise<void> {
 async function fetchPublicDirectoryEntries(): Promise<{
 	entries: Array<{
 		type: 'dir' | 'file'; name: string; path?: string;
-		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean;
+		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean;
 	}>;
 } | null> {
 	const lsUrl = `/api/files/ls?bucketName=${encodeURIComponent(props.bucketName)}&path=${encodeURIComponent(props.filePath)}`;
@@ -869,7 +954,7 @@ async function fetchPublicDirectoryEntries(): Promise<{
 	return await res.json() as {
 		entries: Array<{
 			type: 'dir' | 'file'; name: string; path?: string;
-			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean;
+			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean;
 		}>;
 	};
 }
@@ -952,6 +1037,12 @@ watch([isPartiallySelected, isAllSelected], async () => {
               </Button.Root>
               <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(false)">
                 <Button.Content>一覧から非表示</Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedModeration" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkModerationForcedPrivate(true)">
+                <Button.Content>まとめて強制非公開</Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedModeration" class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestBulkModerationForcedPrivate(false)">
+                <Button.Content>強制非公開をまとめて解除</Button.Content>
               </Button.Root>
               <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" :disabled="archiveDownloadProgress != null" @click="startDirectoryArchiveDownload('tar')">
                 <Button.Content>tarとしてダウンロード</Button.Content>
@@ -1071,6 +1162,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
                     <span v-if="entry.isListed != null" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
                       {{ entry.isListed ? '表示' : '非表示' }}
                     </span>
+                    <span v-if="entry.isModerationForcedPrivate" class="badge badge-danger">強制非公開</span>
                   </div>
                 </td>
                 <td v-if="!isArchive && authStore.user && bucketId" class="col-actions" :class="$style.actionsCell">
@@ -1079,8 +1171,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
                       :class="['btn', 'btn-ghost', 'btn-icon', $style.entryMenuButton]"
                       :aria-label="`${entry.name}の操作`"
                     >
-                      <Eye v-if="entry.isListed !== false" :size="16" :stroke-width="2" aria-hidden="true" />
-                      <EyeOff v-else :size="16" :stroke-width="2" aria-hidden="true" />
+                      <EllipsisVertical :size="16" :stroke-width="2" aria-hidden="true" />
                     </Popover.Activator>
                     <Popover.Content class="action-menu">
                       <div class="action-menu-inner">
@@ -1095,6 +1186,12 @@ watch([isPartiallySelected, isAllSelected], async () => {
                             <EyeOff :size="16" :stroke-width="2" aria-hidden="true" />
                             一覧から非表示
                           </Button.Content>
+                        </Button.Root>
+                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && !entry.isModerationForcedPrivate" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, true)">
+                          <Button.Content>強制非公開</Button.Content>
+                        </Button.Root>
+                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && entry.isModerationForcedPrivate" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, false)">
+                          <Button.Content>強制非公開を解除</Button.Content>
                         </Button.Root>
                         <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestMoveEntry(entry)">
                           <Button.Content>移動/名前変更</Button.Content>
@@ -1180,10 +1277,11 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   <span v-if="entry.isListed != null && !isArchive" :class="entry.isListed ? 'badge badge-info' : 'badge badge-muted'">
                     {{ entry.isListed ? '表示' : '非表示' }}
                   </span>
+                  <span v-if="entry.isModerationForcedPrivate && !isArchive" class="badge badge-danger">強制非公開</span>
                 </div>
                 <div v-if="!isArchive && authStore.user && bucketId" :class="$style.gridCardActions">
                   <a
-                    v-if="!entry.isDir && entry.fileId && entry.visibility === 'public'"
+                    v-if="!entry.isDir && entry.fileId && entry.visibility === 'public' && entry.isModerationForcedPrivate !== true"
                     :href="`/d/${entry.fileId}`"
                     download
                     :class="['btn', 'btn-ghost', $style.gridCardActionButton, $style.gridCardDownloadButton]"
@@ -1245,6 +1343,19 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </Button.Root>
 
                   <Button.Root
+                    v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId"
+                    class="btn"
+                    :class="[entry.isModerationForcedPrivate ? 'btn-ghost' : 'btn-ghost-danger', $style.gridCardActionButton, $style.gridCardIconButton]"
+                    :aria-label="entry.isModerationForcedPrivate ? `${entry.name}の強制非公開を解除` : `${entry.name}を強制非公開`"
+                    :title="entry.isModerationForcedPrivate ? '強制非公開を解除' : '強制非公開'"
+                    @click="(event: Event) => executeEntryUpdateModerationForcedPrivate(entry, !entry.isModerationForcedPrivate, event)"
+                  >
+                    <Button.Content>
+                      <EyeOff :size="16" :stroke-width="2" aria-hidden="true" />
+                    </Button.Content>
+                  </Button.Root>
+
+                  <Button.Root
                     class="btn btn-ghost-danger"
                     :class="[$style.gridCardActionButton, $style.gridCardIconButton]"
                     :aria-label="`${entry.name}を削除`"
@@ -1274,7 +1385,17 @@ watch([isPartiallySelected, isAllSelected], async () => {
       @cancel="deleteDialog = false"
     />
 
-    <!-- 一括削除確認ダイアログ -->
+    <!-- 強制非公開確認ダイアログ（エントリ） -->
+    <ConfirmDialog
+      v-model:open="moderationDialog"
+      :title="moderationValue ? 'ファイルを強制非公開' : '強制非公開を解除'"
+      :message="moderationTarget ? (moderationValue ? `ファイル「${moderationTarget.name}」を強制非公開にしますか？` : `ファイル「${moderationTarget.name}」の強制非公開を解除しますか？`) : ''"
+      :confirm-label="moderationValue ? '強制非公開にする' : '解除する'"
+      :danger="moderationValue"
+      @confirm="confirmEntryUpdateModerationForcedPrivate"
+      @cancel="moderationDialog = false"
+    />
+
     <ConfirmDialog
       v-if="canDeleteSelectedEntries"
       v-model:open="bulkDeleteDialog"
@@ -1284,6 +1405,17 @@ watch([isPartiallySelected, isAllSelected], async () => {
       :danger="true"
       @confirm="executeBulkDelete"
       @cancel="bulkDeleteDialog = false"
+    />
+
+    <ConfirmDialog
+      v-if="canUpdateSelectedModeration"
+      v-model:open="bulkModerationDialog"
+      :title="bulkModerationValue ? '複数ファイルを強制非公開' : '強制非公開をまとめて解除'"
+      :message="bulkModerationValue ? `選択した ${selectedFileEntries.length} 件のファイルを強制非公開にしますか？` : `選択した ${selectedFileEntries.length} 件のファイルの強制非公開を解除しますか？`"
+      :confirm-label="bulkModerationValue ? '強制非公開にする' : '解除する'"
+      :danger="bulkModerationValue"
+      @confirm="executeBulkUpdateModerationForcedPrivate"
+      @cancel="bulkModerationDialog = false"
     />
 
     <InputDialog

@@ -23,9 +23,13 @@ const props = defineProps<{
 	fileId: string;
 	bucketId: string | null;
 	isOwner?: boolean;
+	isModerationForcedPrivate?: boolean;
 	token?: string;
 }>();
 
+const emit = defineEmits<{
+	(e: 'update:isModerationForcedPrivate', value: boolean): void;
+}>();
 
 const downloadUrl = computed(() => {
 	if (!props.fileId) return '';
@@ -58,6 +62,10 @@ const deleteError = ref('');
 const deleteDialog = ref(false);
 const moveDialog = ref(false);
 const reportDialog = ref(false);
+const moderationError = ref('');
+const moderationSaving = ref(false);
+const moderationDialog = ref(false);
+const moderationValue = ref(false);
 const reportLoading = ref(false);
 const reportError = ref('');
 const reportSuccess = ref('');
@@ -164,6 +172,29 @@ async function executeDelete(): Promise<void> {
 		return;
 	}
 	mainRouter.pushByPath(parentPath.value);
+}
+
+function requestModerationForcedPrivate(value: boolean): void {
+	moderationValue.value = value;
+	moderationDialog.value = true;
+}
+
+async function updateModerationForcedPrivate(): Promise<void> {
+	moderationSaving.value = true;
+	moderationDialog.value = false;
+	moderationError.value = '';
+	try {
+		const result = await apiPost('/api/admin/update-file-moderation', {
+			fileId: props.fileId,
+			isModerationForcedPrivate: moderationValue.value,
+		});
+		if (!result.ok) throw new Error(result.data.message || 'モデレーション状態を更新できませんでした');
+		emit('update:isModerationForcedPrivate', moderationValue.value);
+	} catch (e) {
+		moderationError.value = e instanceof Error ? e.message : String(e);
+	} finally {
+		moderationSaving.value = false;
+	}
 }
 
 function handleMoved(target: { bucketName: string; path: string }): void {
@@ -276,6 +307,14 @@ onBeforeUnmount(() => {
       <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="deleteDialog = true">
         <Button.Content>削除</Button.Content>
       </Button.Root>
+      <Button.Root
+        v-if="authStore.user?.isAdmin"
+        :class="['btn', isModerationForcedPrivate ? 'btn-ghost' : 'btn-ghost-danger']"
+        :disabled="moderationSaving"
+        @click="requestModerationForcedPrivate(!isModerationForcedPrivate)"
+      >
+        <Button.Content>{{ isModerationForcedPrivate ? '強制非公開を解除' : '強制非公開' }}</Button.Content>
+      </Button.Root>
       <Button.Root v-if="!isOwner" class="btn btn-ghost" @click="openReportDialog">
         <Button.Content>
           <Flag :size="16" :stroke-width="2" aria-hidden="true" />
@@ -293,6 +332,17 @@ onBeforeUnmount(() => {
 
     <div v-if="downloadError" class="alert alert-error mt-3">{{ downloadError }}</div>
     <div v-if="deleteError" class="alert alert-error mt-3">{{ deleteError }}</div>
+    <div v-if="moderationError" class="alert alert-error mt-3">{{ moderationError }}</div>
+
+    <ConfirmDialog
+      v-model:open="moderationDialog"
+      :title="moderationValue ? 'ファイルを強制非公開' : '強制非公開を解除'"
+      :message="moderationValue ? `ファイル「${filePath}」を強制非公開にしますか？` : `ファイル「${filePath}」の強制非公開を解除しますか？`"
+      :confirm-label="moderationValue ? '強制非公開にする' : '解除する'"
+      :danger="moderationValue"
+      @confirm="updateModerationForcedPrivate"
+      @cancel="moderationDialog = false"
+    />
 
     <ConfirmDialog
       v-model:open="deleteDialog"

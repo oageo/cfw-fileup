@@ -11,6 +11,7 @@ import migration0007 from '../../migrations/0007_famous_vermin.sql?raw';
 import migration0008 from '../../migrations/0008_slim_terror.sql?raw';
 import migration0009 from '../../migrations/0009_secret_bishop.sql?raw';
 import migration0010 from '../../migrations/0010_mean_maestro.sql?raw';
+import migration0011 from '../../migrations/0011_icy_lorna_dane.sql?raw';
 
 export { env, app };
 
@@ -26,6 +27,7 @@ const migrations = [
 	migration0008,
 	migration0009,
 	migration0010,
+	migration0011,
 ] as const;
 
 const tables = [
@@ -35,6 +37,7 @@ const tables = [
 	'file_access_tokens',
 	'file_reports',
 	'ip_bans',
+	'moderation_audit_logs',
 	'moderation_events',
 	'passkeys_challenges',
 	'backup_codes',
@@ -90,6 +93,7 @@ export async function clearDb(): Promise<void> {
 		env.DB.prepare('DELETE FROM file_access_tokens'),
 		env.DB.prepare('DELETE FROM file_reports'),
 		env.DB.prepare('DELETE FROM ip_bans'),
+		env.DB.prepare('DELETE FROM moderation_audit_logs'),
 		env.DB.prepare('DELETE FROM moderation_events'),
 		env.DB.prepare('DELETE FROM passkeys_challenges'),
 		env.DB.prepare('DELETE FROM backup_codes'),

@@ -114,7 +114,7 @@ export class DownloadContext {
 		this.isListMode = this.url.searchParams.has('list');
 		this.isMetaMode = this.url.searchParams.has('meta');
 		this.lastModified = parseEaidx(file.id).date;
-		this.authContext = file.visibility === 'public' ? { type: 'public' } : { type: 'user' };
+		this.authContext = file.visibility === 'public' && !file.isModerationForcedPrivate ? { type: 'public' } : { type: 'user' };
 	}
 
 	get isTarFileEntry(): boolean {

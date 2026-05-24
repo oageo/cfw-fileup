@@ -46,6 +46,7 @@ const FileListEntry = v.pipe(
 		isTar: v.optional(v.boolean()),
 		visibility: v.optional(fileVisibilitySchema),
 		isListed: v.optional(v.boolean()),
+		isModerationForcedPrivate: v.optional(v.boolean()),
 	}),
 	v.metadata({ ref: 'FileListEntry' }),
 );
@@ -238,6 +239,7 @@ export const filesApiDef = {
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
 				visibility: fileVisibilitySchema,
+				isModerationForcedPrivate: v.boolean(),
 				isTargz: v.boolean(),
 				isTar: v.boolean(),
 				size: v.nullable(v.number()),

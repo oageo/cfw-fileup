@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import { errorResponse, IdString } from '../api.schemas.js';
 import { KnownSettingListSchema, KnownSettingRecordSchema } from '../app-settings.js';
 import { fileReportReasonSchema, fileReportRelationshipSchema, fileReportStatusSchema } from '../file-reports.js';
+import { fileVisibilitySchema } from '../file-visibility.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 const QuotaResponse = v.pipe(
@@ -95,6 +96,40 @@ const FileReportResponse = v.pipe(
 	}),
 	v.metadata({ ref: 'FileReport' }),
 );
+const AdminFileResponse = v.pipe(
+	v.object({
+		id: IdString,
+		bucketId: IdString,
+		bucketName: v.nullable(v.string()),
+		userId: IdString,
+		ownerUsername: v.nullable(v.string()),
+		path: v.string(),
+		size: v.nullable(v.number()),
+		mimeType: v.nullable(v.string()),
+		visibility: fileVisibilitySchema,
+		isListed: v.boolean(),
+		isModerationForcedPrivate: v.boolean(),
+		isClosed: v.boolean(),
+		isTargz: v.boolean(),
+		isTar: v.boolean(),
+		createdAt: v.number(),
+	}),
+	v.metadata({ ref: 'AdminFile' }),
+);
+const ModerationAuditLogResponse = v.pipe(
+	v.object({
+		id: IdString,
+		adminUserId: v.nullable(IdString),
+		adminUsername: v.nullable(v.string()),
+		action: v.string(),
+		targetFileId: v.nullable(v.string()),
+		targetUserId: v.nullable(v.string()),
+		targetUsername: v.nullable(v.string()),
+		data: v.nullable(v.record(v.string(), v.unknown())),
+		createdAt: v.number(),
+	}),
+	v.metadata({ ref: 'ModerationAuditLog' }),
+);
 
 const OkResponse = { 200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } } };
 const WorkerCachePurgeResponse = v.pipe(
@@ -133,6 +168,27 @@ export const adminApiDef = {
 		tags: ['admin'],
 		req: v.object({ fileId: IdString }),
 		res: { ...OkResponse, ...AdminErrors, 400: errorResponse('Bad request (missing fileId)', ['FILE_ID_IS_REQUIRED']), 404: errorResponse('File not found', ['FILE_NOT_FOUND']) },
+	},
+	'/api/admin/list-files': {
+		summary: 'List all files',
+		tags: ['admin'],
+		req: v.object({}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(AdminFileResponse) } } }, ...AdminErrors },
+	},
+	'/api/admin/list-moderation-audit-logs': {
+		summary: 'List moderation audit logs',
+		tags: ['admin'],
+		req: v.object({}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(ModerationAuditLogResponse) } } }, ...AdminErrors },
+	},
+	'/api/admin/update-file-moderation': {
+		summary: 'Update file moderation flags',
+		tags: ['admin'],
+		req: v.object({
+			fileId: IdString,
+			isModerationForcedPrivate: v.boolean(),
+		}),
+		res: { ...OkResponse, ...AdminErrors, 404: errorResponse('File not found', ['FILE_NOT_FOUND']) },
 	},
 	'/api/admin/delete-bucket': {
 		summary: 'Delete a bucket',

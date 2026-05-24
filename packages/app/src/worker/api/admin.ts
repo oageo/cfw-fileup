@@ -5,7 +5,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import * as v from 'valibot';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { apiError } from '../utils/api-error';
-import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments, ipBans, fileReports, moderationEvents } from '../scheme/index';
+import { users, tokens, files, buckets, appSettings, userQuotas, globalQuotas, plans, userPlanAssignments, ipBans, fileReports, moderationEvents, moderationAuditLogs } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser, getGlobalQuota } from '../utils/rate-limit';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
@@ -16,6 +16,7 @@ import { bumpWorkerCacheVersion } from '../utils/cache-names';
 import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 import { isValidCidr } from '../utils/cidr';
+import { recordModerationAuditLog } from '../utils/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -28,10 +29,14 @@ app.post(
 	validator('json', apiDef['/api/admin/suspend-user'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/suspend-user', Env>) => {
 		const db = getDb(c.env);
+		const adminUser = c.get('user');
 		const body = c.req.valid('json');
 
 		if (!body.userId) {
 			throw apiError(400, 'USER_ID_IS_REQUIRED');
+		}
+		if (body.userId === adminUser.id) {
+			throw apiError(403, 'FORBIDDEN');
 		}
 
 		const user = await db.select().from(users).where(eq(users.id, body.userId)).get();
@@ -42,6 +47,7 @@ app.post(
 
 		await db.update(users).set({ isSuspended: true }).where(eq(users.id, body.userId));
 		await db.delete(tokens).where(eq(tokens.userId, body.userId));
+		await recordModerationAuditLog(c, 'admin_user_suspended', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/suspend-user')),
@@ -66,6 +72,7 @@ app.post(
 		}
 
 		await db.update(users).set({ isSuspended: false }).where(eq(users.id, body.userId));
+		await recordModerationAuditLog(c, 'admin_user_unsuspended', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/unsuspend-user')),
@@ -90,6 +97,7 @@ app.post(
 		}
 
 		await db.update(users).set({ isAdmin: true }).where(eq(users.id, body.userId));
+		await recordModerationAuditLog(c, 'admin_user_made_admin', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/make-admin')),
@@ -152,6 +160,9 @@ app.post(
 			expiresAt: body.expiresAt ?? null,
 		};
 		await db.insert(ipBans).values(row);
+		await recordModerationAuditLog(c, 'admin_ip_ban_created', {
+			data: { banId: id, cidr, reason: row.reason, sourceEventId: row.sourceEventId, expiresAt: row.expiresAt },
+		});
 
 		return c.json({
 			...row,
@@ -169,6 +180,7 @@ app.post(
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
 		await db.delete(ipBans).where(eq(ipBans.id, body.banId));
+		await recordModerationAuditLog(c, 'admin_ip_ban_deleted', { data: { banId: body.banId } });
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-ip-ban')),
 );
@@ -306,9 +318,120 @@ app.post(
 				updatedAt: Date.now(),
 			})
 			.where(eq(fileReports.id, body.reportId));
+		await recordModerationAuditLog(c, 'admin_file_report_updated', {
+			data: { reportId: body.reportId, status: body.status },
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/update-file-report')),
+);
+
+app.post(
+	'/list-files',
+	describeRoute(omitResAndReq(apiDef['/api/admin/list-files'])),
+	validator('json', apiDef['/api/admin/list-files'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/list-files', Env>) => {
+		const db = getDb(c.env);
+		const rows = await db
+			.select({
+				id: files.id,
+				bucketId: files.bucketId,
+				bucketName: buckets.name,
+				userId: files.userId,
+				ownerUsername: users.username,
+				path: files.path,
+				size: files.size,
+				mimeType: files.mimeType,
+				visibility: files.visibility,
+				isListed: files.isListed,
+				isModerationForcedPrivate: files.isModerationForcedPrivate,
+				isClosed: files.isClosed,
+				isTargz: files.isTargz,
+				isTar: files.isTar,
+			})
+			.from(files)
+			.leftJoin(buckets, eq(files.bucketId, buckets.id))
+			.leftJoin(users, eq(files.userId, users.id))
+			.orderBy(desc(files.id));
+
+		return c.json(rows.map(row => ({
+			...row,
+			createdAt: parseEaidx(row.id).date.getTime(),
+		})), 200);
+	}, getResponseDefWithAuth('/api/admin/list-files')),
+);
+
+app.post(
+	'/list-moderation-audit-logs',
+	describeRoute(omitResAndReq(apiDef['/api/admin/list-moderation-audit-logs'])),
+	validator('json', apiDef['/api/admin/list-moderation-audit-logs'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/list-moderation-audit-logs', Env>) => {
+		const db = getDb(c.env);
+		const adminUsers = alias(users, 'admin_users');
+		const targetUsers = alias(users, 'target_users');
+		const rows = await db
+			.select({
+				id: moderationAuditLogs.id,
+				adminUserId: moderationAuditLogs.adminUserId,
+				adminUsername: adminUsers.username,
+				action: moderationAuditLogs.action,
+				targetFileId: moderationAuditLogs.targetFileId,
+				targetUserId: moderationAuditLogs.targetUserId,
+				targetUsername: targetUsers.username,
+				data: moderationAuditLogs.data,
+			})
+			.from(moderationAuditLogs)
+			.leftJoin(adminUsers, eq(moderationAuditLogs.adminUserId, adminUsers.id))
+			.leftJoin(targetUsers, eq(moderationAuditLogs.targetUserId, targetUsers.id))
+			.orderBy(desc(moderationAuditLogs.id))
+			.limit(200);
+
+		return c.json(rows.map(row => ({
+			...row,
+			createdAt: parseEaidx(row.id).date.getTime(),
+		})), 200);
+	}, getResponseDefWithAuth('/api/admin/list-moderation-audit-logs')),
+);
+
+app.post(
+	'/update-file-moderation',
+	describeRoute(omitResAndReq(apiDef['/api/admin/update-file-moderation'])),
+	validator('json', apiDef['/api/admin/update-file-moderation'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/update-file-moderation', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+		const file = await db.select().from(files).where(eq(files.id, body.fileId)).get();
+		if (!file) throw apiError(404, 'FILE_NOT_FOUND');
+
+		await db.update(files).set({
+			isModerationForcedPrivate: body.isModerationForcedPrivate,
+		}).where(eq(files.id, body.fileId));
+
+		const bucket = await db.select({ id: buckets.id, name: buckets.name }).from(buckets).where(eq(buckets.id, file.bucketId)).get();
+		if (bucket) {
+			fileMutationEvents.emit('file:updated', {
+				env: c.env,
+				origin: new URL(c.req.url).origin,
+				waitUntil: promise => c.executionCtx.waitUntil(promise),
+				bucket,
+				files: [await toFileMutationReference(db, file)],
+			});
+		}
+
+		await recordModerationAuditLog(c, 'admin_file_moderation_forced_private_updated', {
+			targetFileId: file.id,
+			targetUserId: file.userId,
+			data: {
+				bucketId: file.bucketId,
+				bucketName: bucket?.name ?? null,
+				path: file.path,
+				before: file.isModerationForcedPrivate,
+				after: body.isModerationForcedPrivate,
+			},
+		});
+
+		return c.json({ ok: true }, 200);
+	}, getResponseDefWithAuth('/api/admin/update-file-moderation')),
 );
 
 app.post(
@@ -337,6 +460,17 @@ app.post(
 			console.error('Failed to delete R2 object:', file.r2Key, error);
 		}
 
+		await recordModerationAuditLog(c, 'admin_file_deleted', {
+			targetFileId: file.id,
+			targetUserId: file.userId,
+			data: {
+				bucketId: file.bucketId,
+				bucketName: bucket?.name ?? null,
+				path: file.path,
+				size: file.size,
+			},
+		});
+
 		await db.delete(files).where(eq(files.id, body.fileId));
 
 		if (file.isClosed && file.size) {
@@ -355,7 +489,6 @@ app.post(
 				files: [purgeFile],
 			});
 		}
-
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-file')),
 );
@@ -398,6 +531,14 @@ app.post(
 			bucket: { id: bucket.id, name: bucket.name },
 			files: purgeFiles,
 		});
+		await recordModerationAuditLog(c, 'admin_bucket_deleted', {
+			targetUserId: bucket.userId,
+			data: {
+				bucketId: bucket.id,
+				bucketName: bucket.name,
+				fileCount: bucketFiles.length,
+			},
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-bucket')),
@@ -409,6 +550,7 @@ app.post(
 	validator('json', apiDef['/api/admin/purge-worker-cache'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/purge-worker-cache', Env>) => {
 		const version = await bumpWorkerCacheVersion(c.env);
+		await recordModerationAuditLog(c, 'admin_worker_cache_purged', { data: { version } });
 		return c.json({ ok: true, version }, 200);
 	}, getResponseDefWithAuth('/api/admin/purge-worker-cache')),
 );
@@ -449,6 +591,15 @@ app.post(
 					updatedAt: now,
 				},
 			});
+		await recordModerationAuditLog(c, 'admin_user_quota_set', {
+			targetUserId: userId,
+			data: {
+				maxBuckets: body.maxBuckets ?? null,
+				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
+				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
+				maxDailyUploads: body.maxDailyUploads ?? null,
+			},
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/set-user-quota')),
@@ -480,6 +631,14 @@ app.post(
 					maxDailyUploads: body.maxDailyUploads ?? null,
 				},
 			});
+		await recordModerationAuditLog(c, 'admin_global_quota_set', {
+			data: {
+				maxBuckets: body.maxBuckets ?? null,
+				maxBucketSizeBytes: body.maxBucketSizeBytes ?? null,
+				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
+				maxDailyUploads: body.maxDailyUploads ?? null,
+			},
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/set-global-quota')),
@@ -547,6 +706,7 @@ app.post(
 		}
 
 		await db.delete(userQuotas).where(eq(userQuotas.userId, body.userId));
+		await recordModerationAuditLog(c, 'admin_user_quota_deleted', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-user-quota')),
@@ -586,6 +746,9 @@ app.post(
 				target: appSettings.key,
 				set: { value: body.value },
 			});
+		await recordModerationAuditLog(c, 'admin_setting_updated', {
+			data: { key: body.key, value: body.value },
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/update-setting')),
@@ -637,6 +800,9 @@ app.post(
 		};
 
 		await db.insert(plans).values(plan);
+		await recordModerationAuditLog(c, 'admin_plan_created', {
+			data: { planId: plan.id, name: plan.name },
+		});
 
 		return c.json(plan, 200);
 	}, getResponseDefWithAuth('/api/admin/create-plan')),
@@ -673,6 +839,9 @@ app.post(
 			maxDailyUploads: updated.maxDailyUploads,
 			updatedAt: updated.updatedAt,
 		}).where(eq(plans.id, body.planId));
+		await recordModerationAuditLog(c, 'admin_plan_updated', {
+			data: { planId: body.planId, name: updated.name },
+		});
 
 		return c.json(updated, 200);
 	}, getResponseDefWithAuth('/api/admin/update-plan')),
@@ -691,6 +860,7 @@ app.post(
 		}
 
 		await db.delete(plans).where(eq(plans.id, body.planId));
+		await recordModerationAuditLog(c, 'admin_plan_deleted', { data: { planId: body.planId } });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-plan')),
@@ -732,6 +902,10 @@ app.post(
 					updatedAt: now,
 				},
 			});
+		await recordModerationAuditLog(c, 'admin_user_plan_assigned', {
+			targetUserId: body.userId,
+			data: { planId: body.planId, expiresAt: body.expiresAt },
+		});
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/assign-user-plan')),
@@ -780,6 +954,7 @@ app.post(
 		}
 
 		await db.delete(userPlanAssignments).where(eq(userPlanAssignments.userId, body.userId));
+		await recordModerationAuditLog(c, 'admin_user_plan_deleted', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/delete-user-plan')),

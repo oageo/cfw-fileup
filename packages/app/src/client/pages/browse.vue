@@ -157,6 +157,7 @@ const metaLoading = ref(false);
 const metaError = ref('');
 const fileVisibility = ref<FileVisibility>('public');
 const fileIsListed = ref(true);
+const fileIsModerationForcedPrivate = ref(false);
 const fileIsOwner = ref(false);
 
 const activeTab = ref<'info' | 'tokens'>('info');
@@ -301,6 +302,7 @@ async function fetchMeta(): Promise<void> {
 	fileId.value = null;
 	fileBucketId.value = null;
 	fileIsOwner.value = false;
+	fileIsModerationForcedPrivate.value = false;
 	try {
 		const metaUrl = new URL('/api/files/meta', location.origin);
 		metaUrl.searchParams.set('bucketName', props.bucketName);
@@ -321,6 +323,7 @@ async function fetchMeta(): Promise<void> {
 			hasMimeTypeMismatch?: boolean;
 			hasExecutableContent?: boolean;
 			isListed?: boolean;
+			isModerationForcedPrivate?: boolean;
 			isOwner?: boolean;
 			fileId?: string;
 			bucketId?: string;
@@ -334,6 +337,7 @@ async function fetchMeta(): Promise<void> {
 		hasExecutableContent.value = data.hasExecutableContent ?? false;
 		fileVisibility.value = data.visibility ?? 'public';
 		fileIsListed.value = data.isListed ?? true;
+		fileIsModerationForcedPrivate.value = data.isModerationForcedPrivate ?? false;
 		fileIsOwner.value = data.isOwner ?? false;
 		fileId.value = data.fileId ?? null;
 		fileBucketId.value = data.bucketId ?? null;
@@ -487,6 +491,10 @@ function fileIsListedChanged(v: boolean) {
 	fileIsListed.value = v;
 }
 
+function fileIsModerationForcedPrivateChanged(v: boolean) {
+	fileIsModerationForcedPrivate.value = v;
+}
+
 function tokenDeleted(tokenId: string) {
 	if (autoTokenId.value !== tokenId) return;
 	autoToken.value = null;
@@ -543,6 +551,9 @@ watch(() => [entryPath.value, queryToken.value], () => {
         :class="fileIsListed ? 'badge badge-info' : 'badge badge-muted'"
       >
         {{ fileIsListed ? '表示' : '非表示' }}
+      </span>
+      <span v-if="fileIsModerationForcedPrivate && !isDirectory && !metaLoading && !metaError" class="badge badge-danger">
+        強制非公開
       </span>
       <span
         v-if="!isDirectory && !metaLoading && !metaError && (isEntryFile ? innerMeta?.size != null : fileSize != null)"
@@ -603,7 +614,17 @@ watch(() => [entryPath.value, queryToken.value], () => {
         <!-- 詳細タブ: ファイル表示 -->
         <template v-if="activeTab === 'info'">
           <BrowseDirectory v-if="isTargz || isTar" :bucketName="bucketName" :filePath="baseFilePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :fileId="fileId ?? undefined" />
-          <BrowseFile v-else :bucketName="bucketName" :filePath="baseFilePath" :token="autoToken ?? undefined" :fileId="fileId ?? ''" :bucketId="fileBucketId" :isOwner="fileIsOwner" />
+          <BrowseFile
+            v-else
+            :bucketName="bucketName"
+            :filePath="baseFilePath"
+            :token="autoToken ?? undefined"
+            :fileId="fileId ?? ''"
+            :bucketId="fileBucketId"
+            :isOwner="fileIsOwner"
+            :isModerationForcedPrivate="fileIsModerationForcedPrivate"
+            @update:isModerationForcedPrivate="fileIsModerationForcedPrivateChanged"
+          />
         </template>
 
         <!-- 共有タブ: 公開設定 + 共有URL管理 -->
@@ -654,7 +675,17 @@ watch(() => [entryPath.value, queryToken.value], () => {
       <!-- ログインなし or ディレクトリ or (非公開 + トークンあり): タブなし -->
       <template v-else>
         <BrowseDirectory v-if="isDirectory || isTargz || isTar" :bucketName="bucketName" :filePath="baseFilePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :fileId="fileId ?? undefined" />
-        <BrowseFile v-else-if="!isDirectory" :bucketName="bucketName" :filePath="baseFilePath" :token="autoToken ?? undefined" :fileId="fileId ?? ''" :bucketId="fileBucketId" :isOwner="fileIsOwner" />
+        <BrowseFile
+          v-else-if="!isDirectory"
+          :bucketName="bucketName"
+          :filePath="baseFilePath"
+          :token="autoToken ?? undefined"
+          :fileId="fileId ?? ''"
+          :bucketId="fileBucketId"
+          :isOwner="fileIsOwner"
+          :isModerationForcedPrivate="fileIsModerationForcedPrivate"
+          @update:isModerationForcedPrivate="fileIsModerationForcedPrivateChanged"
+        />
       </template>
     </template>
   </div>
