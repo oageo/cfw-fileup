@@ -273,7 +273,8 @@ function toggleTheme(): void {
 }
 
 .navUserMenu {
-  min-width: 140px;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 24px));
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -281,11 +282,18 @@ function toggleTheme(): void {
     0 18px 40px rgba(15, 23, 42, 0.18),
     0 4px 12px rgba(15, 23, 42, 0.12);
   padding: 4px;
+  text-align: left;
 }
 
 .navUserMenuInner {
   display: flex;
   flex-direction: column;
+
+  :global(.btn) {
+    justify-content: flex-start;
+    min-height: 36px;
+    text-align: left;
+  }
 }
 
 .statusStrip {
@@ -449,8 +457,17 @@ function toggleTheme(): void {
   flex: 1;
   max-width: 1200px;
   width: 100%;
-  margin: 0 auto;
+  margin: 0;
   padding: 28px 20px 48px;
+
+  :global(.btn) {
+    min-height: 36px;
+    justify-content: center;
+  }
+
+  :global(.form-input) {
+    min-height: 36px;
+  }
 }
 
 @media (max-width: 640px) {

@@ -32,7 +32,7 @@ Gitの競合マーカー（<<<<<<<, =======, >>>>>>>）が含まれるファイ�
 1. **コンテキストの解析:**
    - HEADの変更目的と意図をコードから読み解く。
    - MERGE_HEADの変更目的と意図を読み解く。
-   - HEADおよびMERGE_HEADの変更内容となぜ競合しているかを分析し、 `.claude/agent-memory/memory/conflict_<yyyyMMdd_HHmmss>.md` にまとめる。
+   - HEADおよびMERGE_HEADの変更内容となぜ競合しているかを分析し、 `.agents/agent-memory/memory/conflict_<yyyyMMdd_HHmmss>.md` にまとめる。
    - テクニック: **Gitコマンドを使う**  
      後述するGitコマンドを駆使し、両方の変更の意図をより深く理解する。  
      競合マーカー内の比較はそこそこにして、merge-base から両方にどのような変更が加えられていったのかを把握することに注力する。

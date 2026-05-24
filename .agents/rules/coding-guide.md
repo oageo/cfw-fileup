@@ -41,8 +41,8 @@ Streamでも全てのチャンクを処理するとタイムアウトするの�
 - 複雑な思考を経て修正できた箇所
 - ワンライナーコードの解説
 
-エージェントスキル `.claude/skills/*/SKILL.md` に書き残すことも考えてください。  
-例えば、`.claude/skills/ecma-stream/SKILL.md` では、ECMAScriptのストリームに関する注意点が書かれています。
+エージェントスキル `.agents/skills/*/SKILL.md` に書き残すことも考えてください。  
+例えば、`.agents/skills/ecma-stream/SKILL.md` では、ECMAScriptのストリームに関する注意点が書かれています。
 
 作業中のIssueやPRだけに関する事柄であれば、複雑だった箇所をIssue・PRコメントで残すと良いと思います。  
 Issueには仕様やnpmパッケージの選択についてのまとめ、PRには具体的なコードに関することを書くと良いです。

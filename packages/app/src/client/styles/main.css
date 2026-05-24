@@ -64,7 +64,8 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 
 /* ===== Layout ===== */
 .action-menu {
-  min-width: 140px;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 24px));
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -72,10 +73,16 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
     0 18px 40px rgba(15, 23, 42, 0.18),
     0 4px 12px rgba(15, 23, 42, 0.12);
   padding: 4px;
+  text-align: left;
 }
 .action-menu-inner {
   display: flex;
   flex-direction: column;
+}
+.action-menu .btn {
+  justify-content: flex-start;
+  min-height: 36px;
+  text-align: left;
 }
 
 /* ===== Card ===== */
@@ -189,6 +196,7 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
 }
 .form-input {
   width: 100%;
+  min-height: 36px;
   padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
