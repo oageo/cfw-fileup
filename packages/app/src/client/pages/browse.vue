@@ -15,6 +15,7 @@ import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
 import { Nirax, type RouteDef } from '@/nirax';
 import { formatBytes } from '@/utils/byte-size';
+import { Download } from '@lucide/vue';
 
 const props = withDefaults(defineProps<{
 	bucketName: string;
@@ -625,7 +626,10 @@ watch(() => [entryPath.value, queryToken.value], () => {
       <!-- アーカイブ内ファイルビュー (ログイン有無問わず) -->
       <template v-if="(isTargz || isTar) && isEntryFile">
         <div class="card file-actions">
-          <a :href="innerDownloadUrl" download class="btn btn-primary">ダウンロード</a>
+          <a :href="innerDownloadUrl" download class="btn btn-primary">
+            <Download :size="16" :stroke-width="2" aria-hidden="true" />
+            ダウンロード
+          </a>
         </div>
         <div v-if="isInnerImage" :class="$style.innerImagePreview">
           <img :src="innerDownloadUrl" :alt="entryPath ?? ''" class="file-preview-image">

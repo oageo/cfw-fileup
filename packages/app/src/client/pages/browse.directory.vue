@@ -3,7 +3,7 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as v from 'valibot';
 import type { FileVisibility } from '../../shared/file-visibility';
 import { Button, Popover } from '@vuetify/v0';
-import { Download, EllipsisVertical, Eye, EyeOff, FileIcon, Folder, LayoutGrid, List, TextCursorInput, Trash2 } from '@lucide/vue';
+import { Archive, CheckCheck, Download, EllipsisVertical, Eye, EyeOff, FileArchive, FileIcon, Folder, FolderPlus, LayoutGrid, List, PackageOpen, ShieldCheck, ShieldOff, TextCursorInput, Trash2, Upload, X } from '@lucide/vue';
 import NirA from '@/components/NirA.vue';
 import { authStore, authHeaders } from '@/store/auth';
 import { apiPost } from '@/utils/api';
@@ -1080,14 +1080,27 @@ watch([isPartiallySelected, isAllSelected], async () => {
     <div class="card file-actions flex gap-2 items-center mb-3 flex-wrap">
       <!-- アーカイブ操作 -->
       <template v-if="isArchive" class="flex gap-2 items-center mb-3 flex-wrap">
-        <button v-if="isTargz" type="button" class="btn btn-primary" :disabled="archiveDownloadProgress != null" @click="startFullArchiveDownload(false)">ダウンロード (.tar.gz)</button>
-        <a v-else :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
-        <button v-if="isTargz" type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startFullArchiveDownload(true)">展開してダウンロード (.tar)</button>
+        <button v-if="isTargz" type="button" class="btn btn-primary" :disabled="archiveDownloadProgress != null" @click="startFullArchiveDownload(false)">
+          <Download :size="16" :stroke-width="2" aria-hidden="true" />
+          ダウンロード (.tar.gz)
+        </button>
+        <a v-else :href="downloadUrl" download class="btn btn-primary">
+          <Download :size="16" :stroke-width="2" aria-hidden="true" />
+          ダウンロード
+        </a>
+        <button v-if="isTargz" type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startFullArchiveDownload(true)">
+          <PackageOpen :size="16" :stroke-width="2" aria-hidden="true" />
+          展開してダウンロード (.tar)
+        </button>
         <button type="button" class="btn btn-secondary" :disabled="archiveDownloadProgress != null" @click="startArchiveToZipDownload">
+          <FileArchive :size="16" :stroke-width="2" aria-hidden="true" />
           zipとしてダウンロード
         </button>
         <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="archiveDeleteDialog = true">
-          <Button.Content>削除</Button.Content>
+          <Button.Content>
+            <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+            削除
+          </Button.Content>
         </Button.Root>
         <span v-if="deleteError" :class="[$style.inlineError, 'alert', 'alert-error']">{{ deleteError }}</span>
       </template>
@@ -1095,9 +1108,13 @@ watch([isPartiallySelected, isAllSelected], async () => {
       <!-- 通常ディレクトリ操作 -->
       <template v-if="!isArchive && authStore.user">
         <Button.Root class="btn btn-primary" @click="goUpload">
-          <Button.Content>アップロード</Button.Content>
+          <Button.Content>
+            <Upload :size="16" :stroke-width="2" aria-hidden="true" />
+            アップロード
+          </Button.Content>
         </Button.Root>
         <button type="button" class="btn btn-secondary" :disabled="!bucketId" @click="openMkdirDialog">
+          <FolderPlus :size="16" :stroke-width="2" aria-hidden="true" />
           フォルダ作成
         </button>
       </template>
@@ -1110,6 +1127,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
           :class="['btn', $style.selectAllButton]"
           @click="selectAllEntries"
         >
+          <CheckCheck :size="16" :stroke-width="2" aria-hidden="true" />
           全て選択
         </button>
 
@@ -1122,29 +1140,56 @@ watch([isPartiallySelected, isAllSelected], async () => {
           </Popover.Activator>
           <Popover.Content class="action-menu">
             <div class="action-menu-inner">
-              <Button.Root v-if="canDeleteSelectedEntries" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkDelete">
-                <Button.Content>まとめて削除</Button.Content>
+              <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="clearSelection">
+                <Button.Content>
+                  <X :size="16" :stroke-width="2" aria-hidden="true" />
+                  選択を解除
+                </Button.Content>
               </Button.Root>
-              <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(true)">
-                <Button.Content>一覧に表示</Button.Content>
-              </Button.Root>
-              <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(false)">
-                <Button.Content>一覧から非表示</Button.Content>
-              </Button.Root>
-              <Button.Root v-if="canUpdateSelectedModeration" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkModerationForcedPrivate(true)">
-                <Button.Content>まとめて強制非公開</Button.Content>
-              </Button.Root>
-              <Button.Root v-if="canUpdateSelectedModeration" class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestBulkModerationForcedPrivate(false)">
-                <Button.Content>強制非公開をまとめて解除</Button.Content>
-              </Button.Root>
+              <div class="action-menu-divider" role="separator" />
               <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" :disabled="archiveDownloadProgress != null" @click="startDirectoryArchiveDownload('tar')">
-                <Button.Content>tarとしてダウンロード</Button.Content>
+                <Button.Content>
+                  <Archive :size="16" :stroke-width="2" aria-hidden="true" />
+                  tarとしてダウンロード
+                </Button.Content>
               </Button.Root>
               <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" :disabled="archiveDownloadProgress != null" @click="startDirectoryArchiveDownload('zip')">
-                <Button.Content>zipとしてダウンロード</Button.Content>
+                <Button.Content>
+                  <FileArchive :size="16" :stroke-width="2" aria-hidden="true" />
+                  zipとしてダウンロード
+                </Button.Content>
               </Button.Root>
-              <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="clearSelection">
-                <Button.Content>選択を解除</Button.Content>
+              <div class="action-menu-divider" role="separator" />
+              <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(true)">
+                <Button.Content>
+                  <Eye :size="16" :stroke-width="2" aria-hidden="true" />
+                  一覧に表示
+                </Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedListing" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeBulkUpdateListing(false)">
+                <Button.Content>
+                  <EyeOff :size="16" :stroke-width="2" aria-hidden="true" />
+                  一覧から非表示
+                </Button.Content>
+              </Button.Root>
+              <div v-if="canDeleteSelectedEntries || canUpdateSelectedModeration" class="action-menu-divider" role="separator" />
+              <Button.Root v-if="canDeleteSelectedEntries" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkDelete">
+                <Button.Content>
+                  <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+                  まとめて削除
+                </Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedModeration" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestBulkModerationForcedPrivate(true)">
+                <Button.Content>
+                  <ShieldOff :size="16" :stroke-width="2" aria-hidden="true" />
+                  まとめて強制非公開
+                </Button.Content>
+              </Button.Root>
+              <Button.Root v-if="canUpdateSelectedModeration" class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestBulkModerationForcedPrivate(false)">
+                <Button.Content>
+                  <ShieldCheck :size="16" :stroke-width="2" aria-hidden="true" />
+                  強制非公開をまとめて解除
+                </Button.Content>
               </Button.Root>
             </div>
           </Popover.Content>
@@ -1284,17 +1329,30 @@ watch([isPartiallySelected, isAllSelected], async () => {
                             一覧から非表示
                           </Button.Content>
                         </Button.Root>
-                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && !entry.isModerationForcedPrivate" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, true)">
-                          <Button.Content>強制非公開</Button.Content>
-                        </Button.Root>
-                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && entry.isModerationForcedPrivate" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, false)">
-                          <Button.Content>強制非公開を解除</Button.Content>
-                        </Button.Root>
                         <Button.Root class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestMoveEntry(entry)">
-                          <Button.Content>移動/名前変更</Button.Content>
+                          <Button.Content>
+                            <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
+                            移動/名前変更
+                          </Button.Content>
                         </Button.Root>
                         <Button.Root class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestDeleteEntry(entry)">
-                          <Button.Content>削除</Button.Content>
+                          <Button.Content>
+                            <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+                            削除
+                          </Button.Content>
+                        </Button.Root>
+                        <div class="action-menu-divider" role="separator" />
+                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && !entry.isModerationForcedPrivate" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, true)">
+                          <Button.Content>
+                            <ShieldOff :size="16" :stroke-width="2" aria-hidden="true" />
+                            強制非公開
+                          </Button.Content>
+                        </Button.Root>
+                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && entry.isModerationForcedPrivate" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, false)">
+                          <Button.Content>
+                            <ShieldCheck :size="16" :stroke-width="2" aria-hidden="true" />
+                            強制非公開を解除
+                          </Button.Content>
                         </Button.Root>
                       </div>
                     </Popover.Content>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue';
 import { AlertDialog, Button, Input } from '@vuetify/v0';
-import { Flag, TextCursorInput } from '@lucide/vue';
+import { Download, Flag, PackageOpen, ShieldCheck, ShieldOff, TextCursorInput, Trash2 } from '@lucide/vue';
 import { authHeaders, authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
@@ -296,8 +296,14 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <div class="card file-actions">
-      <a :href="downloadUrl" download class="btn btn-primary">ダウンロード</a>
-      <button v-if="isGz" type="button" class="btn btn-secondary" :disabled="downloadProgress != null" @click="startDecompressedDownload">展開してダウンロード</button>
+      <a :href="downloadUrl" download class="btn btn-primary">
+        <Download :size="16" :stroke-width="2" aria-hidden="true" />
+        ダウンロード
+      </a>
+      <button v-if="isGz" type="button" class="btn btn-secondary" :disabled="downloadProgress != null" @click="startDecompressedDownload">
+        <PackageOpen :size="16" :stroke-width="2" aria-hidden="true" />
+        展開してダウンロード
+      </button>
       <Button.Root v-if="authStore.user && bucketId" class="btn btn-ghost" @click="moveDialog = true">
         <Button.Content>
           <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
@@ -305,7 +311,10 @@ onBeforeUnmount(() => {
         </Button.Content>
       </Button.Root>
       <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="deleteDialog = true">
-        <Button.Content>削除</Button.Content>
+        <Button.Content>
+          <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
+          削除
+        </Button.Content>
       </Button.Root>
       <Button.Root
         v-if="authStore.user?.isAdmin"
@@ -313,7 +322,11 @@ onBeforeUnmount(() => {
         :disabled="moderationSaving"
         @click="requestModerationForcedPrivate(!isModerationForcedPrivate)"
       >
-        <Button.Content>{{ isModerationForcedPrivate ? '強制非公開を解除' : '強制非公開' }}</Button.Content>
+        <Button.Content>
+          <ShieldCheck v-if="isModerationForcedPrivate" :size="16" :stroke-width="2" aria-hidden="true" />
+          <ShieldOff v-else :size="16" :stroke-width="2" aria-hidden="true" />
+          {{ isModerationForcedPrivate ? '強制非公開を解除' : '強制非公開' }}
+        </Button.Content>
       </Button.Root>
       <Button.Root v-if="!isOwner" class="btn btn-ghost" @click="openReportDialog">
         <Button.Content>

@@ -470,6 +470,12 @@ function toggleTheme(): void {
     text-align: left;
   }
 
+  :global(.action-menu .btn > *) {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   :global(.form-input) {
     min-height: 36px;
   }
