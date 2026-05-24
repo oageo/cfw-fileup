@@ -138,8 +138,6 @@ onMounted(loadTokens);
 <style module lang="scss">
 .root {
   max-width: 960px;
-  margin: 0 auto;
-  padding: 24px;
 }
 
 .header {
@@ -161,10 +159,6 @@ onMounted(loadTokens);
 }
 
 @media (max-width: 640px) {
-  .root {
-    padding: 16px;
-  }
-
   .header {
     flex-direction: column;
   }
