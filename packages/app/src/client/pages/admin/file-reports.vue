@@ -2,31 +2,48 @@
 import { onMounted, ref } from 'vue';
 import { authStore } from '@/store/auth';
 import { apiPost, type ApiSuccess } from '@/utils/api';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import NirA from '@/components/NirA.vue';
 import { fileReportReasonLabels, fileReportStatusIds, fileReportStatusLabels, type FileReportStatusId } from '../../../shared/file-reports';
 
-type FileReport = ApiSuccess<'/api/admin/list-file-reports'>['data'][number];
+type FileReport = ApiSuccess<'/api/admin/list-file-reports'>['data']['items'][number];
 
 const reports = ref<FileReport[]>([]);
 const loading = ref(true);
+const loadingMore = ref(false);
 const error = ref('');
 const statusFilter = ref<FileReportStatusId | ''>('');
+const nextCursor = ref<string | null>(null);
+const hasMore = ref(false);
 
-onMounted(loadReports);
+onMounted(() => loadReports());
 
-async function loadReports(): Promise<void> {
-	loading.value = true;
+async function loadReports(cursor: string | null = null): Promise<void> {
+	const isMore = cursor !== null;
+	if (isMore) {
+		loadingMore.value = true;
+	} else {
+		loading.value = true;
+	}
 	error.value = '';
 	try {
 		const result = await apiPost('/api/admin/list-file-reports', {
 			status: statusFilter.value || null,
+			limit: 50,
+			cursor,
 		});
 		if (!result.ok) throw new Error(result.data.message || 'ファイル通報一覧の取得に失敗しました');
-		reports.value = result.data;
+		reports.value = cursor ? [...reports.value, ...result.data.items] : result.data.items;
+		nextCursor.value = result.data.nextCursor;
+		hasMore.value = result.data.hasMore;
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
 	} finally {
-		loading.value = false;
+		if (isMore) {
+			loadingMore.value = false;
+		} else {
+			loading.value = false;
+		}
 	}
 }
 
@@ -67,13 +84,13 @@ function statusBadgeClass(status: FileReportStatusId): string {
       <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
 
       <div class="flex items-center gap-2 mb-4">
-        <select v-model="statusFilter" class="form-input" @change="loadReports">
+        <select v-model="statusFilter" class="form-input" @change="loadReports()">
           <option value="">すべて</option>
           <option v-for="statusId in fileReportStatusIds" :key="statusId" :value="statusId">
             {{ fileReportStatusLabels[statusId] }}
           </option>
         </select>
-        <button class="btn btn-secondary" type="button" :disabled="loading" @click="loadReports">
+        <button class="btn btn-secondary" type="button" :disabled="loading" @click="loadReports()">
           再読み込み
         </button>
       </div>
@@ -115,6 +132,13 @@ function statusBadgeClass(status: FileReportStatusId): string {
                   </div>
                 </td>
               </tr>
+              <InfiniteTableRow
+                v-if="hasMore || loadingMore"
+                :colspan="5"
+                :has-more="hasMore"
+                :loading="loadingMore"
+                @load-more="loadReports(nextCursor)"
+              />
             </tbody>
           </table>
         </div>

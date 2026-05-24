@@ -3,27 +3,42 @@ import { onMounted, ref } from 'vue';
 import { authStore } from '@/store/auth';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import { formatBytes } from '@/utils/byte-size';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import NirA from '@/components/NirA.vue';
 
-type AdminFile = ApiSuccess<'/api/admin/list-files'>['data'][number];
+type AdminFile = ApiSuccess<'/api/admin/list-files'>['data']['items'][number];
 
 const files = ref<AdminFile[]>([]);
 const loading = ref(true);
+const loadingMore = ref(false);
 const error = ref('');
+const nextCursor = ref<string | null>(null);
+const hasMore = ref(false);
 
-onMounted(loadFiles);
+onMounted(() => loadFiles());
 
-async function loadFiles(): Promise<void> {
-	loading.value = true;
+async function loadFiles(cursor: string | null = null): Promise<void> {
+	const isMore = cursor !== null;
+	if (isMore) {
+		loadingMore.value = true;
+	} else {
+		loading.value = true;
+	}
 	error.value = '';
 	try {
-		const result = await apiPost('/api/admin/list-files');
+		const result = await apiPost('/api/admin/list-files', { limit: 50, cursor });
 		if (!result.ok) throw new Error(result.data.message || 'ファイル一覧の取得に失敗しました');
-		files.value = result.data;
+		files.value = cursor ? [...files.value, ...result.data.items] : result.data.items;
+		nextCursor.value = result.data.nextCursor;
+		hasMore.value = result.data.hasMore;
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
 	} finally {
-		loading.value = false;
+		if (isMore) {
+			loadingMore.value = false;
+		} else {
+			loading.value = false;
+		}
 	}
 }
 
@@ -80,7 +95,7 @@ function fileKindLabel(file: AdminFile): string {
       <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
 
       <div class="flex items-center gap-2 mb-4">
-        <button class="btn btn-secondary" type="button" :disabled="loading" @click="loadFiles">
+        <button class="btn btn-secondary" type="button" :disabled="loading" @click="loadFiles()">
           再読み込み
         </button>
       </div>
@@ -137,6 +152,13 @@ function fileKindLabel(file: AdminFile): string {
                   </div>
                 </td>
               </tr>
+              <InfiniteTableRow
+                v-if="hasMore || loadingMore"
+                :colspan="8"
+                :has-more="hasMore"
+                :loading="loadingMore"
+                @load-more="loadFiles(nextCursor)"
+              />
             </tbody>
           </table>
         </div>

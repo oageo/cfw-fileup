@@ -3,7 +3,7 @@ import { computed, ref, onMounted } from 'vue';
 import * as v from 'valibot';
 import { Button } from '@vuetify/v0';
 import { authStore } from '@/store/auth';
-import { apiPost } from '@/utils/api';
+import { apiPost, type ApiResult } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
@@ -96,9 +96,18 @@ async function fetchQuota(): Promise<void> {
 
 async function fetchUser(): Promise<void> {
 	try {
-		const result = await apiPost('/api/admin/list-users');
-		if (!result.ok) throw new Error('ユーザー情報の取得に失敗しました');
-		username.value = result.data.find((user) => user.id === props.userId)?.username ?? '';
+		let cursor: string | null = null;
+		do {
+			const result: ApiResult<'/api/admin/list-users'> = await apiPost('/api/admin/list-users', { limit: 50, cursor });
+			if (!result.ok) throw new Error('ユーザー情報の取得に失敗しました');
+			const user = result.data.items.find((item) => item.id === props.userId);
+			if (user) {
+				username.value = user.username;
+				return;
+			}
+			cursor = result.data.nextCursor;
+		} while (cursor);
+		username.value = '';
 	} catch (e) {
 		error.value = String(e);
 	}

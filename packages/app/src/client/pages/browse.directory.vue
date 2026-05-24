@@ -10,6 +10,8 @@ import { apiPost } from '@/utils/api';
 import { setPendingUpload } from '@/store/pending-upload';
 import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import InfiniteLoadTrigger from '@/components/InfiniteLoadTrigger.vue';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import InputDialog from '@/components/InputDialog.vue';
 import MoveEntryDialog from '@/components/MoveEntryDialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
@@ -66,10 +68,35 @@ function archiveEntryBrowseUrl(path: string): string {
 const entries = ref<DisplayEntry[]>([]);
 const error = ref('');
 const loading = ref(true);
+const loadingMore = ref(false);
+const directoryNextCursor = ref<string | null>(null);
+const directoryHasMore = ref(false);
 const isDragOver = ref(false);
 const deleteError = ref('');
 
 type RawArchiveEntry = { id: string; path: string; mimeType: string; size?: number };
+type DirectoryEntry = {
+	type: 'dir' | 'file';
+	name: string;
+	path?: string;
+	fileId?: string;
+	size?: number;
+	mimeType?: string;
+	isTargz?: boolean;
+	isTar?: boolean;
+	visibility?: FileVisibility;
+	isListed?: boolean;
+	isModerationForcedPrivate?: boolean;
+	downloadCount?: number;
+	isDownloadCountEnabled?: boolean;
+	isDownloadCountVisible?: boolean;
+};
+type DirectoryPage = {
+	type: 'directory';
+	items: DirectoryEntry[];
+	nextCursor: string | null;
+	hasMore: boolean;
+};
 const allArchiveEntries = ref<RawArchiveEntry[]>([]);
 const archivePath = ref('');
 
@@ -111,6 +138,10 @@ function isImageMime(mime: string): boolean {
 }
 
 // 一括選択・削除用の状態
+//
+// 青選択: selectedPaths に入っている、いま読み込み済みページ上の明示選択。
+// 緑選択: selectAllMode=true の、ページングの未読み込み分も含む「このディレクトリ全件」選択。
+// 緑選択中の excludedPaths は、全件選択から外したパスだけを持つ。
 const selectedPaths = ref<Set<string>>(new Set());
 const bulkDeleteDialog = ref(false);
 const bulkModerationDialog = ref(false);
@@ -146,7 +177,7 @@ const selectedFileEntries = computed(() => {
 			.filter((entry): entry is DisplayEntry => entry != null);
 	return selected.filter(entry => !entry.isDir && entry.fileId != null);
 });
-const canUpdateSelectedModeration = computed(() => !isArchive.value && authStore.user?.isAdmin === true && selectedFileEntries.value.length > 0);
+const canUpdateSelectedModeration = computed(() => !isArchive.value && authStore.user?.isAdmin === true && (selectAllMode.value || selectedFileEntries.value.length > 0));
 
 const selectedCount = computed(() => {
 	if (selectAllMode.value) return Math.max(0, selectableEntries.value.length - excludedPaths.value.size);
@@ -524,6 +555,28 @@ function isEntrySelected(entry: DisplayEntry): boolean {
 	return selectAllMode.value ? !excludedPaths.value.has(entry.fullPath) : selectedPaths.value.has(entry.fullPath);
 }
 
+function isExcludedFromSelectAll(path: string): boolean {
+	for (const excludedPath of excludedPaths.value) {
+		if (path === excludedPath) return true;
+		if (excludedPath.endsWith('/') && path.startsWith(excludedPath)) return true;
+	}
+	return false;
+}
+
+function selectAllDirectoryTarget(): { type: 'directory'; path: string; excludePaths?: string[] } {
+	const excludes = Array.from(excludedPaths.value);
+	return excludes.length === 0
+		? { type: 'directory', path: props.filePath }
+		: { type: 'directory', path: props.filePath, excludePaths: excludes };
+}
+
+function selectedVisibleTargets(): Array<{ type: 'file' | 'directory'; path: string }> {
+	return Array.from(selectedPaths.value).map((path) => {
+		const entry = entries.value.find(e => e.fullPath === path);
+		return { type: entry?.isDir ? 'directory' as const : 'file' as const, path };
+	});
+}
+
 function stopGridActionEvent(event: Event): void {
 	event.preventDefault();
 	event.stopPropagation();
@@ -612,13 +665,8 @@ async function executeBulkDelete(): Promise<void> {
 	}
 
 	const targets = selectAllMode.value
-		? selectableEntries.value
-			.filter(entry => !excludedPaths.value.has(entry.fullPath))
-			.map(entry => ({ type: entry.isDir ? 'directory' as const : 'file' as const, path: entry.fullPath }))
-		: Array.from(selectedPaths.value).map((path) => {
-			const entry = entries.value.find(e => e.fullPath === path);
-			return { type: entry?.isDir ? 'directory' as const : 'file' as const, path };
-		});
+		? [selectAllDirectoryTarget()]
+		: selectedVisibleTargets();
 
 	const result = await apiPost('/api/files/delete', { bucketId: bucketId.value, targets });
 	selectedPaths.value.clear();
@@ -642,11 +690,13 @@ async function executeBulkUpdateListing(isListed: boolean): Promise<void> {
 	}
 
 	const targetEntries = selectAllMode.value
-		? selectableEntries.value.filter(entry => !excludedPaths.value.has(entry.fullPath))
+		? selectableEntries.value.filter(entry => !isExcludedFromSelectAll(entry.fullPath))
 		: Array.from(selectedPaths.value)
 			.map(path => entries.value.find(entry => entry.fullPath === path))
 			.filter((entry): entry is DisplayEntry => entry != null);
-	const targets = targetEntries.map(entry => ({ type: entry.isDir ? 'directory' as const : 'file' as const, path: entry.fullPath }));
+	const targets = selectAllMode.value
+		? [selectAllDirectoryTarget()]
+		: targetEntries.map(entry => ({ type: entry.isDir ? 'directory' as const : 'file' as const, path: entry.fullPath }));
 
 	const result = await apiPost('/api/files/update-listing', { bucketId: bucketId.value, targets, isListed });
 	if (!result.ok) {
@@ -712,7 +762,10 @@ async function confirmEntryUpdateModerationForcedPrivate(): Promise<void> {
 async function executeBulkUpdateModerationForcedPrivate(): Promise<void> {
 	bulkModerationDialog.value = false;
 	deleteError.value = '';
-	const targets = selectedFileEntries.value;
+	const targets = selectAllMode.value
+		? (await fetchAllDirectoryEntriesForSelection())
+			.filter(entry => !entry.isDir && entry.fileId != null && !isExcludedFromSelectAll(entry.fullPath))
+		: selectedFileEntries.value;
 	if (targets.length === 0) {
 		deleteError.value = 'ファイルを選択してください。';
 		return;
@@ -726,7 +779,7 @@ async function executeBulkUpdateModerationForcedPrivate(): Promise<void> {
 			isModerationForcedPrivate: bulkModerationValue.value,
 		});
 		if (!result.ok) {
-			failed.push(entry.name);
+			failed.push(entry.fullPath);
 		}
 	}
 
@@ -806,6 +859,8 @@ function navigateArchiveUp(): void {
 async function load(): Promise<void> {
 	loading.value = true;
 	error.value = '';
+	directoryNextCursor.value = null;
+	directoryHasMore.value = false;
 	// ロード時に選択状態をリセット
 	selectedPaths.value.clear();
 	excludedPaths.value.clear();
@@ -820,55 +875,33 @@ async function load(): Promise<void> {
 			allArchiveEntries.value = raw;
 			buildArchiveEntries();
 		} else {
-			const data = authStore.user
-				? await (async () => {
-					const result = await apiPost('/api/files/ls', { bucketName: props.bucketName, path: props.filePath });
-					if (!result.ok && result.status === 403) return await fetchPublicDirectoryEntries();
-					if (!result.ok) {
-						error.value = result.data.message;
-						return null;
-					}
-					return result.data;
-				})()
-				: await fetchPublicDirectoryEntries();
+			const data = await fetchDirectoryPage(null);
 			if (data === null) return;
-			entries.value = data.entries.map(e => {
-				if (e.type === 'dir') {
-					return {
-					key: `dir:${e.name}`,
-					name: e.name,
-					link: `/v/${props.bucketName}/${props.filePath}${e.name}/`,
-					isDir: true,
-					fullPath: `${props.filePath}${e.name}/`,
-					label: 'フォルダ',
-					isListed: e.isListed,
-					};
-				}
-				const mime = e.isTargz ? 'application/gzip' : e.isTar ? 'application/x-tar' : (e.mimeType ?? '');
-				const previewUrl = isImageMime(mime) && e.visibility === 'public' && e.isModerationForcedPrivate !== true && e.fileId ? `/d/${e.fileId}` : undefined;
-				return {
-					key: `file:${e.name}`,
-					name: e.name,
-					link: `/v/${props.bucketName}/${e.path}`,
-					isDir: false,
-					fullPath: e.path ?? e.name,
-					size: e.size,
-					fileId: e.fileId,
-					label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : mime,
-					visibility: e.visibility,
-					isListed: e.isListed,
-					isModerationForcedPrivate: e.isModerationForcedPrivate,
-					downloadCount: e.downloadCount,
-					isDownloadCountEnabled: e.isDownloadCountEnabled,
-					isDownloadCountVisible: e.isDownloadCountVisible,
-					previewUrl,
-				};
-			});
+			entries.value = data.items.map(toDisplayEntry);
+			directoryNextCursor.value = data.nextCursor;
+			directoryHasMore.value = data.hasMore;
 		}
 	} catch (e) {
 		error.value = String(e);
 	} finally {
 		loading.value = false;
+	}
+}
+
+async function loadMoreDirectory(): Promise<void> {
+	if (!directoryHasMore.value || loadingMore.value) return;
+	loadingMore.value = true;
+	error.value = '';
+	try {
+		const data = await fetchDirectoryPage(directoryNextCursor.value);
+		if (data === null) return;
+		entries.value = [...entries.value, ...data.items.map(toDisplayEntry)];
+		directoryNextCursor.value = data.nextCursor;
+		directoryHasMore.value = data.hasMore;
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		loadingMore.value = false;
 	}
 }
 
@@ -945,23 +978,77 @@ async function executeDeleteArchive(): Promise<void> {
 	mainRouter.pushByPath(parent);
 }
 
-async function fetchPublicDirectoryEntries(): Promise<{
-	entries: Array<{
-		type: 'dir' | 'file'; name: string; path?: string;
-		fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean; downloadCount?: number; isDownloadCountEnabled?: boolean; isDownloadCountVisible?: boolean;
-	}>;
-} | null> {
-	const lsUrl = `/api/files/ls?bucketName=${encodeURIComponent(props.bucketName)}&path=${encodeURIComponent(props.filePath)}`;
+async function fetchDirectoryPage(cursor: string | null): Promise<DirectoryPage | null> {
+	return await fetchDirectoryPageWithLimit(cursor, 50);
+}
+
+async function fetchDirectoryPageWithLimit(cursor: string | null, limit: number): Promise<DirectoryPage | null> {
+	if (authStore.user) {
+		const result = await apiPost('/api/files/ls', { bucketName: props.bucketName, path: props.filePath, limit, cursor });
+		if (result.ok) return result.data;
+		if (result.status !== 403) {
+			error.value = result.data.message;
+			return null;
+		}
+	}
+	return await fetchPublicDirectoryEntries(cursor, limit);
+}
+
+async function fetchPublicDirectoryEntries(cursor: string | null, limit = 50): Promise<DirectoryPage | null> {
+	const params = new URLSearchParams({ bucketName: props.bucketName, path: props.filePath });
+	params.set('limit', String(limit));
+	if (cursor) params.set('cursor', cursor);
+	const lsUrl = `/api/files/ls?${params.toString()}`;
 	const res = await fetch(lsUrl);
 	if (!res.ok) {
 		error.value = `取得失敗: ${res.status}`;
 		return null;
 	}
-	return await res.json() as {
-		entries: Array<{
-			type: 'dir' | 'file'; name: string; path?: string;
-			fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: FileVisibility; isListed?: boolean; isModerationForcedPrivate?: boolean; downloadCount?: number; isDownloadCountEnabled?: boolean; isDownloadCountVisible?: boolean;
-		}>;
+	return await res.json() as DirectoryPage;
+}
+
+async function fetchAllDirectoryEntriesForSelection(): Promise<DisplayEntry[]> {
+	const result: DisplayEntry[] = [];
+	let cursor: string | null = null;
+	do {
+		const page = await fetchDirectoryPageWithLimit(cursor, 100);
+		if (page === null) return [];
+		result.push(...page.items.map(toDisplayEntry));
+		cursor = page.nextCursor;
+	} while (cursor !== null);
+	return result;
+}
+
+function toDisplayEntry(e: DirectoryEntry): DisplayEntry {
+	if (e.type === 'dir') {
+		return {
+			key: `dir:${e.name}`,
+			name: e.name,
+			link: `/v/${props.bucketName}/${props.filePath}${e.name}/`,
+			isDir: true,
+			fullPath: `${props.filePath}${e.name}/`,
+			label: 'フォルダ',
+			isListed: e.isListed,
+		};
+	}
+	const mime = e.isTargz ? 'application/gzip' : e.isTar ? 'application/x-tar' : (e.mimeType ?? '');
+	const previewUrl = isImageMime(mime) && e.visibility === 'public' && e.isModerationForcedPrivate !== true && e.fileId ? `/d/${e.fileId}` : undefined;
+	return {
+		key: `file:${e.name}`,
+		name: e.name,
+		link: `/v/${props.bucketName}/${e.path}`,
+		isDir: false,
+		fullPath: e.path ?? e.name,
+		size: e.size,
+		fileId: e.fileId,
+		label: e.isTargz ? 'tar.gz' : e.isTar ? 'tar' : mime,
+		visibility: e.visibility,
+		isListed: e.isListed,
+		isModerationForcedPrivate: e.isModerationForcedPrivate,
+		downloadCount: e.downloadCount,
+		isDownloadCountEnabled: e.isDownloadCountEnabled,
+		isDownloadCountVisible: e.isDownloadCountVisible,
+		previewUrl,
 	};
 }
 
@@ -1221,6 +1308,13 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </div>
                 </td>
               </tr>
+              <InfiniteTableRow
+                v-if="!isArchive && (directoryHasMore || loadingMore)"
+                :colspan="tableColspan"
+                :has-more="directoryHasMore"
+                :loading="loadingMore"
+                @load-more="loadMoreDirectory"
+              />
             </tbody>
           </table>
           </div>
@@ -1382,6 +1476,12 @@ watch([isPartiallySelected, isAllSelected], async () => {
             </div>
           </div>
         </template>
+        <InfiniteLoadTrigger
+          v-if="!isArchive && viewMode !== 'list' && (directoryHasMore || loadingMore)"
+          :has-more="directoryHasMore"
+          :loading="loadingMore"
+          @load-more="loadMoreDirectory"
+        />
       </div>
     </template>
 

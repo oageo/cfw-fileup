@@ -1,10 +1,18 @@
 import * as v from 'valibot';
-import { errorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString, PageRequestFields, pagedResponse } from '../api.schemas.js';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 const BucketNameString = v.pipe(v.string(), v.maxLength(MAX_BUCKET_NAME_LENGTH));
 const FilePathString = v.pipe(v.string(), v.maxLength(MAX_FILE_PATH_LENGTH));
+const FileTokenResponse = v.pipe(
+	v.object({
+		id: v.string(),
+		expiresAt: v.nullable(v.number()),
+		createdAt: v.number(),
+	}),
+	v.metadata({ ref: 'FileToken' }),
+);
 
 export const fileTokensApiDef = {
 	'/api/file-tokens/create': {
@@ -27,11 +35,10 @@ export const fileTokensApiDef = {
 		req: v.object({
 			bucketName: BucketNameString,
 			filePath: FilePathString,
+			...PageRequestFields,
 		}),
 		res: {
-			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
-				tokens: v.array(v.object({ id: v.string(), expiresAt: v.nullable(v.number()), createdAt: v.number() })),
-			}) } } },
+			200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(FileTokenResponse) } } },
 			400: errorResponse('Bad request (missing fields)', ['BUCKET_NAME_IS_REQUIRED']),
 			404: errorResponse('Bucket or file not found', ['BUCKET_NOT_FOUND', 'FILE_NOT_FOUND']),
 		},

@@ -4,6 +4,7 @@ import { Button, Popover } from '@vuetify/v0';
 import { EllipsisVertical } from '@lucide/vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import FileVisibilitySettings from '@/components/FileVisibilitySettings.vue';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import { apiPost } from '@/utils/api';
 import type { FileVisibility } from '../../shared/file-visibility';
 
@@ -34,7 +35,10 @@ interface FileToken {
 
 const tokens = ref<FileToken[]>([]);
 const loading = ref(false);
+const loadingMore = ref(false);
 const listError = ref('');
+const nextCursor = ref<string | null>(null);
+const hasMore = ref(false);
 
 const expiryMode = ref<'unlimited' | 'datetime' | 'duration'>('duration');
 const datetimeDate = ref('');
@@ -59,20 +63,31 @@ const editPassphrase = ref('');
 const visibilitySaving = ref(false);
 const visibilityError = ref('');
 
-async function loadTokens(): Promise<void> {
-	loading.value = true;
+async function loadTokens(cursor: string | null = null): Promise<void> {
+	const isMore = cursor !== null;
+	if (isMore) {
+		loadingMore.value = true;
+	} else {
+		loading.value = true;
+	}
 	listError.value = '';
 	try {
-		const result = await apiPost('/api/file-tokens/list', { bucketName: props.bucketName, filePath: props.filePath });
+		const result = await apiPost('/api/file-tokens/list', { bucketName: props.bucketName, filePath: props.filePath, limit: 50, cursor });
 		if (!result.ok) {
 			listError.value = result.data.message;
 			return;
 		}
-		tokens.value = result.data.tokens.sort((a, b) => b.createdAt - a.createdAt);
+		tokens.value = cursor ? [...tokens.value, ...result.data.items] : result.data.items;
+		nextCursor.value = result.data.nextCursor;
+		hasMore.value = result.data.hasMore;
 	} catch (e) {
 		listError.value = String(e);
 	} finally {
-		loading.value = false;
+		if (isMore) {
+			loadingMore.value = false;
+		} else {
+			loading.value = false;
+		}
 	}
 }
 
@@ -347,6 +362,13 @@ onMounted(loadTokens);
                 </Popover.Root>
               </td>
             </tr>
+            <InfiniteTableRow
+              v-if="hasMore || loadingMore"
+              :colspan="5"
+              :has-more="hasMore"
+              :loading="loadingMore"
+              @load-more="loadTokens(nextCursor)"
+            />
           </tbody>
         </table>
       </div>

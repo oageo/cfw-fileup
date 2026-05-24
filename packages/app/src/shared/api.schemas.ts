@@ -8,6 +8,24 @@ export const IdString = v.pipe(
 	v.metadata({ ref: 'IdString' }),
 );
 
+export const PageRequestFields = {
+	limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100)), 50),
+	cursor: v.optional(v.nullable(v.string()), null),
+} as const;
+
+export const PageRequestSchema = v.pipe(
+	v.object(PageRequestFields),
+	v.metadata({ ref: 'PageRequest' }),
+);
+
+export function pagedResponse<ItemSchema extends v.GenericSchema>(itemSchema: ItemSchema) {
+	return v.object({
+		items: v.array(itemSchema),
+		nextCursor: v.nullable(v.string()),
+		hasMore: v.boolean(),
+	});
+}
+
 export function createErrorResponseSchema<const Codes extends readonly [ApiErrorCode, ...ApiErrorCode[]]>(codes: Codes) {
 	return v.object({
 		error: v.picklist(codes),

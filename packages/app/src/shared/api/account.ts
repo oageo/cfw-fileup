@@ -1,8 +1,19 @@
 import * as v from 'valibot';
-import { errorResponse } from '../api.schemas.js';
+import { errorResponse, PageRequestFields, pagedResponse } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
+
+const AccountTokenResponse = v.pipe(
+	v.object({
+		id: v.string(),
+		createdAt: v.number(),
+		lastIpAddress: v.nullable(v.string()),
+		isCurrent: v.boolean(),
+		isRevoked: v.boolean(),
+	}),
+	v.metadata({ ref: 'AccountToken' }),
+);
 
 export const accountApiDef = {
 	'/api/account/me': {
@@ -39,9 +50,9 @@ export const accountApiDef = {
 	'/api/account/tokens': {
 		summary: 'List account access tokens',
 		tags: ['account'],
-		req: v.object({}),
+		req: v.object(PageRequestFields),
 		res: {
-			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ tokens: v.array(v.object({ id: v.string(), createdAt: v.number(), lastIpAddress: v.nullable(v.string()), isCurrent: v.boolean(), isRevoked: v.boolean() })) }) } } },
+			200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(AccountTokenResponse) } } },
 		},
 	},
 	'/api/account/tokens/revoke-all': {

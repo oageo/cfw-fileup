@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { errorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString, PageRequestFields, pagedResponse } from '../api.schemas.js';
 import { KnownSettingListSchema, KnownSettingRecordSchema } from '../app-settings.js';
 import { fileReportReasonSchema, fileReportRelationshipSchema, fileReportStatusSchema } from '../file-reports.js';
 import { fileVisibilitySchema } from '../file-visibility.js';
@@ -133,6 +133,15 @@ const ModerationAuditLogResponse = v.pipe(
 	}),
 	v.metadata({ ref: 'ModerationAuditLog' }),
 );
+const AdminUserResponse = v.pipe(
+	v.object({
+		id: IdString,
+		username: v.string(),
+		isAdmin: v.boolean(),
+		isSuspended: v.boolean(),
+	}),
+	v.metadata({ ref: 'AdminUser' }),
+);
 
 const OkResponse = { 200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } } };
 const WorkerCachePurgeResponse = v.pipe(
@@ -175,14 +184,14 @@ export const adminApiDef = {
 	'/api/admin/list-files': {
 		summary: 'List all files',
 		tags: ['admin'],
-		req: v.object({}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(AdminFileResponse) } } }, ...AdminErrors },
+		req: v.object(PageRequestFields),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(AdminFileResponse) } } }, ...AdminErrors },
 	},
 	'/api/admin/list-moderation-audit-logs': {
 		summary: 'List moderation audit logs',
 		tags: ['admin'],
-		req: v.object({}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(ModerationAuditLogResponse) } } }, ...AdminErrors },
+		req: v.object(PageRequestFields),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(ModerationAuditLogResponse) } } }, ...AdminErrors },
 	},
 	'/api/admin/update-file-moderation': {
 		summary: 'Update file moderation flags',
@@ -247,8 +256,8 @@ export const adminApiDef = {
 	'/api/admin/list-users': {
 		summary: 'List all users',
 		tags: ['admin'],
-		req: v.object({}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(v.object({ id: v.string(), username: v.string(), isAdmin: v.boolean(), isSuspended: v.boolean() })) } } }, ...AdminErrors },
+		req: v.object(PageRequestFields),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(AdminUserResponse) } } }, ...AdminErrors },
 	},
 	'/api/admin/update-setting': {
 		summary: 'Update app setting',
@@ -265,8 +274,8 @@ export const adminApiDef = {
 	'/api/admin/list-ip-bans': {
 		summary: 'List IP bans',
 		tags: ['admin'],
-		req: v.object({}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(IpBanResponse) } } }, ...AdminErrors },
+		req: v.object(PageRequestFields),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(IpBanResponse) } } }, ...AdminErrors },
 	},
 	'/api/admin/create-ip-ban': {
 		summary: 'Create an IP ban',
@@ -288,8 +297,8 @@ export const adminApiDef = {
 	'/api/admin/list-file-reports': {
 		summary: 'List file reports',
 		tags: ['admin'],
-		req: v.object({ status: v.optional(v.nullable(fileReportStatusSchema)) }),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(FileReportResponse) } } }, ...AdminErrors },
+		req: v.object({ status: v.optional(v.nullable(fileReportStatusSchema)), ...PageRequestFields }),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(FileReportResponse) } } }, ...AdminErrors },
 	},
 	'/api/admin/get-file-report': {
 		summary: 'Get file report',

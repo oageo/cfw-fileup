@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import * as v from 'valibot';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
@@ -17,6 +17,7 @@ import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 import { isValidCidr } from '../utils/cidr';
 import { recordModerationAuditLog } from '../utils/moderation';
+import { idPage, pageParams } from '../utils/pagination';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -109,6 +110,7 @@ app.post(
 	validator('json', apiDef['/api/admin/list-ip-bans'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/list-ip-bans', Env>) => {
 		const db = getDb(c.env);
+		const { limit, cursor } = pageParams(c.req.valid('json'));
 		const rows = await db
 			.select({
 				id: ipBans.id,
@@ -121,9 +123,11 @@ app.post(
 			})
 			.from(ipBans)
 			.leftJoin(users, eq(ipBans.createdBy, users.id))
-			.orderBy(desc(ipBans.id));
+			.where(cursor ? lt(ipBans.id, cursor) : undefined)
+			.orderBy(desc(ipBans.id))
+			.limit(limit + 1);
 
-		return c.json(rows.map(row => ({
+		return c.json(idPage(rows, limit, row => ({
 			id: row.id,
 			cidr: row.cidr,
 			reason: row.reason,
@@ -192,7 +196,15 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/admin/list-file-reports', Env>) => {
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
+		const { limit, cursor } = pageParams(body);
 		const fileOwners = alias(users, 'file_owners');
+		const whereCondition = body.status && cursor
+			? and(eq(fileReports.status, body.status), lt(fileReports.id, cursor))
+			: body.status
+				? eq(fileReports.status, body.status)
+				: cursor
+					? lt(fileReports.id, cursor)
+					: undefined;
 		const query = db
 			.select({
 				id: fileReports.id,
@@ -222,10 +234,12 @@ app.post(
 			.leftJoin(files, eq(fileReports.fileId, files.id))
 			.leftJoin(buckets, eq(files.bucketId, buckets.id))
 			.leftJoin(fileOwners, eq(files.userId, fileOwners.id))
-			.orderBy(desc(fileReports.id));
+			.where(whereCondition)
+			.orderBy(desc(fileReports.id))
+			.limit(limit + 1);
 
-		const rows = body.status ? await query.where(eq(fileReports.status, body.status)) : await query;
-		return c.json(rows.map(row => ({
+		const rows = await query;
+		return c.json(idPage(rows, limit, row => ({
 			...row,
 			uploadEventId: null,
 			uploadIpAddress: null,
@@ -332,6 +346,7 @@ app.post(
 	validator('json', apiDef['/api/admin/list-files'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/list-files', Env>) => {
 		const db = getDb(c.env);
+		const { limit, cursor } = pageParams(c.req.valid('json'));
 		const rows = await db
 			.select({
 				id: files.id,
@@ -352,9 +367,11 @@ app.post(
 			.from(files)
 			.leftJoin(buckets, eq(files.bucketId, buckets.id))
 			.leftJoin(users, eq(files.userId, users.id))
-			.orderBy(desc(files.id));
+			.where(cursor ? lt(files.id, cursor) : undefined)
+			.orderBy(desc(files.id))
+			.limit(limit + 1);
 
-		return c.json(rows.map(row => ({
+		return c.json(idPage(rows, limit, row => ({
 			...row,
 			createdAt: parseEaidx(row.id).date.getTime(),
 		})), 200);
@@ -367,6 +384,7 @@ app.post(
 	validator('json', apiDef['/api/admin/list-moderation-audit-logs'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/list-moderation-audit-logs', Env>) => {
 		const db = getDb(c.env);
+		const { limit, cursor } = pageParams(c.req.valid('json'));
 		const adminUsers = alias(users, 'admin_users');
 		const targetUsers = alias(users, 'target_users');
 		const rows = await db
@@ -383,10 +401,11 @@ app.post(
 			.from(moderationAuditLogs)
 			.leftJoin(adminUsers, eq(moderationAuditLogs.adminUserId, adminUsers.id))
 			.leftJoin(targetUsers, eq(moderationAuditLogs.targetUserId, targetUsers.id))
+			.where(cursor ? lt(moderationAuditLogs.id, cursor) : undefined)
 			.orderBy(desc(moderationAuditLogs.id))
-			.limit(200);
+			.limit(limit + 1);
 
-		return c.json(rows.map(row => ({
+		return c.json(idPage(rows, limit, row => ({
 			...row,
 			createdAt: parseEaidx(row.id).date.getTime(),
 		})), 200);
@@ -725,13 +744,18 @@ app.post(
 	validator('json', apiDef['/api/admin/list-users'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/list-users', Env>) => {
 		const db = getDb(c.env);
+		const { limit, cursor } = pageParams(c.req.valid('json'));
 		const allUsers = await db.select({
 			id: users.id,
 			username: users.username,
 			isAdmin: users.isAdmin,
 			isSuspended: users.isSuspended,
-		}).from(users).all();
-		return c.json(allUsers, 200);
+		})
+			.from(users)
+			.where(cursor ? lt(users.id, cursor) : undefined)
+			.orderBy(desc(users.id))
+			.limit(limit + 1);
+		return c.json(idPage(allUsers, limit, user => user), 200);
 	}, getResponseDefWithAuth('/api/admin/list-users')),
 );
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc, lt } from 'drizzle-orm';
 import { buckets, files, fileAccessTokens } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { generateToken, tokenToBytes } from '../utils/crypto';
@@ -11,6 +11,7 @@ import { omitResAndReq } from '../utils/omit';
 import { verifyTurnstile } from '../utils/turnstile';
 import { apiError } from '../utils/api-error';
 import { recordModerationEvent } from '../utils/moderation';
+import { idPage, pageParams } from '../utils/pagination';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -71,6 +72,7 @@ app.post(
 		const db = getDb(c.env);
 		const user = c.get('user');
 		const body = c.req.valid('json');
+		const { limit, cursor } = pageParams(body);
 
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
 		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
@@ -86,15 +88,15 @@ app.post(
 		const rows = await db
 			.select()
 			.from(fileAccessTokens)
-			.where(eq(fileAccessTokens.fileId, file.id));
+			.where(cursor ? and(eq(fileAccessTokens.fileId, file.id), lt(fileAccessTokens.id, cursor)) : eq(fileAccessTokens.fileId, file.id))
+			.orderBy(desc(fileAccessTokens.id))
+			.limit(limit + 1);
 
-		return c.json({
-			tokens: rows.map((r) => ({
+		return c.json(idPage(rows, limit, r => ({
 				id: r.id,
 				expiresAt: r.expiresAt,
 				createdAt: parseEaidx(r.id).date.getTime(),
-			})),
-		}, 200);
+			})), 200);
 	}, getResponseDefWithAuth('/api/file-tokens/list')),
 );
 

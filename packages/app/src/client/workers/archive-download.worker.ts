@@ -105,16 +105,22 @@ function progress(id: string, progress: ArchiveDownloadProgress): void {
 
 async function listDirectory(bucketName: string, path: string, headers: Record<string, string>): Promise<FileListEntry[]> {
 	const hasAuth = Object.keys(headers).length > 0;
-	const res = hasAuth
-		? await fetch('/api/files/ls', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', ...headers },
-			body: JSON.stringify({ bucketName, path }),
-		})
-		: await fetch(`/api/files/ls?bucketName=${encodeURIComponent(bucketName)}&path=${encodeURIComponent(path)}`);
-	if (!res.ok) throw new Error(`Failed to list ${path || '/'}: HTTP ${res.status}`);
-	const data = await res.json() as { entries: FileListEntry[] };
-	return data.entries;
+	const entries: FileListEntry[] = [];
+	let cursor: string | null = null;
+	do {
+		const res = hasAuth
+			? await fetch('/api/files/ls', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', ...headers },
+				body: JSON.stringify({ bucketName, path, cursor }),
+			})
+			: await fetch(`/api/files/ls?bucketName=${encodeURIComponent(bucketName)}&path=${encodeURIComponent(path)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+		if (!res.ok) throw new Error(`Failed to list ${path || '/'}: HTTP ${res.status}`);
+		const data = await res.json() as { items: FileListEntry[]; nextCursor: string | null };
+		entries.push(...data.items);
+		cursor = data.nextCursor;
+	} while (cursor);
+	return entries;
 }
 
 async function resolveDirectoryTargets(request: Extract<ArchiveDownloadWorkerRequest, { mode: 'directory' }>): Promise<Array<{ path: string; fileId: string; size: number }>> {

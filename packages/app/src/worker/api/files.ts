@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, and, gte, desc, sql, count, like } from 'drizzle-orm';
+import { eq, and, gte, desc, sql, count, like, lt } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
 import { apiError } from '../utils/api-error';
 import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
@@ -20,10 +20,76 @@ import { fileMutationEvents } from '../events/file-mutations';
 import { toFileMutationReference, toFileMutationReferences } from '../utils/file-mutation-reference';
 import { recordModerationAuditLog, recordModerationEvent } from '../utils/moderation';
 import { tokenToBytes } from '../utils/crypto';
+import { pageParams, type PageInput } from '../utils/pagination';
 
 const app = new Hono<{ Bindings: Env }>();
 
-async function listFiles(c: { env: Env; req: { header(name: string): string | undefined } }, bucketName: string, path = '', forceOwner = false, allowBearerAuth = true) {
+type FileListEntry = {
+	type: 'dir' | 'file';
+	name: string;
+	path?: string;
+	fileId?: string;
+	size?: number;
+	mimeType?: string;
+	isTargz?: boolean;
+	isTar?: boolean;
+	visibility?: 'public' | 'private' | 'passphrase';
+	isListed?: boolean;
+	isModerationForcedPrivate?: boolean;
+	downloadCount?: number;
+	isDownloadCountEnabled?: boolean;
+	isDownloadCountVisible?: boolean;
+};
+
+type FileListCursor = {
+	type: 'dir' | 'file';
+	name: string;
+	key: string;
+};
+
+type RawFileListEntry = {
+	sort_type: number;
+	type: 'dir' | 'file';
+	name: string;
+	key: string;
+	path: string | null;
+	fileId: string | null;
+	size: number | null;
+	mimeType: string | null;
+	isTargz: number | null;
+	isTar: number | null;
+	visibility: 'public' | 'private' | 'passphrase' | null;
+	isListed: number | null;
+	isModerationForcedPrivate: number | null;
+	downloadCount: number | null;
+	isDownloadCountEnabled: number | null;
+	isDownloadCountVisible: number | null;
+};
+
+function encodeCursor(cursor: FileListCursor): string {
+	const bytes = new TextEncoder().encode(JSON.stringify(cursor));
+	let binary = '';
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+function decodeCursor(cursor: string | null): FileListCursor | null {
+	if (!cursor) return null;
+	try {
+		const padded = cursor.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(cursor.length / 4) * 4, '=');
+		const binary = atob(padded);
+		const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+		const value = JSON.parse(new TextDecoder().decode(bytes)) as Partial<FileListCursor>;
+		if ((value.type === 'dir' || value.type === 'file') && typeof value.name === 'string' && typeof value.key === 'string') {
+			return { type: value.type, name: value.name, key: value.key };
+		}
+	} catch {
+		// Invalid cursors simply behave like the first page.
+	}
+	return null;
+}
+
+async function listFiles(c: { env: Env; req: { header(name: string): string | undefined } }, bucketName: string, path = '', forceOwner = false, allowBearerAuth = true, pageInput: PageInput = {}) {
 	const db = getDb(c.env);
 	const normalizedPath = path === '' || path.endsWith('/') ? path : `${path}/`;
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
@@ -60,74 +126,167 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		}
 	}
 
-	const fileCondition = isOwnerOrAdmin
-		? and(eq(files.bucketId, bucket.id), eq(files.isClosed, true))
-		: and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.visibility, 'public'), eq(files.isListed, true), eq(files.isModerationForcedPrivate, false));
-	const allFiles = await db
-		.select({
-			id: files.id,
-			path: files.path,
-			size: files.size,
-			mimeType: files.mimeType,
-			isTargz: files.isTargz,
-			isTar: files.isTar,
-			visibility: files.visibility,
-			isListed: files.isListed,
-			isModerationForcedPrivate: files.isModerationForcedPrivate,
-			downloadCount: files.downloadCount,
-			isDownloadCountEnabled: files.isDownloadCountEnabled,
-			isDownloadCountVisible: files.isDownloadCountVisible,
-		})
-		.from(files)
-		.where(fileCondition);
-	const allDirs = await db.select({ path: directories.path, isListed: directories.isListed }).from(directories).where(eq(directories.bucketId, bucket.id));
-	const hiddenDirPaths = isOwnerOrAdmin ? new Set<string>() : new Set(allDirs.filter(dir => !dir.isListed).map(dir => dir.path));
-
-	const entries: Array<{ type: 'dir' | 'file'; name: string; path?: string; fileId?: string; size?: number; mimeType?: string; isTargz?: boolean; isTar?: boolean; visibility?: 'public' | 'private' | 'passphrase'; isListed?: boolean; isModerationForcedPrivate?: boolean; downloadCount?: number; isDownloadCountEnabled?: boolean; isDownloadCountVisible?: boolean }> = [];
-	const seenDirs = new Set<string>();
-	for (const d of allDirs) {
-		if (!d.path.startsWith(normalizedPath)) continue;
-		if (!isOwnerOrAdmin && !d.isListed) continue;
-		const rest = d.path.slice(normalizedPath.length);
-		const slashIdx = rest.indexOf('/');
-		if (slashIdx !== -1) {
-			const dirName = rest.slice(0, slashIdx);
-			if (!seenDirs.has(dirName)) {
-				seenDirs.add(dirName);
-				entries.push({ type: 'dir', name: dirName, isListed: d.isListed });
-			}
+	const { limit, cursor } = pageParams(pageInput);
+	const decodedCursor = decodeCursor(cursor);
+	const cursorSortType = decodedCursor?.type === 'file' ? 1 : decodedCursor?.type === 'dir' ? 0 : null;
+	const cursorName = decodedCursor?.name ?? null;
+	const cursorKey = decodedCursor?.key ?? null;
+	const prefixLike = `${normalizedPath}%`;
+	const childStart = normalizedPath.length + 1;
+	const ownerVisibilitySql = isOwnerOrAdmin
+		? '1 = 1'
+		: `NOT EXISTS (
+			SELECT 1 FROM directories hidden
+			WHERE hidden.bucket_id = ?
+				AND hidden.is_listed = 0
+				AND candidate_path LIKE hidden.path || '%'
+		)`;
+	const publicExtraBind = isOwnerOrAdmin ? [] : [bucket.id];
+	const sqlText = `
+		WITH
+		directory_candidates AS (
+			SELECT
+				0 AS sort_type,
+				'dir' AS type,
+				CASE
+					WHEN instr(substr(path, ?), '/') = 0 THEN substr(path, ?)
+					ELSE substr(substr(path, ?), 1, instr(substr(path, ?), '/') - 1)
+				END AS name,
+				path AS candidate_path,
+				path AS key,
+				NULL AS file_id,
+				NULL AS size,
+				NULL AS mime_type,
+				NULL AS is_targz,
+				NULL AS is_tar,
+				NULL AS visibility,
+				is_listed AS is_listed,
+				NULL AS is_moderation_forced_private,
+				NULL AS download_count,
+				NULL AS is_download_count_enabled,
+				NULL AS is_download_count_visible
+			FROM directories
+			WHERE bucket_id = ?
+				AND path LIKE ?
+				AND path != ?
+				${isOwnerOrAdmin ? '' : 'AND is_listed = 1'}
+		),
+		file_candidates AS (
+			SELECT
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN 1 ELSE 0 END AS sort_type,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN 'file' ELSE 'dir' END AS type,
+				CASE
+					WHEN instr(substr(path, ?), '/') = 0 THEN substr(path, ?)
+					ELSE substr(substr(path, ?), 1, instr(substr(path, ?), '/') - 1)
+				END AS name,
+				path AS candidate_path,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN id ELSE substr(path, 1, ? + length(
+					substr(substr(path, ?), 1, instr(substr(path, ?), '/') - 1)
+				) + 1) END AS key,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN id ELSE NULL END AS file_id,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN size ELSE NULL END AS size,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN mime_type ELSE NULL END AS mime_type,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN is_targz ELSE NULL END AS is_targz,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN is_tar ELSE NULL END AS is_tar,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN visibility ELSE NULL END AS visibility,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN is_listed ELSE NULL END AS is_listed,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN is_moderation_forced_private ELSE NULL END AS is_moderation_forced_private,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN download_count ELSE NULL END AS download_count,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN is_download_count_enabled ELSE NULL END AS is_download_count_enabled,
+				CASE WHEN instr(substr(path, ?), '/') = 0 THEN is_download_count_visible ELSE NULL END AS is_download_count_visible
+			FROM files
+			WHERE bucket_id = ?
+				AND is_closed = 1
+				AND path LIKE ?
+				AND path != ?
+				${isOwnerOrAdmin ? '' : 'AND visibility = \'public\' AND is_listed = 1 AND is_moderation_forced_private = 0'}
+		),
+		visible_file_candidates AS (
+			SELECT * FROM file_candidates
+			WHERE ${ownerVisibilitySql}
+		),
+		combined AS (
+			SELECT * FROM directory_candidates
+			UNION ALL
+			SELECT * FROM visible_file_candidates
+		),
+		grouped AS (
+			SELECT
+				sort_type,
+				type,
+				name,
+				min(key) AS key,
+				max(file_id) AS fileId,
+				max(candidate_path) AS path,
+				max(size) AS size,
+				max(mime_type) AS mimeType,
+				max(is_targz) AS isTargz,
+				max(is_tar) AS isTar,
+				max(visibility) AS visibility,
+				max(is_listed) AS isListed,
+				max(is_moderation_forced_private) AS isModerationForcedPrivate,
+				max(download_count) AS downloadCount,
+				max(is_download_count_enabled) AS isDownloadCountEnabled,
+				max(is_download_count_visible) AS isDownloadCountVisible
+			FROM combined
+			WHERE name != ''
+			GROUP BY sort_type, type, name
+		)
+		SELECT * FROM grouped
+		WHERE (? IS NULL OR sort_type > ? OR (sort_type = ? AND (name > ? OR (name = ? AND key > ?))))
+		ORDER BY sort_type ASC, name ASC, key ASC
+		LIMIT ?
+	`;
+	const restArgs = [
+		childStart, childStart, childStart, childStart,
+		bucket.id, prefixLike, normalizedPath,
+			childStart, childStart, childStart, childStart, childStart, childStart,
+			childStart, normalizedPath.length, childStart, childStart,
+			childStart, childStart, childStart, childStart, childStart, childStart,
+			childStart, childStart, childStart, childStart, childStart,
+			bucket.id, prefixLike, normalizedPath,
+		...publicExtraBind,
+		cursorSortType, cursorSortType, cursorSortType, cursorName, cursorName, cursorKey,
+		limit + 1,
+	];
+	const rows = (await c.env.DB.prepare(sqlText).bind(...restArgs).all<RawFileListEntry>()).results;
+	const pageRows = rows.slice(0, limit);
+	const items = pageRows.map((row): FileListEntry => {
+		if (row.type === 'dir') {
+			return {
+				type: 'dir',
+				name: row.name,
+				...(isOwnerOrAdmin && row.isListed !== null ? { isListed: !!row.isListed } : {}),
+			};
 		}
-	}
-	for (const f of allFiles) {
-		if (!f.path.startsWith(normalizedPath)) continue;
-		const rest = f.path.slice(normalizedPath.length);
-		const slashIdx = rest.indexOf('/');
-		if (slashIdx === -1) {
-			entries.push({
-				type: 'file',
-				name: rest,
-				path: f.path,
-				fileId: f.id,
-				size: f.size ?? undefined,
-				mimeType: f.mimeType ?? undefined,
-				isTargz: f.isTargz,
-				isTar: f.isTar,
-				visibility: f.visibility,
-				...((f.isDownloadCountEnabled && (isOwnerOrAdmin || f.isDownloadCountVisible)) ? { downloadCount: f.downloadCount } : {}),
-				...(isOwnerOrAdmin ? { isListed: f.isListed, isModerationForcedPrivate: f.isModerationForcedPrivate, isDownloadCountEnabled: f.isDownloadCountEnabled, isDownloadCountVisible: f.isDownloadCountVisible } : {}),
-			});
-		} else {
-			const dirName = rest.slice(0, slashIdx);
-			if (hiddenDirPaths.has(`${normalizedPath}${dirName}/`)) continue;
-			if (!seenDirs.has(dirName)) {
-				seenDirs.add(dirName);
-				const dir = allDirs.find(d => d.path === `${normalizedPath}${dirName}/`);
-				entries.push({ type: 'dir', name: dirName, ...(isOwnerOrAdmin && dir ? { isListed: dir.isListed } : {}) });
-			}
-		}
-	}
-	entries.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
-	return { type: 'directory' as const, entries };
+		return {
+			type: 'file',
+			name: row.name,
+			path: row.path ?? undefined,
+			fileId: row.fileId ?? undefined,
+			size: row.size ?? undefined,
+			mimeType: row.mimeType ?? undefined,
+			isTargz: !!row.isTargz,
+			isTar: !!row.isTar,
+			visibility: row.visibility ?? undefined,
+			...((row.isDownloadCountEnabled && (isOwnerOrAdmin || row.isDownloadCountVisible)) ? { downloadCount: row.downloadCount ?? 0 } : {}),
+			...(isOwnerOrAdmin
+				? {
+					isListed: !!row.isListed,
+					isModerationForcedPrivate: !!row.isModerationForcedPrivate,
+					isDownloadCountEnabled: !!row.isDownloadCountEnabled,
+					isDownloadCountVisible: !!row.isDownloadCountVisible,
+				}
+				: {}),
+		};
+	});
+	const lastRow = pageRows.at(-1);
+	return {
+		type: 'directory' as const,
+		items,
+		nextCursor: rows.length > limit && lastRow ? encodeCursor({ type: lastRow.type, name: lastRow.name, key: lastRow.key }) : null,
+		hasMore: rows.length > limit,
+	};
 }
 
 async function shouldRejectMismatchedFileType(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -145,9 +304,11 @@ app.get('/ls', async (c) => {
 	const bucketName = c.req.query('bucketName');
 	if (!bucketName) throw apiError(400, 'BUCKET_NAME_IS_REQUIRED');
 	const path = c.req.query('path') ?? '';
+	const limit = c.req.query('limit') === undefined ? undefined : Number(c.req.query('limit'));
+	const cursor = c.req.query('cursor') ?? null;
 	if (bucketName.length > MAX_BUCKET_NAME_LENGTH) throw apiError(400, 'BUCKET_NAME_IS_REQUIRED', `bucketName must be at most ${MAX_BUCKET_NAME_LENGTH} characters`);
 	if (path.length > MAX_FILE_PATH_LENGTH) throw apiError(400, 'INVALID_FILE_PATH', `path must be at most ${MAX_FILE_PATH_LENGTH} characters`);
-	return c.json(await listFiles(c, bucketName, path, false, false), 200);
+	return c.json(await listFiles(c, bucketName, path, false, false, { limit, cursor }), 200);
 });
 
 app.get('/meta', async (c) => {
@@ -247,7 +408,7 @@ app.post(
 		const bucket = await db.select().from(buckets).where(eq(buckets.name, body.bucketName)).get();
 		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
-		return c.json(await listFiles(c, body.bucketName, body.path ?? '', true), 200);
+		return c.json(await listFiles(c, body.bucketName, body.path ?? '', true, true, body), 200);
 	}, getResponseDefWithAuth('/api/files/ls')),
 );
 
@@ -733,24 +894,35 @@ app.post(
 				.select()
 				.from(files)
 				.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), like(files.path, `${prefix}%`)));
-			const whereClauses = ['bucket_id = ?', 'path LIKE ?'];
-			const params: Array<string | number> = [bucket.id, `${prefix}%`];
+			const directoryWhereClauses = ['bucket_id = ?', 'path LIKE ?'];
+			const directoryParams: Array<string | number> = [bucket.id, `${prefix}%`];
+			const fileWhereClauses = ['bucket_id = ?', 'is_closed = 1', 'path LIKE ?'];
+			const fileParams: Array<string | number> = [bucket.id, `${prefix}%`];
 			for (const excludedPath of excludePaths) {
 				const normalizedExcludedPath = excludedPath.endsWith('/') ? excludedPath : `${excludedPath}/`;
 				if (normalizedExcludedPath === prefix) {
-					whereClauses.push('path != ?');
-					params.push(normalizedExcludedPath);
-				} else {
-					whereClauses.push('path != ?', 'path NOT LIKE ?');
-					params.push(normalizedExcludedPath, `${normalizedExcludedPath}%`);
+					directoryWhereClauses.push('path != ?');
+					directoryParams.push(normalizedExcludedPath);
+					continue;
 				}
+				directoryWhereClauses.push('path != ?', 'path NOT LIKE ?');
+				directoryParams.push(normalizedExcludedPath, `${normalizedExcludedPath}%`);
+				fileWhereClauses.push('path != ?', 'path NOT LIKE ?');
+				fileParams.push(excludedPath, `${normalizedExcludedPath}%`);
 			}
-			const whereSql = whereClauses.join(' AND ');
-			const countRow = await c.env.DB
-				.prepare(`SELECT COUNT(*) AS count FROM directories WHERE ${whereSql}`)
-				.bind(...params)
+			const directoryWhereSql = directoryWhereClauses.join(' AND ');
+			const fileWhereSql = fileWhereClauses.join(' AND ');
+			const directoryCountRow = await c.env.DB
+				.prepare(`SELECT COUNT(*) AS count FROM directories WHERE ${directoryWhereSql}`)
+				.bind(...directoryParams)
 				.first<{ count: number }>();
-			const countForTarget = countRow?.count ?? 0;
+			const fileCountRow = await c.env.DB
+				.prepare(`SELECT COUNT(*) AS count FROM files WHERE ${fileWhereSql}`)
+				.bind(...fileParams)
+				.first<{ count: number }>();
+			const directoryCountForTarget = directoryCountRow?.count ?? 0;
+			const fileCountForTarget = fileCountRow?.count ?? 0;
+			const countForTarget = directoryCountForTarget + fileCountForTarget;
 			if (countForTarget === 0) {
 				const targetDirectory = await db.select({ id: directories.id })
 					.from(directories)
@@ -768,17 +940,23 @@ app.post(
 				}
 			}
 			if (countForTarget === 0) continue;
-			matchedCount += countForTarget;
+			matchedCount += directoryCountForTarget > 0 ? directoryCountForTarget : 1;
 			for (const file of childFiles) {
 				if (excludePaths.some((excludePath) => {
 					const normalizedExcludedPath = excludePath.endsWith('/') ? excludePath : `${excludePath}/`;
-					return file.path === normalizedExcludedPath || file.path.startsWith(normalizedExcludedPath);
+					if (normalizedExcludedPath === prefix) return false;
+					if (excludePath.endsWith('/')) return file.path.startsWith(excludePath);
+					return file.path === excludePath || file.path.startsWith(normalizedExcludedPath);
 				})) continue;
 				filesToPurge.set(file.id, file);
 			}
 			await c.env.DB
-				.prepare(`UPDATE directories SET is_listed = ? WHERE ${whereSql}`)
-				.bind(body.isListed ? 1 : 0, ...params)
+				.prepare(`UPDATE files SET is_listed = ? WHERE ${fileWhereSql}`)
+				.bind(body.isListed ? 1 : 0, ...fileParams)
+				.run();
+			await c.env.DB
+				.prepare(`UPDATE directories SET is_listed = ? WHERE ${directoryWhereSql}`)
+				.bind(body.isListed ? 1 : 0, ...directoryParams)
 				.run();
 		}
 
@@ -806,6 +984,7 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/files/uploadings', Env>) => {
 		const db = getDb(c.env);
 		const user = c.get('user');
+		const { limit, cursor } = pageParams(c.req.valid('json'));
 
 		const userFiles = await db
 			.select({
@@ -823,10 +1002,16 @@ app.post(
 			})
 			.from(files)
 			.innerJoin(buckets, eq(files.bucketId, buckets.id))
-			.where(eq(files.userId, user.id))
-			.orderBy(desc(files.id));
+			.where(cursor ? and(eq(files.userId, user.id), lt(files.id, cursor)) : eq(files.userId, user.id))
+			.orderBy(desc(files.id))
+			.limit(limit + 1);
 
-		return c.json({ files: userFiles }, 200);
+		const items = userFiles.slice(0, limit);
+		return c.json({
+			items,
+			nextCursor: userFiles.length > limit ? items.at(-1)?.id ?? null : null,
+			hasMore: userFiles.length > limit,
+		}, 200);
 	}, getResponseDefWithAuth('/api/files/uploadings')),
 );
 

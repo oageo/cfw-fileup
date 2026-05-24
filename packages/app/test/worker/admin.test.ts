@@ -142,8 +142,8 @@ describe('POST /api/admin/unsuspend-user', () => {
 			body: JSON.stringify({}),
 		}, env);
 		expect(listRes.status).toBe(200);
-		const users = await listRes.json() as Array<{ id: string; isSuspended: boolean }>;
-		expect(users.find((user) => user.id === userId)?.isSuspended).toBe(false);
+		const users = await listRes.json() as { items: Array<{ id: string; isSuspended: boolean }> };
+		expect(users.items.find((user) => user.id === userId)?.isSuspended).toBe(false);
 	});
 
 	test('nonexistent user returns 404', async () => {
@@ -175,8 +175,8 @@ describe('POST /api/admin/make-admin', () => {
 			body: JSON.stringify({}),
 		}, env);
 		expect(listRes.status).toBe(200);
-		const users = await listRes.json() as Array<{ id: string; isAdmin: boolean }>;
-		expect(users.find((user) => user.id === userId)?.isAdmin).toBe(true);
+		const users = await listRes.json() as { items: Array<{ id: string; isAdmin: boolean }> };
+		expect(users.items.find((user) => user.id === userId)?.isAdmin).toBe(true);
 
 		const promotedAdminRes = await app.request('/api/admin/get-global-quota', {
 			method: 'POST',
@@ -274,8 +274,8 @@ describe('POST /api/admin/list-files', () => {
 			body: JSON.stringify({}),
 		}, env);
 		expect(listRes.status).toBe(200);
-		const body = await listRes.json() as Array<{ id: string; path: string; visibility: string; isModerationForcedPrivate: boolean }>;
-		expect(body).toContainEqual(expect.objectContaining({
+		const body = await listRes.json() as { items: Array<{ id: string; path: string; visibility: string; isModerationForcedPrivate: boolean }> };
+		expect(body.items).toContainEqual(expect.objectContaining({
 			id: fileId,
 			path: 'private.txt',
 			visibility: 'private',
@@ -301,12 +301,12 @@ describe('POST /api/admin/list-moderation-audit-logs', () => {
 			body: JSON.stringify({}),
 		}, env);
 		expect(listRes.status).toBe(200);
-		const body = await listRes.json() as Array<{ action: string; targetUserId: string | null; createdAt: number }>;
-		expect(body[0]).toEqual(expect.objectContaining({
+		const body = await listRes.json() as { items: Array<{ action: string; targetUserId: string | null; createdAt: number }> };
+		expect(body.items[0]).toEqual(expect.objectContaining({
 			action: 'admin_user_suspended',
 			targetUserId: userId,
 		}));
-		expect(body[0].createdAt).toBeGreaterThan(0);
+		expect(body.items[0].createdAt).toBeGreaterThan(0);
 	});
 });
 

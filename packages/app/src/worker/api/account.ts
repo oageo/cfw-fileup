@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, count, eq, inArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { users, usedUsernames, tokens, moderationEvents } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
@@ -11,6 +11,7 @@ import { omitResAndReq } from '../utils/omit';
 import { apiError } from '../utils/api-error';
 import { parseEaidx } from '../../shared/eaid-x';
 import type { JsonCtx } from '../../shared/api';
+import { idPage, pageParams } from '../utils/pagination';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -116,14 +117,18 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/account/tokens', Env>) => {
 		const db = getDb(c.env);
 		const user = c.get('user');
+		const { limit, cursor } = pageParams(c.req.valid('json'));
 		const rows = await db
 			.select({
 				id: tokens.id,
 				isRevoked: tokens.isRevoked,
 			})
 			.from(tokens)
-			.where(eq(tokens.userId, user.id));
-		const tokenIds = rows.map(token => token.id);
+			.where(cursor ? and(eq(tokens.userId, user.id), lt(tokens.id, cursor)) : eq(tokens.userId, user.id))
+			.orderBy(desc(tokens.id))
+			.limit(limit + 1);
+		const pageRows = rows.slice(0, limit);
+		const tokenIds = pageRows.map(token => token.id);
 		const latestEventIds = tokenIds.length === 0
 			? []
 			: await db
@@ -149,7 +154,7 @@ app.post(
 		}
 
 		return c.json({
-			tokens: rows.map(token => ({
+			...idPage(rows, limit, token => ({
 				id: token.id,
 				createdAt: parseEaidx(token.id).date.getTime(),
 				lastIpAddress: lastIpByTokenId.get(token.id) ?? null,

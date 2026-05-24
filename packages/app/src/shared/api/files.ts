@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { errorResponse, IdString } from '../api.schemas.js';
+import { errorResponse, IdString, PageRequestFields, pagedResponse } from '../api.schemas.js';
 import { fileVisibilitySchema } from '../file-visibility.js';
 import { filePathValidation } from '../name-validation.js';
 import {
@@ -150,11 +150,14 @@ export const filesApiDef = {
 		req: v.object({
 			bucketName: BucketNameString,
 			path: v.optional(FilePathString),
+			...PageRequestFields,
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
 				type: v.literal('directory'),
-				entries: v.array(FileListEntry),
+				items: v.array(FileListEntry),
+				nextCursor: v.nullable(v.string()),
+				hasMore: v.boolean(),
 			}) } } },
 			404: errorResponse('Bucket or directory not found', ['BUCKET_NOT_FOUND', 'DIRECTORY_NOT_FOUND']),
 		},
@@ -198,9 +201,9 @@ export const filesApiDef = {
 	'/api/files/uploadings': {
 		summary: 'List in-progress uploads',
 		tags: ['files'],
-		req: v.object({}),
+		req: v.object(PageRequestFields),
 		res: {
-			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ files: v.array(UploadingFileResponse) }) } } },
+			200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(UploadingFileResponse) } } },
 		},
 	},
 	'/api/files/delete': {

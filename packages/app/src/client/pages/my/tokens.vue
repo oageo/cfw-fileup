@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { Button } from '@vuetify/v0';
 import { apiPost } from '@/utils/api';
 import { clearAuth } from '@/store/auth';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import { mainRouter } from '@/router';
 
 type TokenItem = {
@@ -15,23 +16,37 @@ type TokenItem = {
 
 const tokens = ref<TokenItem[]>([]);
 const loading = ref(true);
+const loadingMore = ref(false);
 const error = ref('');
 const revoking = ref(false);
+const nextCursor = ref<string | null>(null);
+const hasMore = ref(false);
 
-async function loadTokens(): Promise<void> {
-	loading.value = true;
+async function loadTokens(cursor: string | null = null): Promise<void> {
+	const isMore = cursor !== null;
+	if (isMore) {
+		loadingMore.value = true;
+	} else {
+		loading.value = true;
+	}
 	error.value = '';
 	try {
-		const result = await apiPost('/api/account/tokens');
+		const result = await apiPost('/api/account/tokens', { limit: 50, cursor });
 		if (!result.ok) {
 			error.value = result.data.message || 'アクセストークン履歴の取得に失敗しました';
 			return;
 		}
-		tokens.value = result.data.tokens;
+		tokens.value = cursor ? [...tokens.value, ...result.data.items] : result.data.items;
+		nextCursor.value = result.data.nextCursor;
+		hasMore.value = result.data.hasMore;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
-		loading.value = false;
+		if (isMore) {
+			loadingMore.value = false;
+		} else {
+			loading.value = false;
+		}
 	}
 }
 
@@ -106,6 +121,13 @@ onMounted(loadTokens);
             <tr v-if="tokens.length === 0">
               <td colspan="4">アクセストークンはありません。</td>
             </tr>
+            <InfiniteTableRow
+              v-if="hasMore || loadingMore"
+              :colspan="4"
+              :has-more="hasMore"
+              :loading="loadingMore"
+              @load-more="loadTokens(nextCursor)"
+            />
           </tbody>
         </table>
       </div>

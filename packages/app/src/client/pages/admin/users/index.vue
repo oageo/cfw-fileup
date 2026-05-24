@@ -4,6 +4,7 @@ import { Button, Popover } from '@vuetify/v0';
 import { EllipsisVertical } from '@lucide/vue';
 import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import NirA from '@/components/NirA.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
@@ -16,8 +17,11 @@ interface AdminUser {
 
 const userList = ref<AdminUser[]>([]);
 const loading = ref(true);
+const loadingMore = ref(false);
 const error = ref('');
 const actionError = ref('');
+const nextCursor = ref<string | null>(null);
+const hasMore = ref(false);
 
 const suspendDialog = ref(false);
 const suspendTarget = ref<AdminUser | null>(null);
@@ -26,19 +30,30 @@ const unsuspendTarget = ref<AdminUser | null>(null);
 const makeAdminDialog = ref(false);
 const makeAdminTarget = ref<AdminUser | null>(null);
 
-onMounted(fetchUsers);
+onMounted(() => fetchUsers());
 
-async function fetchUsers(): Promise<void> {
-	loading.value = true;
+async function fetchUsers(cursor: string | null = null): Promise<void> {
+	const isMore = cursor !== null;
+	if (isMore) {
+		loadingMore.value = true;
+	} else {
+		loading.value = true;
+	}
 	error.value = '';
 	try {
-		const result = await apiPost('/api/admin/list-users');
+		const result = await apiPost('/api/admin/list-users', { limit: 50, cursor });
 		if (!result.ok) throw new Error('ユーザー一覧の取得に失敗しました');
-		userList.value = result.data;
+		userList.value = cursor ? [...userList.value, ...result.data.items] : result.data.items;
+		nextCursor.value = result.data.nextCursor;
+		hasMore.value = result.data.hasMore;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
-		loading.value = false;
+		if (isMore) {
+			loadingMore.value = false;
+		} else {
+			loading.value = false;
+		}
 	}
 }
 
@@ -169,6 +184,13 @@ async function executeMakeAdmin(): Promise<void> {
                 </div>
               </td>
             </tr>
+            <InfiniteTableRow
+              v-if="hasMore || loadingMore"
+              :colspan="4"
+              :has-more="hasMore"
+              :loading="loadingMore"
+              @load-more="fetchUsers(nextCursor)"
+            />
           </tbody>
         </table>
         </div>

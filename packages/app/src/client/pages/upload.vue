@@ -1197,9 +1197,24 @@ async function executeUpload(): Promise<void> {
 			const result = await apiPost('/api/files/ls', {
 				bucketName: selectedBucketName.value,
 				path: parentPath,
+				limit: 50,
+				cursor: null,
 			});
 			if (result.ok) {
-				conflicts.push(...findUploadConflictsInDirectory(targets, result.data.entries));
+				let entries = result.data.items;
+				let cursor = result.data.nextCursor;
+				while (cursor) {
+					const page = await apiPost('/api/files/ls', {
+						bucketName: selectedBucketName.value,
+						path: parentPath,
+						limit: 50,
+						cursor,
+					});
+					if (!page.ok) break;
+					entries = [...entries, ...page.data.items];
+					cursor = page.data.nextCursor;
+				}
+				conflicts.push(...findUploadConflictsInDirectory(targets, entries));
 			} else if (result.status === 404) {
 				missingDirectories.add(parentPath);
 			}

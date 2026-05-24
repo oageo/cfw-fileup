@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { Button } from '@vuetify/v0';
 import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
+import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import NirA from '@/components/NirA.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
@@ -19,6 +20,7 @@ type IpBan = {
 
 const bans = ref<IpBan[]>([]);
 const loading = ref(true);
+const loadingMore = ref(false);
 const saving = ref(false);
 const error = ref('');
 const actionError = ref('');
@@ -28,20 +30,33 @@ const indefinite = ref(true);
 const expiresAtLocal = ref('');
 const deleteDialog = ref(false);
 const deleteTarget = ref<IpBan | null>(null);
+const nextCursor = ref<string | null>(null);
+const hasMore = ref(false);
 
-onMounted(loadBans);
+onMounted(() => loadBans());
 
-async function loadBans(): Promise<void> {
-	loading.value = true;
+async function loadBans(cursor: string | null = null): Promise<void> {
+	const isMore = cursor !== null;
+	if (isMore) {
+		loadingMore.value = true;
+	} else {
+		loading.value = true;
+	}
 	error.value = '';
 	try {
-		const result = await apiPost('/api/admin/list-ip-bans');
+		const result = await apiPost('/api/admin/list-ip-bans', { limit: 50, cursor });
 		if (!result.ok) throw new Error(result.data.message || 'IP BAN一覧の取得に失敗しました');
-		bans.value = result.data;
+		bans.value = cursor ? [...bans.value, ...result.data.items] : result.data.items;
+		nextCursor.value = result.data.nextCursor;
+		hasMore.value = result.data.hasMore;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
-		loading.value = false;
+		if (isMore) {
+			loadingMore.value = false;
+		} else {
+			loading.value = false;
+		}
 	}
 }
 
@@ -164,6 +179,13 @@ function formatDate(ms: number): string {
               <tr v-if="bans.length === 0">
                 <td colspan="6" :class="$style.empty">IP BANはありません。</td>
               </tr>
+              <InfiniteTableRow
+                v-if="hasMore || loadingMore"
+                :colspan="6"
+                :has-more="hasMore"
+                :loading="loadingMore"
+                @load-more="loadBans(nextCursor)"
+              />
             </tbody>
           </table>
         </div>

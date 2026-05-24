@@ -163,8 +163,8 @@ describe('POST /api/file-tokens/list', () => {
 			body: JSON.stringify({ bucketName, filePath: 'secret.txt' }),
 		}, env);
 		expect(res.status).toBe(200);
-		const body = await res.json() as { tokens: unknown[] };
-		expect(body.tokens).toHaveLength(0);
+		const body = await res.json() as { items: unknown[] };
+		expect(body.items).toHaveLength(0);
 	});
 
 	test('returns created tokens with id, expiresAt, createdAt', async () => {
@@ -182,11 +182,45 @@ describe('POST /api/file-tokens/list', () => {
 			body: JSON.stringify({ bucketName, filePath: 'secret.txt' }),
 		}, env);
 		expect(res.status).toBe(200);
-		const body = await res.json() as { tokens: Array<{ id: string; expiresAt: number; createdAt: number }> };
-		expect(body.tokens).toHaveLength(1);
-		expect(typeof body.tokens[0].id).toBe('string');
-		expect(typeof body.tokens[0].expiresAt).toBe('number');
-		expect(typeof body.tokens[0].createdAt).toBe('number');
+		const body = await res.json() as { items: Array<{ id: string; expiresAt: number; createdAt: number }> };
+		expect(body.items).toHaveLength(1);
+		expect(typeof body.items[0].id).toBe('string');
+		expect(typeof body.items[0].expiresAt).toBe('number');
+		expect(typeof body.items[0].createdAt).toBe('number');
+	});
+
+	test('paginates created tokens', async () => {
+		const { token, bucketId, bucketName } = await setupUserAndBucket();
+		await createClosedFile(token, bucketId, bucketName, 'secret.txt');
+		for (let i = 0; i < 3; i++) {
+			await app.request('/api/file-tokens/create', {
+				method: 'POST',
+				headers: authHeaders(token),
+				body: JSON.stringify({ bucketName, filePath: 'secret.txt', expiresIn: 3600 }),
+			}, env);
+		}
+
+		const firstRes = await app.request('/api/file-tokens/list', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName, filePath: 'secret.txt', limit: 2 }),
+		}, env);
+		expect(firstRes.status).toBe(200);
+		const first = await firstRes.json() as { items: Array<{ id: string }>; nextCursor: string | null; hasMore: boolean };
+		expect(first.items).toHaveLength(2);
+		expect(first.hasMore).toBe(true);
+		expect(first.nextCursor).toBeTypeOf('string');
+
+		const secondRes = await app.request('/api/file-tokens/list', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName, filePath: 'secret.txt', limit: 2, cursor: first.nextCursor }),
+		}, env);
+		expect(secondRes.status).toBe(200);
+		const second = await secondRes.json() as { items: Array<{ id: string }>; nextCursor: string | null; hasMore: boolean };
+		expect(second.items).toHaveLength(1);
+		expect(second.hasMore).toBe(false);
+		expect(second.nextCursor).toBeNull();
 	});
 
 	test('other user\'s bucket returns 403', async () => {

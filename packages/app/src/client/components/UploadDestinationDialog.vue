@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { Dialog } from '@vuetify/v0';
 import { ArrowLeft, ArrowRight, Check, Folder, FolderPlus, X } from '@lucide/vue';
-import { apiPost } from '../utils/api';
+import { apiPost, type ApiResult } from '../utils/api';
 import { formatBytes } from '@/utils/byte-size';
 import { isValidPathSegmentName } from '../../shared/name-validation';
 
@@ -113,17 +113,28 @@ async function initializeSelection(): Promise<void> {
 async function loadDirectory(): Promise<void> {
 	loadingDir.value = true;
 	dirError.value = '';
-	const result = await apiPost('/api/files/ls', {
-		bucketName: selectedBucketName.value,
-		path: currentPath.value,
-	});
-	loadingDir.value = false;
-	if (!result.ok) {
-		dirError.value = result.data.message;
-		return;
+	let cursor: string | null = null;
+	const dirs: typeof dirEntries.value = [];
+	try {
+		do {
+			const result: ApiResult<'/api/files/ls'> = await apiPost('/api/files/ls', {
+				bucketName: selectedBucketName.value,
+				path: currentPath.value,
+				limit: 50,
+				cursor,
+			});
+			if (!result.ok) {
+				dirError.value = result.data.message;
+				return;
+			}
+			dirs.push(...result.data.items.filter(e => e.type === 'dir'));
+			cursor = result.data.nextCursor;
+		} while (cursor);
+		dirEntries.value = dirs;
+		emitChange();
+	} finally {
+		loadingDir.value = false;
 	}
-	dirEntries.value = result.data.entries.filter(e => e.type === 'dir');
-	emitChange();
 }
 
 function selectBucket(bucket: Bucket): void {

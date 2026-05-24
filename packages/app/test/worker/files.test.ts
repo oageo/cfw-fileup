@@ -202,8 +202,8 @@ describe('POST /api/files/ls', () => {
 			body: JSON.stringify({ bucketName: 'test_bucket', path: '' }),
 		}, env);
 		expect(res.status).toBe(200);
-		const body = await res.json() as { entries: Array<{ name: string; fileId?: string }> };
-		expect(body.entries).toContainEqual(expect.objectContaining({ name: 'hello.txt', fileId }));
+		const body = await res.json() as { items: Array<{ name: string; fileId?: string }> };
+		expect(body.items).toContainEqual(expect.objectContaining({ name: 'hello.txt', fileId }));
 	});
 
 	test('public listing only includes listed public files for anonymous users', async () => {
@@ -215,11 +215,11 @@ describe('POST /api/files/ls', () => {
 
 		const publicRes = await app.request('/api/files/ls?bucketName=test_bucket&path=', {}, env);
 		expect(publicRes.status).toBe(200);
-		const publicBody = await publicRes.json() as { entries: Array<{ name: string; fileId?: string }> };
-		expect(publicBody.entries).toContainEqual(expect.objectContaining({ name: 'listed.txt', fileId: listedFileId }));
-		expect(publicBody.entries).not.toContainEqual(expect.objectContaining({ name: 'unlisted.txt', fileId: unlistedFileId }));
-		expect(publicBody.entries.map(entry => entry.name)).not.toContain('private.txt');
-		expect(publicBody.entries.map(entry => entry.name)).not.toContain('passphrase.txt');
+		const publicBody = await publicRes.json() as { items: Array<{ name: string; fileId?: string }> };
+		expect(publicBody.items).toContainEqual(expect.objectContaining({ name: 'listed.txt', fileId: listedFileId }));
+		expect(publicBody.items).not.toContainEqual(expect.objectContaining({ name: 'unlisted.txt', fileId: unlistedFileId }));
+		expect(publicBody.items.map(entry => entry.name)).not.toContain('private.txt');
+		expect(publicBody.items.map(entry => entry.name)).not.toContain('passphrase.txt');
 
 		const ownerRes = await app.request('/api/files/ls', {
 			method: 'POST',
@@ -227,10 +227,44 @@ describe('POST /api/files/ls', () => {
 			body: JSON.stringify({ bucketName: 'test_bucket', path: '' }),
 		}, env);
 		expect(ownerRes.status).toBe(200);
-		const ownerBody = await ownerRes.json() as { entries: Array<{ name: string; fileId?: string; isListed?: boolean }> };
-		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'unlisted.txt', fileId: unlistedFileId, isListed: false }));
+		const ownerBody = await ownerRes.json() as { items: Array<{ name: string; fileId?: string; isListed?: boolean }> };
+		expect(ownerBody.items).toContainEqual(expect.objectContaining({ name: 'unlisted.txt', fileId: unlistedFileId, isListed: false }));
 	});
-});
+
+	test('lists direct entries with cursor pagination', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await app.request('/api/directories/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'a/' }),
+		}, env);
+		await createClosedFile({ token, bucketId, path: 'a/nested.txt' });
+		await createClosedFile({ token, bucketId, path: 'b/nested.txt' });
+		await createClosedFile({ token, bucketId, path: 'c.txt' });
+
+		const firstRes = await app.request('/api/files/ls', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', path: '', limit: 2 }),
+		}, env);
+		expect(firstRes.status).toBe(200);
+		const first = await firstRes.json() as { items: Array<{ name: string; type: 'dir' | 'file' }>; nextCursor: string | null; hasMore: boolean };
+		expect(first.items.map(entry => entry.name)).toEqual(['a', 'b']);
+		expect(first.hasMore).toBe(true);
+		expect(first.nextCursor).toBeTypeOf('string');
+
+		const secondRes = await app.request('/api/files/ls', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'test_bucket', path: '', limit: 2, cursor: first.nextCursor }),
+		}, env);
+		expect(secondRes.status).toBe(200);
+		const second = await secondRes.json() as { items: Array<{ name: string; type: 'dir' | 'file' }>; nextCursor: string | null; hasMore: boolean };
+		expect(second.items.map(entry => entry.name)).toEqual(['c.txt']);
+		expect(second.hasMore).toBe(false);
+		expect(second.nextCursor).toBeNull();
+	});
+	});
 
 describe('POST /api/files/create/targz-index', () => {
 	test('registers targz index entries', async () => {
@@ -722,8 +756,8 @@ describe('POST /api/files/update', () => {
 
 		const publicRes = await app.request('/api/files/ls?bucketName=test_bucket&path=', {}, env);
 		expect(publicRes.status).toBe(200);
-		const publicBody = await publicRes.json() as { entries: Array<{ name: string }> };
-		expect(publicBody.entries.map(entry => entry.name)).not.toContain('listed-setting.txt');
+		const publicBody = await publicRes.json() as { items: Array<{ name: string }> };
+		expect(publicBody.items.map(entry => entry.name)).not.toContain('listed-setting.txt');
 
 		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=listed-setting.txt', {
 			headers: authHeaders(token),
@@ -766,8 +800,8 @@ describe('POST /api/files/update', () => {
 
 		const rootRes = await app.request('/api/files/ls?bucketName=directory_listing_bucket&path=', {}, env);
 		expect(rootRes.status).toBe(200);
-		const rootBody = await rootRes.json() as { entries: Array<{ name: string }> };
-		expect(rootBody.entries.map(entry => entry.name)).toEqual(['outside.txt']);
+		const rootBody = await rootRes.json() as { items: Array<{ name: string }> };
+		expect(rootBody.items.map(entry => entry.name)).toEqual(['outside.txt']);
 
 		const ownerRes = await app.request('/api/files/ls', {
 			method: 'POST',
@@ -775,9 +809,9 @@ describe('POST /api/files/update', () => {
 			body: JSON.stringify({ bucketName: 'directory_listing_bucket', path: 'docs/' }),
 		}, env);
 		expect(ownerRes.status).toBe(200);
-		const ownerBody = await ownerRes.json() as { entries: Array<{ name: string; isListed?: boolean }> };
-		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'a.txt', isListed: true }));
-		expect(ownerBody.entries).toContainEqual(expect.objectContaining({ name: 'nested' }));
+		const ownerBody = await ownerRes.json() as { items: Array<{ name: string; isListed?: boolean }> };
+		expect(ownerBody.items).toContainEqual(expect.objectContaining({ name: 'a.txt', isListed: false }));
+		expect(ownerBody.items).toContainEqual(expect.objectContaining({ name: 'nested' }));
 	});
 
 	test('cannot update listed setting in another user bucket', async () => {
@@ -834,8 +868,8 @@ describe('POST /api/files/update', () => {
 
 		const publicRes = await app.request('/api/files/ls?bucketName=listing_exclude_bucket&path=docs/', {}, env);
 		expect(publicRes.status).toBe(200);
-		const publicBody = await publicRes.json() as { entries: Array<{ name: string }> };
-		expect(publicBody.entries.map(entry => entry.name)).toEqual(['keep-dir', 'a.txt', 'keep.txt']);
+		const publicBody = await publicRes.json() as { items: Array<{ name: string }> };
+		expect(publicBody.items.map(entry => entry.name)).toEqual(['keep-dir']);
 	});
 
 	test('update listed setting returns 404 when no files match', async () => {
