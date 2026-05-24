@@ -457,7 +457,7 @@ function toggleTheme(): void {
   flex: 1;
   max-width: 1200px;
   width: 100%;
-  margin: 0;
+  margin: 0 auto;
   padding: 28px 20px 48px;
 
   :global(.btn) {
