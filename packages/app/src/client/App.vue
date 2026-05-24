@@ -465,6 +465,11 @@ function toggleTheme(): void {
     justify-content: center;
   }
 
+  :global(.action-menu .btn) {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
   :global(.form-input) {
     min-height: 36px;
   }

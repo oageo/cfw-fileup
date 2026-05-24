@@ -1753,9 +1753,9 @@ watch([isPartiallySelected, isAllSelected], async () => {
 }
 
 .publicBadges {
-  display: inline-flex;
+  display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
 }
 
