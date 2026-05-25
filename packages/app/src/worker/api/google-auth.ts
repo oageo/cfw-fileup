@@ -44,22 +44,19 @@ function googleErrorLocation(error: string, path: '/signin' | '/signup' = '/sign
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get('/', async (c) => {
-	if ((c.env.GOOGLE_CLIENT_ID as string) === '' || (c.env.GOOGLE_CLIENT_SECRET as string) === '') {
+export async function createGoogleAuthUrl(env: Env, requestUrl: URL, linkUserId?: string, signupPassphrase?: string, signupUsername?: string): Promise<string> {
+	if ((env.GOOGLE_CLIENT_ID as string) === '' || (env.GOOGLE_CLIENT_SECRET as string) === '') {
 		throw apiError(503, 'GOOGLE_OAUTH_IS_NOT_CONFIGURED');
 	}
 
-	const db = getDb(c.env);
-	const passphrase = c.req.query('passphrase');
-	const signupUsername = c.req.query('username');
-	if (passphrase && passphrase.length > MAX_PASSPHRASE_LENGTH) {
+	if (signupPassphrase && signupPassphrase.length > MAX_PASSPHRASE_LENGTH) {
 		throw apiError(400, 'PASSPHRASE_TOO_LONG', `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters`);
 	}
 	if (signupUsername && signupUsername.length > MAX_USERNAME_LENGTH) {
 		throw apiError(400, 'INVALID_USERNAME_FORMAT', `username must be at most ${MAX_USERNAME_LENGTH} characters`);
 	}
 
-	// Clean up expired states
+	const db = getDb(env);
 	await db.delete(oauthStates).where(lt(oauthStates.expiresAt, Date.now()));
 
 	const state = generateToken();
@@ -68,19 +65,26 @@ app.get('/', async (c) => {
 	const stateId = genEaidx(Date.now());
 	const expiresAt = Date.now() + STATE_TTL_MS;
 
-	await db.insert(oauthStates).values({ id: stateId, state: stateBytes, signupPassphrase: passphrase, signupUsername, expiresAt });
+	await db.insert(oauthStates).values({ id: stateId, state: stateBytes, linkUserId, signupPassphrase, signupUsername, expiresAt });
 
-	const url = new URL(c.req.url);
-	const redirectUri = getRedirectUri(c.env, url);
+	const redirectUri = getRedirectUri(env, requestUrl);
 
 	const authUrl = new URL(GOOGLE_AUTH_URL);
-	authUrl.searchParams.set('client_id', c.env.GOOGLE_CLIENT_ID);
+	authUrl.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
 	authUrl.searchParams.set('redirect_uri', redirectUri);
 	authUrl.searchParams.set('response_type', 'code');
 	authUrl.searchParams.set('scope', 'openid email profile');
 	authUrl.searchParams.set('state', state);
 	authUrl.searchParams.set('access_type', 'online');
 
+	return authUrl.toString();
+}
+
+app.get('/', async (c) => {
+	const passphrase = c.req.query('passphrase');
+	const signupUsername = c.req.query('username');
+	const url = new URL(c.req.url);
+	const authUrl = await createGoogleAuthUrl(c.env, url, undefined, passphrase, signupUsername);
 	return c.redirect(authUrl.toString(), 302);
 });
 
@@ -158,8 +162,27 @@ app.get('/callback', async (c) => {
 		return c.redirect(googleErrorLocation('userinfo_failed'), 302);
 	}
 
+	const linkedUser = await db.select().from(users).where(eq(users.googleId, googleId)).get();
+
+	if (storedState.linkUserId) {
+		if (linkedUser && linkedUser.id !== storedState.linkUserId) {
+			return c.redirect('/my/account?link_error=account_already_linked', 302);
+		}
+
+		const currentUser = await db.select().from(users).where(eq(users.id, storedState.linkUserId)).get();
+		if (!currentUser || currentUser.isSuspended) {
+			return c.redirect('/my/account?link_error=link_failed', 302);
+		}
+		if (currentUser.googleId && currentUser.googleId !== googleId) {
+			return c.redirect('/my/account?link_error=already_linked', 302);
+		}
+
+		await db.update(users).set({ googleId }).where(eq(users.id, storedState.linkUserId));
+		return c.redirect('/my/account?link_success=google', 302);
+	}
+
 	// Check if user exists with this Google ID
-	let user = await db.select().from(users).where(eq(users.googleId, googleId)).get();
+	let user = linkedUser;
 
 	if (user) {
 		// Existing Google user - sign in

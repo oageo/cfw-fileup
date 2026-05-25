@@ -97,6 +97,81 @@ describe('GET /api/auth/indieauth/begin', () => {
 	});
 });
 
+describe('POST /api/account/link/indieauth/begin', () => {
+	test('requires current password', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const res = await app.request('http://localhost:8788/api/account/link/indieauth/begin', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ profileUrl: 'https://p1.a9z.dev/@aqz', currentPassword: 'wrongpassword' }),
+		}, env);
+		expect(res.status).toBe(401);
+	});
+
+	test('stores current user id in OAuth state', async () => {
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+			const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+			if (url === 'https://p1.a9z.dev/.well-known/oauth-authorization-server') {
+				return Response.json({
+					issuer: 'https://p1.a9z.dev',
+					authorization_endpoint: 'https://p1.a9z.dev/oauth/authorize',
+					token_endpoint: 'https://p1.a9z.dev/oauth/token',
+				});
+			}
+			return new Response('not found', { status: 404 });
+		});
+
+		const { data } = await signup('user1');
+		const token = String(data.token);
+		const userId = String(data.userId);
+
+		const res = await app.request('http://localhost:8788/api/account/link/indieauth/begin', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ profileUrl: 'https://p1.a9z.dev/@aqz', currentPassword: 'password123' }),
+		}, env);
+		expect(res.status).toBe(200);
+
+		const body = await res.json() as { url: string };
+		const state = new URL(body.url).searchParams.get('state');
+		expect(state).toBeTruthy();
+
+		const row = await env.DB
+			.prepare('SELECT link_user_id FROM oauth_states WHERE state = ?')
+			.bind(base64UrlToBytes(state ?? ''))
+			.first<{ link_user_id: string | null }>();
+		expect(row?.link_user_id).toBe(userId);
+	});
+});
+
+describe('POST /api/account/linked-misskey/list', () => {
+	test('returns linked Misskey accounts for current user', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+		const userId = String(data.userId);
+
+		await env.DB.prepare('INSERT INTO misskey_accounts (id, user_id, misskey_id, issuer, username, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+			.bind('mk1', userId, 'https://misskey.example/users/1', 'https://misskey.example', 'alice', 'Alice', 1000)
+			.run();
+		await env.DB.prepare('INSERT INTO misskey_accounts (id, user_id, misskey_id, issuer, username, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+			.bind('mk2', userId, 'https://misskey2.example/users/2', 'https://misskey2.example', 'alice2', null, 2000)
+			.run();
+
+		const res = await app.request('/api/account/linked-misskey/list', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({}),
+		}, env);
+		expect(res.status).toBe(200);
+		const accounts = await res.json() as Array<{ misskeyId: string; username: string | null }>;
+		expect(accounts).toHaveLength(2);
+		expect(accounts.map(account => account.misskeyId)).toContain('https://misskey.example/users/1');
+		expect(accounts.map(account => account.username)).toContain('alice2');
+	});
+});
+
 describe('GET /api/auth/indieauth/client', () => {
 	test('serves OAuth client metadata page for Misskey client discovery', async () => {
 		const res = await app.request('http://localhost:8788/api/auth/indieauth/client', { method: 'GET' }, env);

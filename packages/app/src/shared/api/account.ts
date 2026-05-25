@@ -35,7 +35,59 @@ export const accountApiDef = {
 		tags: ['account'],
 		req: v.object({}),
 		res: {
-			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ id: v.string(), username: v.string(), isAdmin: v.boolean(), termsAgreedAt: v.nullable(v.number()) }) } } },
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
+				id: v.string(),
+				username: v.string(),
+				isAdmin: v.boolean(),
+				termsAgreedAt: v.nullable(v.number()),
+				hasGoogle: v.boolean(),
+				hasMisskey: v.boolean(),
+				hasPassword: v.boolean(),
+				recentlyAuthenticated: v.boolean(),
+			}) } } },
+		},
+	},
+	'/api/account/link/google/begin': {
+		summary: 'Begin linking Google account',
+		tags: ['account'],
+		req: v.object({
+			currentPassword: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ url: v.string() }) } } },
+			401: errorResponse('Recent authentication or current password required', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'RECENT_AUTHENTICATION_REQUIRED']),
+			404: errorResponse('User not found', ['USER_NOT_FOUND']),
+			503: errorResponse('Google OAuth is not configured', ['GOOGLE_OAUTH_IS_NOT_CONFIGURED']),
+		},
+	},
+	'/api/account/link/indieauth/begin': {
+		summary: 'Begin linking IndieAuth account',
+		tags: ['account'],
+		req: v.object({
+			profileUrl: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(2048)),
+			currentPassword: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ url: v.string() }) } } },
+			400: errorResponse('Bad request', ['INVALID_PROFILE_URL', 'INDIEAUTH_DISCOVERY_FAILED']),
+			401: errorResponse('Recent authentication or current password required', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'RECENT_AUTHENTICATION_REQUIRED']),
+			403: errorResponse('Blocked server', ['THIS_MISSKEY_SERVER_IS_NOT_ALLOWED']),
+			404: errorResponse('User not found', ['USER_NOT_FOUND']),
+		},
+	},
+	'/api/account/linked-misskey/list': {
+		summary: 'List linked Misskey accounts',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.array(v.object({
+				id: v.string(),
+				misskeyId: v.string(),
+				issuer: v.string(),
+				username: v.nullable(v.string()),
+				name: v.nullable(v.string()),
+				createdAt: v.number(),
+			})) } } },
 		},
 	},
 	'/api/account/agree-terms': {

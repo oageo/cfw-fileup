@@ -25,6 +25,7 @@ export const tokens = sqliteTable('tokens', {
 	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	token: binaryBlob('token').notNull().unique(),
 	isRevoked: integer('is_revoked', { mode: 'boolean' }).notNull().default(false),
+	reauthenticatedAt: integer('reauthenticated_at'),
 });
 
 export const oauthStates = sqliteTable('oauth_states', {
@@ -32,6 +33,7 @@ export const oauthStates = sqliteTable('oauth_states', {
 	state: binaryBlob('state').notNull().unique(),
 	codeVerifier: binaryBlob('code_verifier'),
 	profileUrl: text('profile_url'),
+	linkUserId: text('link_user_id').references(() => users.id, { onDelete: 'cascade' }),
 	signupPassphrase: text('signup_passphrase'),
 	signupUsername: text('signup_username'),
 	expiresAt: integer('expires_at').notNull(),

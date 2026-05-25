@@ -53,6 +53,43 @@ describe('GET /api/auth/google', () => {
 	});
 });
 
+describe('POST /api/account/link/google/begin', () => {
+	test('requires current password', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const res = await app.request('/api/account/link/google/begin', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ currentPassword: 'wrongpassword' }),
+		}, googleEnv);
+		expect(res.status).toBe(401);
+	});
+
+	test('stores current user id in OAuth state', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+		const userId = String(data.userId);
+
+		const res = await app.request('/api/account/link/google/begin', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ currentPassword: 'password123' }),
+		}, googleEnv);
+		expect(res.status).toBe(200);
+
+		const body = await res.json() as { url: string };
+		const state = new URL(body.url).searchParams.get('state');
+		expect(state).toBeTruthy();
+
+		const row = await env.DB
+			.prepare('SELECT link_user_id FROM oauth_states WHERE state = ?')
+			.bind(base64UrlToBytes(state ?? ''))
+			.first<{ link_user_id: string | null }>();
+		expect(row?.link_user_id).toBe(userId);
+	});
+});
+
 describe('GET /api/auth/google/callback', () => {
 	test('returns 503 when Google OAuth is not configured', async () => {
 		const res = await app.request('/api/auth/google/callback?code=abc&state=xyz', { method: 'GET' }, noGoogleEnv);

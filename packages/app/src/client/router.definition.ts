@@ -63,6 +63,11 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/my/tokens.vue')),
 	},
 	{
+		path: '/my/account',
+		name: 'my-account',
+		component: page(() => import('@/pages/my/account.vue')),
+	},
+	{
 		path: '/uploader',
 		name: 'upload',
 		component: page(() => import('@/pages/upload.vue')),

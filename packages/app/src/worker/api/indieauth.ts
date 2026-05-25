@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, count, lt, sql } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
-import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
+import { misskeyAccounts, users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes, tokenToDigest } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
@@ -171,7 +171,7 @@ async function discoverAuthorizationServer(profileUrl: string): Promise<OAuthDis
  * Normalize and validate a profile URL.
  * Returns the canonical profile URL, or null if invalid.
  */
-function normalizeProfileUrl(input: string): string | null {
+export function normalizeProfileUrl(input: string): string | null {
 	let url: URL;
 	try {
 		// Try parsing as-is; if no protocol, try adding https://
@@ -205,7 +205,7 @@ function getServerHost(profileUrl: string): string {
 /**
  * Check if the server of a profile URL is blocked by admin settings.
  */
-async function isServerBlocked(env: Env, profileUrl: string): Promise<boolean> {
+export async function isServerBlocked(env: Env, profileUrl: string): Promise<boolean> {
 	const db = getDb(env);
 	const host = getServerHost(profileUrl);
 	if (!host) return true;
@@ -277,14 +277,11 @@ app.get('/client', (c) => {
 </html>`);
 });
 
-app.get('/begin', async (c) => {
-	const profileUrlRaw = c.req.query('profile_url');
-	const passphrase = c.req.query('passphrase');
-	const signupUsername = c.req.query('username');
+export async function createIndieAuthUrl(env: Env, requestUrl: URL, profileUrlRaw: string, linkUserId?: string, signupPassphrase?: string, signupUsername?: string): Promise<string> {
 	if (!profileUrlRaw) {
 		throw apiError(400, 'PROFILE_URL_IS_REQUIRED');
 	}
-	if (passphrase && passphrase.length > MAX_PASSPHRASE_LENGTH) {
+	if (signupPassphrase && signupPassphrase.length > MAX_PASSPHRASE_LENGTH) {
 		throw apiError(400, 'PASSPHRASE_TOO_LONG', `passphrase must be at most ${MAX_PASSPHRASE_LENGTH} characters`);
 	}
 	if (signupUsername && signupUsername.length > MAX_USERNAME_LENGTH) {
@@ -296,7 +293,7 @@ app.get('/begin', async (c) => {
 		throw apiError(400, 'INVALID_PROFILE_URL');
 	}
 
-	if (await isServerBlocked(c.env, profileUrl)) {
+	if (await isServerBlocked(env, profileUrl)) {
 		throw apiError(403, 'THIS_MISSKEY_SERVER_IS_NOT_ALLOWED');
 	}
 
@@ -305,9 +302,8 @@ app.get('/begin', async (c) => {
 		throw apiError(400, 'INDIEAUTH_DISCOVERY_FAILED');
 	}
 
-	const db = getDb(c.env);
+	const db = getDb(env);
 
-	// Clean up expired states
 	await db.delete(oauthStates).where(lt(oauthStates.expiresAt, Date.now()));
 
 	const state = generateToken();
@@ -325,12 +321,12 @@ app.get('/begin', async (c) => {
 		state: stateBytes,
 		codeVerifier: codeVerifierBytes,
 		profileUrl,
-		signupPassphrase: passphrase,
+		linkUserId,
+		signupPassphrase,
 		signupUsername,
 		expiresAt,
 	});
 
-	const requestUrl = new URL(c.req.url);
 	const redirectUri = getCallbackUri(requestUrl);
 	const clientId = getClientId(requestUrl);
 
@@ -343,7 +339,16 @@ app.get('/begin', async (c) => {
 	authUrl.searchParams.set('code_challenge_method', 'S256');
 	authUrl.searchParams.set('scope', MISSKEY_OAUTH_SCOPE);
 
-	return c.redirect(authUrl.toString(), 302);
+	return authUrl.toString();
+}
+
+app.get('/begin', async (c) => {
+	const profileUrlRaw = c.req.query('profile_url');
+	const passphrase = c.req.query('passphrase');
+	const signupUsername = c.req.query('username');
+	const requestUrl = new URL(c.req.url);
+	const authUrl = await createIndieAuthUrl(c.env, requestUrl, profileUrlRaw ?? '', undefined, passphrase, signupUsername);
+	return c.redirect(authUrl, 302);
 });
 
 app.get('/callback', async (c) => {
@@ -432,9 +437,38 @@ app.get('/callback', async (c) => {
 
 	// Use the profile URL as the misskey_id (canonical identifier)
 	const misskeyId = canonicalMe;
+	const linkedAccount = await db.select().from(misskeyAccounts).where(eq(misskeyAccounts.misskeyId, misskeyId)).get();
+
+	if (storedState.linkUserId) {
+		const legacyUser = await db.select().from(users).where(eq(users.misskeyId, misskeyId)).get();
+		const existingUserId = linkedAccount?.userId ?? legacyUser?.id;
+		if (existingUserId && existingUserId !== storedState.linkUserId) {
+			return c.redirect('/my/account?link_error=account_already_linked', 302);
+		}
+
+		const currentUser = await db.select().from(users).where(eq(users.id, storedState.linkUserId)).get();
+		if (!currentUser || currentUser.isSuspended) {
+			return c.redirect('/my/account?link_error=link_failed', 302);
+		}
+		if (!linkedAccount) {
+			await db.insert(misskeyAccounts).values({
+				id: genEaidx(Date.now()),
+				userId: storedState.linkUserId,
+				misskeyId,
+				issuer: server.issuer,
+				username: account?.username ?? null,
+				name: account?.name ?? null,
+				createdAt: Date.now(),
+			});
+		}
+
+		return c.redirect('/my/account?link_success=misskey', 302);
+	}
 
 	// Check if user exists with this misskeyId
-	let user = await db.select().from(users).where(eq(users.misskeyId, misskeyId)).get();
+	let user = linkedAccount
+		? await db.select().from(users).where(eq(users.id, linkedAccount.userId)).get()
+		: await db.select().from(users).where(eq(users.misskeyId, misskeyId)).get();
 
 	if (user) {
 		if (user.isSuspended) {
@@ -491,7 +525,7 @@ app.get('/callback', async (c) => {
 			username,
 			passwordHash: null,
 			googleId: null,
-			misskeyId,
+			misskeyId: null,
 			isAdmin: isFirstUser,
 			isSuspended: false,
 			effectiveMaxBuckets: initialQuota.maxBuckets,
@@ -502,6 +536,15 @@ app.get('/callback', async (c) => {
 			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
 			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
+		});
+		await db.insert(misskeyAccounts).values({
+			id: genEaidx(Date.now()),
+			userId,
+			misskeyId,
+			issuer: server.issuer,
+			username: account?.username ?? null,
+			name: account?.name ?? null,
+			createdAt: Date.now(),
 		});
 
 		await db

@@ -301,7 +301,7 @@ app.post(
 		const tokenValue = generateToken();
 		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
-		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes });
+		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes, reauthenticatedAt: Date.now() });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey' }, user.id, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
@@ -650,7 +650,7 @@ app.post(
 		const tokenValue = generateToken();
 		const tokenBytes = await tokenToDigest(tokenValue);
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
-		await db.insert(tokens).values({ id: tokenId, userId, token: tokenBytes });
+		await db.insert(tokens).values({ id: tokenId, userId, token: tokenBytes, reauthenticatedAt: Date.now() });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey_signup' }, userId, tokenId);
 
 		return c.json({ token: tokenValue }, 200);
