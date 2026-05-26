@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { errorResponse, PageRequestFields, pagedResponse } from '../api.schemas.js';
+import { errorResponse, PageRequestFields, pagedResponse, IdString } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
 import { MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
@@ -27,6 +27,41 @@ const EffectiveQuotaResponse = v.pipe(
 		effectiveQuotaSource: v.nullable(EffectiveQuotaSource),
 	}),
 	v.metadata({ ref: 'AccountEffectiveQuota' }),
+);
+const CurrentPlanResponse = v.pipe(
+	v.nullable(v.object({
+		userId: IdString,
+		planId: IdString,
+		planName: v.string(),
+		expiresAt: v.number(),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	})),
+	v.metadata({ ref: 'AccountCurrentPlan' }),
+);
+const EthereumAddress = v.pipe(v.string(), v.regex(/^0x[a-fA-F0-9]{40}$/));
+const HexSignature = v.pipe(v.string(), v.regex(/^0x[a-fA-F0-9]+$/));
+const WalletResponse = v.pipe(
+	v.object({
+		id: v.string(),
+		chainId: v.number(),
+		address: EthereumAddress,
+		label: v.nullable(v.string()),
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	}),
+	v.metadata({ ref: 'UserWallet' }),
+);
+const WalletLinkChainResponse = v.pipe(
+	v.object({
+		chainId: v.number(),
+		name: v.string(),
+		nativeCurrencyName: v.string(),
+		nativeCurrencySymbol: v.string(),
+		nativeCurrencyDecimals: v.number(),
+		blockExplorerUrl: v.nullable(v.string()),
+	}),
+	v.metadata({ ref: 'WalletLinkChain' }),
 );
 
 export const accountApiDef = {
@@ -90,6 +125,59 @@ export const accountApiDef = {
 			})) } } },
 		},
 	},
+	'/api/account/wallets/list': {
+		summary: 'List linked wallets',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.array(WalletResponse) } } },
+		},
+	},
+	'/api/account/wallets/link/chains': {
+		summary: 'List wallet link chains',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.array(WalletLinkChainResponse) } } },
+		},
+	},
+	'/api/account/wallets/unlink': {
+		summary: 'Unlink wallet',
+		tags: ['account'],
+		req: v.object({ walletId: IdString }),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
+			404: errorResponse('Wallet not found', ['WALLET_NOT_FOUND']),
+		},
+	},
+	'/api/account/wallets/link/begin': {
+		summary: 'Begin linking a wallet with SIWE',
+		tags: ['account'],
+		req: v.object({
+			address: EthereumAddress,
+			chainId: v.pipe(v.number(), v.integer(), v.minValue(1)),
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
+				nonce: v.string(),
+				message: v.string(),
+			}) } } },
+			400: errorResponse('Invalid wallet link request', ['PAYMENT_CHAIN_RPC_NOT_CONFIGURED', 'PAYMENT_TRANSACTION_INVALID', 'WALLET_ALREADY_LINKED']),
+		},
+	},
+	'/api/account/wallets/link/verify': {
+		summary: 'Verify SIWE signature and link wallet',
+		tags: ['account'],
+		req: v.object({
+			nonce: v.string(),
+			message: v.string(),
+			signature: HexSignature,
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: WalletResponse } } },
+			400: errorResponse('Invalid wallet signature', ['PAYMENT_CHAIN_RPC_NOT_CONFIGURED', 'WALLET_ALREADY_LINKED', 'WALLET_CHALLENGE_NOT_FOUND', 'WALLET_SIGNATURE_INVALID']),
+		},
+	},
 	'/api/account/agree-terms': {
 		summary: 'Record terms agreement',
 		tags: ['account'],
@@ -104,6 +192,14 @@ export const accountApiDef = {
 		req: v.object({}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: EffectiveQuotaResponse } } },
+		},
+	},
+	'/api/account/current-plan': {
+		summary: 'Get current account plan assignment',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: CurrentPlanResponse } } },
 		},
 	},
 	'/api/account/update': {

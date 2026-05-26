@@ -5,6 +5,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import { authStore, fetchCurrentUser, setToken } from '@/store/auth';
+import WalletSettings from '@/components/WalletSettings.vue';
 import type { ApiReq } from '../../../shared/api';
 
 type LinkedMisskeyAccount = ApiSuccess<'/api/account/linked-misskey/list'>['data'][number];
@@ -227,6 +228,8 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <WalletSettings />
     </template>
   </div>
 </template>
@@ -274,6 +277,10 @@ onMounted(async () => {
 }
 
 .linkedItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px;
@@ -296,5 +303,11 @@ onMounted(async () => {
 .linkedLink:hover {
   color: var(--color-primary);
   text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+  .linkedItem {
+    flex-direction: column;
+  }
 }
 </style>

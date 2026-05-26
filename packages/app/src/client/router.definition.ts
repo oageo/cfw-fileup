@@ -53,6 +53,11 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/my/quota.vue')),
 	},
 	{
+		path: '/my/payments',
+		name: 'my-payments',
+		component: page(() => import('@/pages/my/payments.vue')),
+	},
+	{
 		path: '/my/passkeys',
 		name: 'my-passkeys',
 		component: page(() => import('@/pages/my/passkeys.vue')),
@@ -126,6 +131,11 @@ export const ROUTE_DEF = [
 		path: '/admin/plans',
 		name: 'admin-plans',
 		component: page(() => import('@/pages/admin/plans.vue')),
+	},
+	{
+		path: '/admin/crypto-payments',
+		name: 'admin-crypto-payments',
+		component: page(() => import('@/pages/admin/crypto-payments.vue')),
 	},
 	{
 		path: '/admin/users/:userId',
