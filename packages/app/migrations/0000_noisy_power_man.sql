@@ -1,4 +1,4 @@
--- https://github.com/tamaina/cfw-fileup/pull/109
+-- https://github.com/tamaina/cfw-fileup/issues/112
 CREATE TABLE `crypto_payment_orders` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -23,6 +23,7 @@ CREATE TABLE `crypto_payment_orders` (
 	`quote_expires_at` integer NOT NULL,
 	`quote_base_amount_base_units` text NOT NULL,
 	`quote_discount_base_units` text NOT NULL,
+	`quote_effective_starts_at` integer NOT NULL,
 	`quote_effective_expires_at` integer NOT NULL,
 	`quote_current_plan_id` text,
 	`quote_current_plan_name` text,
@@ -289,8 +290,10 @@ CREATE TABLE `plans` (
 );
 --> statement-breakpoint
 CREATE TABLE `user_plan_assignments` (
-	`user_id` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
 	`plan_id` text NOT NULL,
+	`starts_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
@@ -298,6 +301,8 @@ CREATE TABLE `user_plan_assignments` (
 	FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `user_plan_assignments_user_period_idx` ON `user_plan_assignments` (`user_id`,`starts_at`,`expires_at`);--> statement-breakpoint
+CREATE INDEX `user_plan_assignments_plan_id_idx` ON `user_plan_assignments` (`plan_id`);--> statement-breakpoint
 CREATE TABLE `user_quotas` (
 	`user_id` text PRIMARY KEY NOT NULL,
 	`max_buckets` integer,

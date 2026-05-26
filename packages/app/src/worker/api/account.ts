@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { createPublicClient, http, getAddress, type Hex } from 'viem';
 import { createSiweMessage, generateSiweNonce, verifySiweMessage } from 'viem/siwe';
 import { misskeyAccounts, paymentChains, plans, users, usedUsernames, tokens, moderationEvents, userPlanAssignments, userWallets, walletLinkChallenges } from '../scheme/index';
@@ -321,6 +321,7 @@ app.post(
 	validator('json', apiDef['/api/account/current-plan'].req),
 	describeResponse(async (c: JsonCtx<'/api/account/current-plan', Env>) => {
 		const user = c.get('user');
+		const now = Date.now();
 		const assignment = await getDb(c.env)
 			.select({
 				userId: userPlanAssignments.userId,
@@ -332,7 +333,12 @@ app.post(
 			})
 			.from(userPlanAssignments)
 			.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
-			.where(eq(userPlanAssignments.userId, user.id))
+			.where(and(
+				eq(userPlanAssignments.userId, user.id),
+				lt(userPlanAssignments.startsAt, now + 1),
+				gt(userPlanAssignments.expiresAt, now),
+			))
+			.orderBy(desc(plans.sortOrder), desc(userPlanAssignments.expiresAt))
 			.get();
 		return c.json(assignment ?? null, 200);
 	}, getResponseDefWithAuth('/api/account/current-plan')),

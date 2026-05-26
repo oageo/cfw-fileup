@@ -32,6 +32,13 @@ export async function confirmCryptoPaymentOrder(env: Env, userId: string, orderI
 	if (order.status !== 'pending') {
 		throw apiError(400, 'PAYMENT_ORDER_EXPIRED');
 	}
+	if (order.expiresAt <= now) {
+		await db
+			.update(cryptoPaymentOrders)
+			.set({ status: 'expired', updatedAt: now })
+			.where(and(eq(cryptoPaymentOrders.id, order.id), eq(cryptoPaymentOrders.status, 'pending')));
+		throw apiError(400, 'PAYMENT_ORDER_EXPIRED');
+	}
 	assertValidBigIntString(order.amountBaseUnits);
 
 	const normalizedTxHash = normalizeTransactionHash(txHash);
@@ -199,20 +206,14 @@ async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: nu
 	await db
 		.insert(userPlanAssignments)
 		.values({
+			id: newPaymentId(now),
 			userId: order.userId,
 			planId: order.planId,
+			startsAt: order.quoteEffectiveStartsAt,
 			expiresAt: order.quoteEffectiveExpiresAt,
 			createdAt: now,
 			updatedAt: now,
-		})
-		.onConflictDoUpdate({
-			target: userPlanAssignments.userId,
-			set: {
-				planId: order.planId,
-				expiresAt: order.quoteEffectiveExpiresAt,
-				updatedAt: now,
-			},
-	});
+		});
 }
 
 export function normalizeTransactionHash(txHash: string): Hex {

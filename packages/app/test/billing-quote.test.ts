@@ -10,6 +10,7 @@ describe('billing quote calculation', () => {
 			quoteCreatedAt: baseAt,
 			quoteTtlMs: 15 * 60 * 1000,
 			targetPlanId: 'plan-basic',
+			targetPlanSortOrder: 10,
 			targetPlanPrice: {
 				amountBaseUnits: '30000000',
 				durationDays: 90,
@@ -18,6 +19,7 @@ describe('billing quote calculation', () => {
 			currentPlan: {
 				id: 'plan-basic',
 				name: 'Basic',
+				sortOrder: 10,
 				expiresAt: currentExpiresAt,
 				price: {
 					amountBaseUnits: '30000000',
@@ -37,6 +39,7 @@ describe('billing quote calculation', () => {
 			quoteCreatedAt: baseAt,
 			quoteTtlMs: 15 * 60 * 1000,
 			targetPlanId: 'plan-basic',
+			targetPlanSortOrder: 10,
 			targetPlanPrice: {
 				amountBaseUnits: '30000000',
 				durationDays: 90,
@@ -55,6 +58,7 @@ describe('billing quote calculation', () => {
 			quoteCreatedAt: baseAt,
 			quoteTtlMs: 15 * 60 * 1000,
 			targetPlanId: 'plan-pro',
+			targetPlanSortOrder: 20,
 			targetPlanPrice: {
 				amountBaseUnits: '90000000',
 				durationDays: 90,
@@ -63,6 +67,7 @@ describe('billing quote calculation', () => {
 			currentPlan: {
 				id: 'plan-basic',
 				name: 'Basic',
+				sortOrder: 10,
 				expiresAt: baseAt + 30 * 86_400_000,
 				price: {
 					amountBaseUnits: '30000000',
@@ -77,6 +82,38 @@ describe('billing quote calculation', () => {
 		expect(quote.payableAmountBaseUnits).toBe('80000000');
 		expect(quote.effectiveExpiresAt).toBe(baseAt + 90 * 86_400_000);
 		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: 'plan-basic' }));
+	});
+
+	test('schedules a downgrade after the current higher plan expires', () => {
+		const currentExpiresAt = baseAt + 30 * 86_400_000;
+		const quote = calculatePaymentQuote({
+			quoteCreatedAt: baseAt,
+			quoteTtlMs: 15 * 60 * 1000,
+			targetPlanId: 'plan-basic',
+			targetPlanSortOrder: 10,
+			targetPlanPrice: {
+				amountBaseUnits: '30000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			},
+			currentPlan: {
+				id: 'plan-pro',
+				name: 'Pro',
+				sortOrder: 20,
+				expiresAt: currentExpiresAt,
+				price: {
+					amountBaseUnits: '90000000',
+					durationDays: 90,
+					durationUnit: 'days',
+				},
+			},
+		});
+
+		expect(quote.discountBaseUnits).toBe('0');
+		expect(quote.payableAmountBaseUnits).toBe('30000000');
+		expect(quote.effectiveStartsAt).toBe(currentExpiresAt);
+		expect(quote.effectiveExpiresAt).toBe(currentExpiresAt + 90 * 86_400_000);
+		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: 'plan-pro', sortOrder: 20 }));
 	});
 
 	test('adds calendar months without overflowing into the next month', () => {

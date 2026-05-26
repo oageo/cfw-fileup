@@ -963,22 +963,17 @@ app.post(
 		}
 
 		const now = Date.now();
+		await db.delete(userPlanAssignments).where(eq(userPlanAssignments.userId, body.userId));
 		await db
 			.insert(userPlanAssignments)
 			.values({
+				id: genEaidx(now),
 				userId: body.userId,
 				planId: body.planId,
+				startsAt: now,
 				expiresAt: body.expiresAt,
 				createdAt: now,
 				updatedAt: now,
-			})
-			.onConflictDoUpdate({
-				target: userPlanAssignments.userId,
-				set: {
-					planId: body.planId,
-					expiresAt: body.expiresAt,
-					updatedAt: now,
-				},
 			});
 		await refreshEffectiveQuotaForUser(c.env, body.userId, now);
 		await recordModerationAuditLog(c, 'admin_user_plan_assigned', {
@@ -1014,6 +1009,11 @@ app.post(
 			.from(userPlanAssignments)
 			.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
 			.where(eq(userPlanAssignments.userId, body.userId))
+			.orderBy(
+				desc(sql<number>`case when ${userPlanAssignments.startsAt} <= ${Date.now()} and ${userPlanAssignments.expiresAt} > ${Date.now()} then 1 else 0 end`),
+				desc(userPlanAssignments.startsAt),
+				desc(userPlanAssignments.expiresAt),
+			)
 			.get();
 
 		return c.json(assignment ?? null, 200);

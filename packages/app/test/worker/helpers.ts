@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import app from '../../src/worker/index';
-import migration0000 from '../../migrations/0000_light_fabian_cortez.sql?raw';
+import migration0000 from '../../migrations/0000_noisy_power_man.sql?raw';
 
 export { env, app };
 

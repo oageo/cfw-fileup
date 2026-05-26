@@ -89,6 +89,7 @@ export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	quoteExpiresAt: integer('quote_expires_at').notNull(),
 	quoteBaseAmountBaseUnits: text('quote_base_amount_base_units').notNull(),
 	quoteDiscountBaseUnits: text('quote_discount_base_units').notNull(),
+	quoteEffectiveStartsAt: integer('quote_effective_starts_at').notNull(),
 	quoteEffectiveExpiresAt: integer('quote_effective_expires_at').notNull(),
 	quoteCurrentPlanId: text('quote_current_plan_id'),
 	quoteCurrentPlanName: text('quote_current_plan_name'),

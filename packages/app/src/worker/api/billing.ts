@@ -24,6 +24,7 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 	assetId: string;
 	planId: string;
 	planName: string;
+	planSortOrder: number;
 	amountBaseUnits: string;
 	durationDays: number;
 	durationUnit: PaymentDurationUnit;
@@ -34,10 +35,16 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 			planId: userPlanAssignments.planId,
 			expiresAt: userPlanAssignments.expiresAt,
 			planName: plans.name,
+			planSortOrder: plans.sortOrder,
 		})
 		.from(userPlanAssignments)
 		.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
-		.where(and(eq(userPlanAssignments.userId, userId), gt(userPlanAssignments.expiresAt, quoteCreatedAt)))
+		.where(and(
+			eq(userPlanAssignments.userId, userId),
+			lt(userPlanAssignments.startsAt, quoteCreatedAt + 1),
+			gt(userPlanAssignments.expiresAt, quoteCreatedAt),
+		))
+		.orderBy(desc(plans.sortOrder), desc(userPlanAssignments.expiresAt))
 		.get();
 	const currentPlanPrice = activeAssignment && activeAssignment.planId !== offer.planId
 		? await getReferencePlanPrice(env, offer.assetId, activeAssignment.planId, quoteCreatedAt)
@@ -46,6 +53,7 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 		? {
 			id: activeAssignment.planId,
 			name: activeAssignment.planName,
+			sortOrder: activeAssignment.planSortOrder,
 			expiresAt: activeAssignment.expiresAt,
 			price: {
 				amountBaseUnits: offer.amountBaseUnits,
@@ -56,6 +64,7 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 		: activeAssignment && currentPlanPrice ? {
 			id: activeAssignment.planId,
 			name: activeAssignment.planName,
+			sortOrder: activeAssignment.planSortOrder,
 			expiresAt: activeAssignment.expiresAt,
 			price: currentPlanPrice,
 		} : null;
@@ -63,6 +72,7 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 		quoteCreatedAt,
 		quoteTtlMs: QUOTE_TTL_MS,
 		targetPlanId: offer.planId,
+		targetPlanSortOrder: offer.planSortOrder,
 		targetPlanPrice: {
 			amountBaseUnits: offer.amountBaseUnits,
 			durationDays: offer.durationDays,
@@ -178,18 +188,19 @@ async function listEnabledOffers(env: Env, userId: string, quoteCreatedAt = Date
 		},
 		amountBaseUnits: row.amountBaseUnits,
 		durationDays: row.durationDays,
-		durationUnit: row.durationUnit,
-		isEnabled: row.isEnabled,
-		expiresAt: row.expiresAt,
-		isRpcConfigured: isPaymentChainRpcConfigured(env, row.chainId),
-		quote: await createPaymentOfferQuote(env, userId, {
-			assetId: row.assetId,
-			planId: row.planId,
-			planName: row.planName,
-			amountBaseUnits: row.amountBaseUnits,
-			durationDays: row.durationDays,
 			durationUnit: row.durationUnit,
-		}, quoteCreatedAt),
+			isEnabled: row.isEnabled,
+			expiresAt: row.expiresAt,
+			isRpcConfigured: isPaymentChainRpcConfigured(env, row.chainId),
+			quote: await createPaymentOfferQuote(env, userId, {
+				assetId: row.assetId,
+				planId: row.planId,
+				planName: row.planName,
+				planSortOrder: row.planSortOrder,
+				amountBaseUnits: row.amountBaseUnits,
+				durationDays: row.durationDays,
+				durationUnit: row.durationUnit,
+			}, quoteCreatedAt),
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt,
 	})));
@@ -241,6 +252,7 @@ app.post(
 				durationUnit: paymentAssetPlanPrices.durationUnit,
 				expiresAt: paymentAssetPlanPrices.expiresAt,
 				planName: plans.name,
+				planSortOrder: plans.sortOrder,
 			})
 			.from(paymentAssetPlanPrices)
 			.innerJoin(paymentAssets, eq(paymentAssetPlanPrices.assetId, paymentAssets.id))
@@ -271,6 +283,7 @@ app.post(
 			assetId: price.assetId,
 			planId: price.planId,
 			planName: price.planName,
+			planSortOrder: price.planSortOrder,
 			amountBaseUnits: price.amountBaseUnits,
 			durationDays: price.durationDays,
 			durationUnit: price.durationUnit,
@@ -305,6 +318,7 @@ app.post(
 			quoteExpiresAt: quote.quoteExpiresAt,
 			quoteBaseAmountBaseUnits: quote.baseAmountBaseUnits,
 			quoteDiscountBaseUnits: quote.discountBaseUnits,
+			quoteEffectiveStartsAt: quote.effectiveStartsAt,
 			quoteEffectiveExpiresAt: quote.effectiveExpiresAt,
 			quoteCurrentPlanId: quote.currentPlan?.id ?? null,
 			quoteCurrentPlanName: quote.currentPlan?.name ?? null,

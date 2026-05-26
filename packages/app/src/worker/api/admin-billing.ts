@@ -142,6 +142,7 @@ async function listPrices(env: Env, priceId?: string) {
 			baseAmountBaseUnits: row.amountBaseUnits,
 			discountBaseUnits: '0',
 			payableAmountBaseUnits: row.amountBaseUnits,
+			effectiveStartsAt: row.updatedAt,
 			effectiveExpiresAt: row.updatedAt,
 			currentPlan: null,
 		},

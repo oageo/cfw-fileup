@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 import { users } from './users';
 
 export const plans = sqliteTable('plans', {
@@ -16,12 +16,17 @@ export const plans = sqliteTable('plans', {
 });
 
 export const userPlanAssignments = sqliteTable('user_plan_assignments', {
-	userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+	id: text('id').primaryKey(),
+	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	planId: text('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
+	startsAt: integer('starts_at').notNull(),
 	expiresAt: integer('expires_at').notNull(),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
-});
+}, (table) => [
+	index('user_plan_assignments_user_period_idx').on(table.userId, table.startsAt, table.expiresAt),
+	index('user_plan_assignments_plan_id_idx').on(table.planId),
+]);
 
 export const userQuotas = sqliteTable('user_quotas', {
 	userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),

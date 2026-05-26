@@ -929,7 +929,7 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify({}),
 		}, env);
 		expect(offersRes.status).toBe(200);
-		const offers = await offersRes.json() as Array<{ id: string; deploymentId: string; quote: { payableAmountBaseUnits: string; quoteCreatedAt: number } }>;
+		const offers = await offersRes.json() as Array<{ id: string; deploymentId: string; quote: { payableAmountBaseUnits: string; quoteCreatedAt: number; effectiveStartsAt: number; effectiveExpiresAt: number } }>;
 		const offer = offers.find(item => item.id === priceId && item.deploymentId === deploymentId);
 		expect(offer).toBeTruthy();
 		return offer!.quote;
@@ -1422,6 +1422,64 @@ describe('Crypto payment administration', () => {
 		expect(order.quoteCurrentPlanId).toBe(plan.id);
 	});
 
+	test('payment offers schedule lower sortOrder plan after current higher plan expires', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { plan, asset, deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const wallet = await createLinkedWallet(userId);
+
+		const updateBasePlanRes = await app.request('/api/admin/update-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ planId: plan.id, name: 'Crypto Basic', maxBuckets: 5, sortOrder: 10 }),
+		}, env);
+		expect(updateBasePlanRes.status).toBe(200);
+
+		const higherPlanRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Crypto Max', maxBuckets: 20, sortOrder: 20 }),
+		}, env);
+		expect(higherPlanRes.status).toBe(200);
+		const higherPlan = await higherPlanRes.json() as { id: string };
+		const higherPriceRes = await app.request('/api/admin/create-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: asset.id,
+				planId: higherPlan.id,
+				amountBaseUnits: '90000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			}),
+		}, env);
+		expect(higherPriceRes.status).toBe(200);
+
+		const assignmentExpiresAt = Date.now() + 30 * 86_400_000;
+		const assignRes = await app.request('/api/admin/assign-user-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, planId: higherPlan.id, expiresAt: assignmentExpiresAt }),
+		}, env);
+		expect(assignRes.status).toBe(200);
+
+		const quote = await getOfferQuote(userToken, price.id, deployment.id);
+		expect(quote.payableAmountBaseUnits).toBe('30000000');
+		expect(quote.effectiveStartsAt).toBe(assignmentExpiresAt);
+		expect(quote.effectiveExpiresAt).toBe(assignmentExpiresAt + 90 * 86_400_000);
+
+		const orderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify(createOrderBodyWithQuote(price.id, deployment.id, wallet.id, quote)),
+		}, env);
+		expect(orderRes.status).toBe(200);
+		const order = await orderRes.json() as { amountBaseUnits: string; quoteEffectiveStartsAt: number; quoteEffectiveExpiresAt: number };
+		expect(order.amountBaseUnits).toBe('30000000');
+		expect(order.quoteEffectiveStartsAt).toBe(assignmentExpiresAt);
+		expect(order.quoteEffectiveExpiresAt).toBe(quote.effectiveExpiresAt);
+	});
+
 	test('payment offers do not discount first purchase or expired subscriptions', async () => {
 		const { adminToken, userToken, userId } = await setupAdminAndUser();
 		const { plan, deployment, price } = await createCryptoOffer(adminToken);
@@ -1789,7 +1847,7 @@ describe('Crypto payment administration', () => {
 		const expensivePlanRes = await app.request('/api/admin/create-plan', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
-			body: JSON.stringify({ name: 'Expensive Plan', maxBuckets: 50 }),
+				body: JSON.stringify({ name: 'Expensive Plan', maxBuckets: 50, sortOrder: 10 }),
 		}, env);
 		expect(expensivePlanRes.status).toBe(200);
 		const expensivePlan = await expensivePlanRes.json() as { id: string };

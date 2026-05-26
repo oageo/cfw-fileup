@@ -1,4 +1,4 @@
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, lt, sql } from 'drizzle-orm';
 import { userQuotas, globalQuotas, userPlanAssignments, plans, users } from '../scheme/index';
 import { getDb } from './db';
 
@@ -108,8 +108,10 @@ async function computeEffectiveQuotaForUser(env: Env, userId: string, now: numbe
 		.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
 		.where(and(
 			eq(userPlanAssignments.userId, userId),
+			lt(userPlanAssignments.startsAt, now + 1),
 			gt(userPlanAssignments.expiresAt, now),
 		))
+		.orderBy(desc(plans.sortOrder), desc(userPlanAssignments.expiresAt))
 		.get();
 
 	if (activePlan) {
@@ -201,6 +203,7 @@ export async function refreshEffectiveQuotaForGlobalFallbackUsers(env: Env, quot
 			and not exists (
 				select 1 from ${userPlanAssignments}
 				where ${userPlanAssignments.userId} = ${users.id}
+				and ${userPlanAssignments.startsAt} <= ${now}
 				and ${userPlanAssignments.expiresAt} > ${now}
 			)
 		`);
