@@ -394,8 +394,26 @@ function formatAmountValue(amountBaseUnits: string, decimals: number | null): st
 	return integer + (fraction ? `.${fraction}` : '');
 }
 
+function formatApproxAmountValue(amountBaseUnits: string, decimals: number | null): string {
+	const amount = formatAmountValue(amountBaseUnits, decimals);
+	const amountNumber = Number(amount);
+	if (!Number.isFinite(amountNumber) || amountNumber === 0) return amount;
+	return amountNumber.toLocaleString(undefined, {
+		maximumSignificantDigits: 3,
+	});
+}
+
 function formatOfferAmountValue(offer: Offer): string {
-	return formatAmountValue(offer.quote.payableAmountBaseUnits, offer.decimals);
+	return formatApproxAmountValue(offer.quote.payableAmountBaseUnits, offer.decimals);
+}
+
+function formatOfferBaseAmountValue(offer: Offer): string {
+	return formatApproxAmountValue(offer.quote.baseAmountBaseUnits, offer.decimals);
+}
+
+function hasOfferDiscount(offer: Offer): boolean {
+	return BigInt(offer.quote.discountBaseUnits) > 0n
+		&& offer.quote.baseAmountBaseUnits !== offer.quote.payableAmountBaseUnits;
 }
 
 function formatOfferAmount(offer: Offer, amountBaseUnits: string): string {
@@ -445,6 +463,20 @@ function dialogExpiryBefore(): number | null {
 	if (!offer) return null;
 	if (isCurrentPlan(offer.plan) && currentPlan.value) return currentPlan.value.expiresAt;
 	return offer.quote.currentPlan?.expiresAt ?? null;
+}
+
+function dialogStartsAt(): number | null {
+	const offer = selectedDialogOffer.value;
+	if (!offer || offer.quote.currentPlan == null) return null;
+	return offer.quote.effectiveStartsAt > offer.quote.quoteCreatedAt ? offer.quote.effectiveStartsAt : null;
+}
+
+function dialogEffectiveStartLabel(): string {
+	return dialogStartsAt() == null ? '延長前期限' : '開始日';
+}
+
+function dialogEffectiveStartDate(): number | null {
+	return dialogStartsAt() ?? dialogExpiryBefore();
 }
 
 function dialogExpiryAfter(): number | null {
@@ -797,10 +829,13 @@ onMounted(load);
 		              <div :class="$style.priceRows">
 		                <div v-for="price in planGroup.prices" :key="priceRowKey(price)" :class="$style.priceRow">
 		                  <span :class="$style.priceDuration">{{ formatDuration(selectedFilterOfferForPrice(price).durationDays, selectedFilterOfferForPrice(price).durationUnit) }}</span>
-		                  <span :class="$style.priceValue">
-		                    {{ formatOfferAmountValue(selectedFilterOfferForPrice(price)) }}
-		                    <span :class="$style.priceCurrency">{{ selectedFilterOfferForPrice(price).tokenSymbol ?? selectedFilterOfferForPrice(price).assetSymbol }}</span>
+		                  <span :class="$style.originalPriceCell">
+		                    <del v-if="hasOfferDiscount(selectedFilterOfferForPrice(price))" :class="$style.originalPrice">{{ formatOfferBaseAmountValue(selectedFilterOfferForPrice(price)) }}</del>
 		                  </span>
+		                  <span :class="$style.priceAmount">
+		                    {{ formatOfferAmountValue(selectedFilterOfferForPrice(price)) }}
+		                  </span>
+		                  <span :class="$style.priceCurrency">{{ selectedFilterOfferForPrice(price).tokenSymbol ?? selectedFilterOfferForPrice(price).assetSymbol }}</span>
 		                  <button class="btn btn-primary btn-sm" type="button" :disabled="priceButtonDisabled(price)" @click="openPriceDialog(price)">
 		                    購入
 		                  </button>
@@ -827,7 +862,7 @@ onMounted(load);
 		                  </button>
 		                </div>
 		                <div :class="$style.dialogSummary">
-		                  <div>延長前期限: {{ formatDateOrDash(dialogExpiryBefore()) }}</div>
+		                  <div>{{ dialogEffectiveStartLabel() }}: {{ formatDateOrDash(dialogEffectiveStartDate()) }}</div>
 		                  <div>購入後期限: {{ formatDateOrDash(dialogExpiryAfter()) }}</div>
 		                </div>
 		                <dl :class="$style.dialogPaymentSummary">
@@ -981,24 +1016,47 @@ onMounted(load);
 .priceRows {
   display: grid;
   gap: 8px;
+  justify-items: end;
   margin-top: auto;
   padding-top: 8px;
 }
 
 .priceRow {
   display: grid;
-  grid-template-columns: minmax(72px, 1fr) minmax(72px, 1fr) auto;
+  grid-template-columns: max-content minmax(28px, max-content) minmax(56px, max-content) max-content auto;
   align-items: center;
   gap: 8px;
 }
 
 .priceDuration,
-.priceValue {
+.priceAmount {
   font-size: 1.125rem;
   font-weight: 700;
 }
 
+.priceAmount {
+  min-width: 56px;
+  justify-self: end;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.originalPriceCell {
+  min-width: 28px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.originalPrice {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration-thickness: 1.5px;
+}
+
 .priceCurrency {
+  justify-self: start;
   color: var(--color-text-muted);
   font-size: 0.8125rem;
   font-weight: 600;

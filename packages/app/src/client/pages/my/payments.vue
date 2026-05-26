@@ -120,6 +120,10 @@ function paymentDiscountBaseUnits(payment: Payment): string {
 	return payment.quoteDiscountBaseUnits ?? '0';
 }
 
+function hasPaymentDiscount(payment: Payment): boolean {
+	return paymentDiscountBaseUnits(payment) !== '0';
+}
+
 function paymentStatusLabel(status: Payment['status']): string {
 	switch (status) {
 		case 'pending': return '保留中';
@@ -197,18 +201,21 @@ onMounted(loadPayments);
                   </td>
                   <td>
                     <div :class="$style.cellPrimary">{{ formatAmount(payment.amountBaseUnits, payment.decimals, payment.assetSymbol) }}</div>
-                    <div v-if="paymentDiscountBaseUnits(payment) !== '0'" :class="['text-muted', $style.cellSecondary]">
+                    <div v-if="hasPaymentDiscount(payment)" :class="['text-muted', $style.cellSecondary]">
                       通常 {{ formatAmount(payment.quoteBaseAmountBaseUnits, payment.decimals, payment.assetSymbol) }}
                     </div>
                   </td>
                   <td>{{ formatDate(paymentEffectiveExpiresAt(payment)) }}</td>
-                  <td>
+                  <td :class="$style.quoteCell">
                     <div>{{ formatDuration(payment.durationDays, payment.durationUnit) }}</div>
-                    <div v-if="paymentDiscountBaseUnits(payment) !== '0'" :class="['text-muted', $style.cellSecondary]">
+                    <div v-if="hasPaymentDiscount(payment)" :class="['text-muted', $style.cellSecondary]">
                       割引 {{ formatAmount(paymentDiscountBaseUnits(payment), payment.decimals, payment.assetSymbol) }}
                     </div>
-                    <div v-if="payment.quoteCurrentPlanName" :class="['text-muted', $style.cellSecondary]">
+                    <div v-if="payment.quoteCurrentPlanName && hasPaymentDiscount(payment)" :class="['text-muted', $style.cellSecondary]">
                       {{ payment.quoteCurrentPlanName }} の残り期間を {{ formatAmount(payment.quoteCurrentPlanPriceAmountBaseUnits ?? '0', payment.decimals, payment.assetSymbol) }} / {{ formatDuration(payment.quoteCurrentPlanPriceDurationDays ?? 1, payment.quoteCurrentPlanPriceDurationUnit ?? 'days') }} で按分
+                    </div>
+                    <div v-else-if="payment.quoteCurrentPlanName" :class="['text-muted', $style.cellSecondary]">
+                      {{ payment.quoteCurrentPlanName }} の期限後に開始
                     </div>
                   </td>
                   <td><span :class="paymentStatusClass(payment)">{{ paymentStatusText(payment) }}</span></td>
@@ -284,6 +291,13 @@ onMounted(loadPayments);
 
 .hashText {
   max-width: 100%;
+}
+
+.quoteCell .cellSecondary {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

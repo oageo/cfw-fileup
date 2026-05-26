@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, lt, ne, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import * as v from 'valibot';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
@@ -39,6 +39,21 @@ async function getNextPlanSortOrder(env: Env): Promise<number> {
 		.limit(1)
 		.get();
 	return (latestPlan?.sortOrder ?? 0) + 10;
+}
+
+async function assertPlanSortOrderAvailable(env: Env, sortOrder: number, exceptPlanId?: string): Promise<void> {
+	const db = getDb(env);
+	const duplicate = await db
+		.select({ id: plans.id })
+		.from(plans)
+		.where(exceptPlanId ? and(eq(plans.sortOrder, sortOrder), ne(plans.id, exceptPlanId)) : eq(plans.sortOrder, sortOrder))
+		.get();
+	if (duplicate) throw apiError(400, 'PLAN_SORT_ORDER_ALREADY_EXISTS');
+}
+
+function rethrowPlanSortOrderError(error: unknown): never {
+	if (String(error).includes('plans_sort_order_idx')) throw apiError(400, 'PLAN_SORT_ORDER_ALREADY_EXISTS');
+	throw error;
 }
 
 app.post(
@@ -875,6 +890,8 @@ app.post(
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
 		const now = Date.now();
+		const sortOrder = body.sortOrder ?? await getNextPlanSortOrder(c.env);
+		await assertPlanSortOrderAvailable(c.env, sortOrder);
 		const plan = {
 			id: genEaidx(now),
 			name: body.name,
@@ -884,12 +901,16 @@ app.post(
 			maxDailyUploads: body.maxDailyUploads ?? null,
 			canUseDownloadCount: body.canUseDownloadCount ?? false,
 			isEnabled: body.isEnabled ?? true,
-			sortOrder: body.sortOrder ?? await getNextPlanSortOrder(c.env),
+			sortOrder,
 			createdAt: now,
 			updatedAt: now,
 		};
 
-		await db.insert(plans).values(plan);
+		try {
+			await db.insert(plans).values(plan);
+		} catch (error) {
+			rethrowPlanSortOrderError(error);
+		}
 		await recordModerationAuditLog(c, 'admin_plan_created', {
 			data: { planId: plan.id, name: plan.name },
 		});
@@ -910,6 +931,8 @@ app.post(
 			throw apiError(404, 'PLAN_NOT_FOUND');
 		}
 
+		const sortOrder = body.sortOrder ?? existing.sortOrder;
+		await assertPlanSortOrderAvailable(c.env, sortOrder, body.planId);
 		const updated = {
 			id: existing.id,
 			name: body.name,
@@ -919,22 +942,26 @@ app.post(
 			maxDailyUploads: body.maxDailyUploads ?? null,
 			canUseDownloadCount: body.canUseDownloadCount ?? false,
 			isEnabled: body.isEnabled ?? true,
-			sortOrder: body.sortOrder ?? existing.sortOrder,
+			sortOrder,
 			createdAt: existing.createdAt,
 			updatedAt: Date.now(),
 		};
 
-		await db.update(plans).set({
-			name: updated.name,
-			maxBuckets: updated.maxBuckets,
-			maxBucketSizeBytes: updated.maxBucketSizeBytes,
-			maxFilesPerBucket: updated.maxFilesPerBucket,
-			maxDailyUploads: updated.maxDailyUploads,
-			canUseDownloadCount: updated.canUseDownloadCount,
-			isEnabled: updated.isEnabled,
-			sortOrder: updated.sortOrder,
-			updatedAt: updated.updatedAt,
-		}).where(eq(plans.id, body.planId));
+		try {
+			await db.update(plans).set({
+				name: updated.name,
+				maxBuckets: updated.maxBuckets,
+				maxBucketSizeBytes: updated.maxBucketSizeBytes,
+				maxFilesPerBucket: updated.maxFilesPerBucket,
+				maxDailyUploads: updated.maxDailyUploads,
+				canUseDownloadCount: updated.canUseDownloadCount,
+				isEnabled: updated.isEnabled,
+				sortOrder: updated.sortOrder,
+				updatedAt: updated.updatedAt,
+			}).where(eq(plans.id, body.planId));
+		} catch (error) {
+			rethrowPlanSortOrderError(error);
+		}
 		await refreshEffectiveQuotaForPlanUsers(c.env, body.planId, updated.updatedAt);
 		await recordModerationAuditLog(c, 'admin_plan_updated', {
 			data: { planId: body.planId, name: updated.name },

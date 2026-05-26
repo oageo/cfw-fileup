@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import app from '../../src/worker/index';
 import migration0000 from '../../migrations/0000_noisy_power_man.sql?raw';
+import migration0001 from '../../migrations/0001_loving_gertrude_yorkes.sql?raw';
 
 export { env, app };
 
@@ -17,6 +18,7 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 
 const migrations = [
 	migration0000,
+	migration0001,
 ] as const;
 
 const tables = [

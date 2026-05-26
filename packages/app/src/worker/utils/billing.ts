@@ -203,6 +203,15 @@ async function getConfirmationsRequired(env: Env, chainId: number): Promise<numb
 async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: number): Promise<void> {
 	const db = getDb(env);
 
+	await expireDiscountedFuturePlanAssignment(env, {
+		userId: order.userId,
+		quoteCurrentPlanId: order.quoteCurrentPlanId,
+		quoteCurrentPlanExpiresAt: order.quoteCurrentPlanExpiresAt,
+		quoteCreatedAt: order.quoteCreatedAt,
+		quoteDiscountBaseUnits: order.quoteDiscountBaseUnits,
+		quoteEffectiveStartsAt: order.quoteEffectiveStartsAt,
+	});
+
 	await db
 		.insert(userPlanAssignments)
 		.values({
@@ -214,6 +223,31 @@ async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: nu
 			createdAt: now,
 			updatedAt: now,
 		});
+}
+
+export async function expireDiscountedFuturePlanAssignment(env: Env, order: {
+	userId: string;
+	quoteCurrentPlanId: string | null;
+	quoteCurrentPlanExpiresAt: number | null;
+	quoteCreatedAt: number;
+	quoteDiscountBaseUnits: string;
+	quoteEffectiveStartsAt: number;
+}): Promise<void> {
+	if (
+		order.quoteCurrentPlanId === null
+		|| order.quoteCurrentPlanExpiresAt === null
+		|| order.quoteEffectiveStartsAt <= order.quoteCreatedAt
+		|| BigInt(order.quoteDiscountBaseUnits) <= 0n
+	) return;
+
+	await getDb(env)
+		.delete(userPlanAssignments)
+		.where(and(
+			eq(userPlanAssignments.userId, order.userId),
+			eq(userPlanAssignments.planId, order.quoteCurrentPlanId),
+			eq(userPlanAssignments.startsAt, order.quoteEffectiveStartsAt),
+			eq(userPlanAssignments.expiresAt, order.quoteCurrentPlanExpiresAt),
+		));
 }
 
 export function normalizeTransactionHash(txHash: string): Hex {

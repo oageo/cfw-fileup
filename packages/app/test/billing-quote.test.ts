@@ -116,6 +116,39 @@ describe('billing quote calculation', () => {
 		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: 'plan-pro', sortOrder: 20 }));
 	});
 
+	test('discounts an upgrade from a future scheduled lower plan', () => {
+		const futureStartsAt = baseAt + 30 * 86_400_000;
+		const quote = calculatePaymentQuote({
+			quoteCreatedAt: baseAt,
+			quoteTtlMs: 15 * 60 * 1000,
+			targetPlanId: 'plan-pro',
+			targetPlanSortOrder: 20,
+			targetPlanPrice: {
+				amountBaseUnits: '90000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			},
+			currentPlan: {
+				id: 'plan-basic',
+				name: 'Basic',
+				sortOrder: 10,
+				startsAt: futureStartsAt,
+				expiresAt: futureStartsAt + 90 * 86_400_000,
+				price: {
+					amountBaseUnits: '30000000',
+					durationDays: 90,
+					durationUnit: 'days',
+				},
+			},
+		});
+
+		expect(quote.discountBaseUnits).toBe('30000000');
+		expect(quote.payableAmountBaseUnits).toBe('60000000');
+		expect(quote.effectiveStartsAt).toBe(futureStartsAt);
+		expect(quote.effectiveExpiresAt).toBe(futureStartsAt + 90 * 86_400_000);
+		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: 'plan-basic', sortOrder: 10 }));
+	});
+
 	test('adds calendar months without overflowing into the next month', () => {
 		const jan31 = Date.UTC(2026, 0, 31, 10, 0, 0);
 

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
 import { getWorkerCacheName, workerCacheBaseNames } from '../../src/worker/utils/cache-names';
+import { expireDiscountedFuturePlanAssignment } from '../../src/worker/utils/billing';
 import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
 
 beforeAll(async () => {
@@ -711,6 +712,41 @@ describe('Quota management', () => {
 		expect(await deletedAssignmentRes.json()).toBeNull();
 	});
 
+	test('plan sortOrder must be unique', async () => {
+		const { adminToken } = await setupAdminAndUser();
+
+		const firstRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Basic', sortOrder: 10 }),
+		}, env);
+		expect(firstRes.status).toBe(200);
+
+		const duplicateCreateRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Basic Copy', sortOrder: 10 }),
+		}, env);
+		expect(duplicateCreateRes.status).toBe(400);
+		expect(await duplicateCreateRes.json()).toEqual(expect.objectContaining({ error: 'PLAN_SORT_ORDER_ALREADY_EXISTS' }));
+
+		const secondRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Pro', sortOrder: 20 }),
+		}, env);
+		expect(secondRes.status).toBe(200);
+		const second = await secondRes.json() as { id: string };
+
+		const duplicateUpdateRes = await app.request('/api/admin/update-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ planId: second.id, name: 'Pro', sortOrder: 10 }),
+		}, env);
+		expect(duplicateUpdateRes.status).toBe(400);
+		expect(await duplicateUpdateRes.json()).toEqual(expect.objectContaining({ error: 'PLAN_SORT_ORDER_ALREADY_EXISTS' }));
+	});
+
 	test('active plan quota overrides per-user quota', async () => {
 		const { adminToken, userToken, userId } = await setupAdminAndUser();
 
@@ -929,7 +965,7 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify({}),
 		}, env);
 		expect(offersRes.status).toBe(200);
-		const offers = await offersRes.json() as Array<{ id: string; deploymentId: string; quote: { payableAmountBaseUnits: string; quoteCreatedAt: number; effectiveStartsAt: number; effectiveExpiresAt: number } }>;
+		const offers = await offersRes.json() as Array<{ id: string; deploymentId: string; quote: { discountBaseUnits: string; payableAmountBaseUnits: string; quoteCreatedAt: number; effectiveStartsAt: number; effectiveExpiresAt: number; currentPlan: { id: string } | null } }>;
 		const offer = offers.find(item => item.id === priceId && item.deploymentId === deploymentId);
 		expect(offer).toBeTruthy();
 		return offer!.quote;
@@ -1480,6 +1516,136 @@ describe('Crypto payment administration', () => {
 		expect(order.quoteEffectiveExpiresAt).toBe(quote.effectiveExpiresAt);
 	});
 
+	test('payment offers discount upgrades from a future scheduled downgrade', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { plan, asset, deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+
+		const updateBasePlanRes = await app.request('/api/admin/update-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ planId: plan.id, name: 'Crypto Basic', maxBuckets: 5, sortOrder: 10 }),
+		}, env);
+		expect(updateBasePlanRes.status).toBe(200);
+
+		const higherPlanRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Crypto Max', maxBuckets: 20, sortOrder: 20 }),
+		}, env);
+		expect(higherPlanRes.status).toBe(200);
+		const higherPlan = await higherPlanRes.json() as { id: string };
+		const higherPriceRes = await app.request('/api/admin/create-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: asset.id,
+				planId: higherPlan.id,
+				amountBaseUnits: '90000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			}),
+		}, env);
+		expect(higherPriceRes.status).toBe(200);
+		const higherPrice = await higherPriceRes.json() as { id: string };
+
+		const activeExpiresAt = Date.now() + 30 * 86_400_000;
+		const futureDowngradeExpiresAt = activeExpiresAt + 90 * 86_400_000;
+		await env.DB.prepare(
+			'INSERT INTO user_plan_assignments (id, user_id, plan_id, starts_at, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)',
+		).bind(
+			'assignment-active-higher',
+			userId,
+			higherPlan.id,
+			Date.now() - 1_000,
+			activeExpiresAt,
+			Date.now(),
+			Date.now(),
+			'assignment-future-downgrade',
+			userId,
+			plan.id,
+			activeExpiresAt,
+			futureDowngradeExpiresAt,
+			Date.now(),
+			Date.now(),
+		).run();
+
+		const quote = await getOfferQuote(userToken, higherPrice.id, deployment.id);
+		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: plan.id }));
+		expect(quote.discountBaseUnits).toBe('30000000');
+		expect(quote.payableAmountBaseUnits).toBe('60000000');
+		expect(quote.effectiveStartsAt).toBe(activeExpiresAt);
+		expect(quote.effectiveExpiresAt).toBe(futureDowngradeExpiresAt);
+	});
+
+	test('paid upgrade expires the future downgrade used for discount', async () => {
+		const { adminToken, userId } = await setupAdminAndUser();
+		const { plan } = await createCryptoOffer(adminToken);
+		const higherPlanRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Crypto Max', maxBuckets: 20, sortOrder: 20 }),
+		}, env);
+		expect(higherPlanRes.status).toBe(200);
+		const higherPlan = await higherPlanRes.json() as { id: string };
+
+		const now = Date.now();
+		const activeExpiresAt = now + 30 * 86_400_000;
+		const futureDowngradeExpiresAt = activeExpiresAt + 90 * 86_400_000;
+		await env.DB.prepare(
+			'INSERT INTO user_plan_assignments (id, user_id, plan_id, starts_at, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)',
+		).bind(
+			'assignment-active-higher',
+			userId,
+			higherPlan.id,
+			now - 1_000,
+			activeExpiresAt,
+			now,
+			now,
+			'assignment-future-downgrade',
+			userId,
+			plan.id,
+			activeExpiresAt,
+			futureDowngradeExpiresAt,
+			now,
+			now,
+		).run();
+
+		await expireDiscountedFuturePlanAssignment(env, {
+			userId,
+			quoteCurrentPlanId: plan.id,
+			quoteCurrentPlanExpiresAt: futureDowngradeExpiresAt,
+			quoteCreatedAt: now,
+			quoteDiscountBaseUnits: '30000000',
+			quoteEffectiveStartsAt: activeExpiresAt,
+		});
+
+		const assignments = await env.DB.prepare('SELECT id FROM user_plan_assignments ORDER BY id').all<{ id: string }>();
+		expect(assignments.results.map(row => row.id)).toEqual(['assignment-active-higher']);
+	});
+
+	test('paid upgrade does not expire an active plan used for discount', async () => {
+		const { adminToken, userId } = await setupAdminAndUser();
+		const { plan } = await createCryptoOffer(adminToken);
+		const now = Date.now();
+		const activeExpiresAt = now + 90 * 86_400_000;
+		await env.DB.prepare(
+			'INSERT INTO user_plan_assignments (id, user_id, plan_id, starts_at, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+		).bind('assignment-active-basic', userId, plan.id, now, activeExpiresAt, now, now).run();
+
+		await expireDiscountedFuturePlanAssignment(env, {
+			userId,
+			quoteCurrentPlanId: plan.id,
+			quoteCurrentPlanExpiresAt: activeExpiresAt,
+			quoteCreatedAt: now,
+			quoteDiscountBaseUnits: '30000000',
+			quoteEffectiveStartsAt: now,
+		});
+
+		const assignment = await env.DB.prepare('SELECT id FROM user_plan_assignments WHERE id = ?').bind('assignment-active-basic').first<{ id: string }>();
+		expect(assignment?.id).toBe('assignment-active-basic');
+	});
+
 	test('payment offers do not discount first purchase or expired subscriptions', async () => {
 		const { adminToken, userToken, userId } = await setupAdminAndUser();
 		const { plan, deployment, price } = await createCryptoOffer(adminToken);
@@ -1847,7 +2013,7 @@ describe('Crypto payment administration', () => {
 		const expensivePlanRes = await app.request('/api/admin/create-plan', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
-				body: JSON.stringify({ name: 'Expensive Plan', maxBuckets: 50, sortOrder: 10 }),
+			body: JSON.stringify({ name: 'Expensive Plan', maxBuckets: 50, sortOrder: 5 }),
 		}, env);
 		expect(expensivePlanRes.status).toBe(200);
 		const expensivePlan = await expensivePlanRes.json() as { id: string };

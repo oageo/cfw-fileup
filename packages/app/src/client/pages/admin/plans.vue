@@ -125,6 +125,11 @@ function formatBucketSizePreview(value: number | null): string {
 	return value == null ? '無制限' : `${value.toLocaleString()} bytes (${formatBytes(value)})`;
 }
 
+function planErrorMessage(data: { error: string; message: string }, fallback: string): string {
+	if (data.error === 'PLAN_SORT_ORDER_ALREADY_EXISTS') return '同じ並び順のプランが既にあります。別の値を指定してください。';
+	return data.message || fallback;
+}
+
 async function fetchPlans(): Promise<void> {
 	loading.value = true;
 	error.value = '';
@@ -172,7 +177,7 @@ async function savePlan(): Promise<void> {
 		const result = editingPlanId.value
 			? await apiPost('/api/admin/update-plan', { planId: editingPlanId.value, ...body })
 			: await apiPost('/api/admin/create-plan', body);
-		if (!result.ok) throw new Error('保存に失敗しました');
+		if (!result.ok) throw new Error(planErrorMessage(result.data, '保存に失敗しました'));
 		success.value = editingPlanId.value ? 'プランを更新しました' : 'プランを作成しました';
 		resetForm();
 		await fetchPlans();
@@ -199,7 +204,7 @@ async function togglePlanEnabled(plan: Plan): Promise<void> {
 			isEnabled: !plan.isEnabled,
 			sortOrder: plan.sortOrder,
 		});
-		if (!result.ok) throw new Error('保存に失敗しました');
+		if (!result.ok) throw new Error(planErrorMessage(result.data, '保存に失敗しました'));
 		success.value = plan.isEnabled ? 'プランを無効化しました' : 'プランを有効化しました';
 		await fetchPlans();
 	} catch (e) {
@@ -237,6 +242,7 @@ async function togglePlanEnabled(plan: Plan): Promise<void> {
           <label :class="$style.field">
             <span>並び順</span>
             <input :value="Number.isNaN(form.sortOrder) ? '' : form.sortOrder" class="form-input" type="number" step="1" @input="onSortOrderInput">
+            <span :class="$style.fieldHint">同じ値は使えません。数値が大きいプランほど上位として扱われ、アップグレード/ダウングレード判定に使われます。</span>
             <span v-if="sortOrderError" :class="$style.validationError">{{ sortOrderError }}</span>
           </label>
           <div :class="$style.quotaGrid">

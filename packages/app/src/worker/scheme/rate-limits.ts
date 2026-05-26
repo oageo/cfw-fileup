@@ -1,4 +1,4 @@
-import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { index, sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { users } from './users';
 
 export const plans = sqliteTable('plans', {
@@ -13,7 +13,9 @@ export const plans = sqliteTable('plans', {
 	sortOrder: integer('sort_order').notNull().default(0),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
-});
+}, (table) => [
+	uniqueIndex('plans_sort_order_idx').on(table.sortOrder),
+]);
 
 export const userPlanAssignments = sqliteTable('user_plan_assignments', {
 	id: text('id').primaryKey(),

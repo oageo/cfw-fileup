@@ -359,7 +359,7 @@ export const adminApiDef = {
 			isEnabled: v.optional(v.boolean(), true),
 			sortOrder: v.optional(v.pipe(v.number(), v.integer())),
 		}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PlanResponse } } }, ...AdminErrors },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PlanResponse } } }, 400: errorResponse('Invalid plan', ['PLAN_SORT_ORDER_ALREADY_EXISTS']), ...AdminErrors },
 	},
 	'/api/admin/update-plan': {
 		summary: 'Update plan',
@@ -371,7 +371,7 @@ export const adminApiDef = {
 			isEnabled: v.optional(v.boolean(), true),
 			sortOrder: v.optional(v.pipe(v.number(), v.integer())),
 		}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PlanResponse } } }, ...AdminErrors, 404: PlanNotFound },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PlanResponse } } }, 400: errorResponse('Invalid plan', ['PLAN_SORT_ORDER_ALREADY_EXISTS']), ...AdminErrors, 404: PlanNotFound },
 	},
 	'/api/admin/assign-user-plan': {
 		summary: 'Assign plan to user',

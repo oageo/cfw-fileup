@@ -30,9 +30,10 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 	durationUnit: PaymentDurationUnit;
 }, quoteCreatedAt: number): Promise<PaymentQuote> {
 	const db = getDb(env);
-	const activeAssignment = await db
+	const assignmentRows = await db
 		.select({
 			planId: userPlanAssignments.planId,
+			startsAt: userPlanAssignments.startsAt,
 			expiresAt: userPlanAssignments.expiresAt,
 			planName: plans.name,
 			planSortOrder: plans.sortOrder,
@@ -41,31 +42,40 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 		.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
 		.where(and(
 			eq(userPlanAssignments.userId, userId),
-			lt(userPlanAssignments.startsAt, quoteCreatedAt + 1),
 			gt(userPlanAssignments.expiresAt, quoteCreatedAt),
 		))
-		.orderBy(desc(plans.sortOrder), desc(userPlanAssignments.expiresAt))
-		.get();
-	const currentPlanPrice = activeAssignment && activeAssignment.planId !== offer.planId
-		? await getReferencePlanPrice(env, offer.assetId, activeAssignment.planId, quoteCreatedAt)
+		.orderBy(asc(userPlanAssignments.startsAt), desc(plans.sortOrder), desc(userPlanAssignments.expiresAt));
+	const activeAssignment = assignmentRows
+		.filter(assignment => assignment.startsAt <= quoteCreatedAt && assignment.expiresAt > quoteCreatedAt)
+		.sort((a, b) => b.planSortOrder - a.planSortOrder || b.expiresAt - a.expiresAt)[0] ?? null;
+	const futureUpgradeBase = assignmentRows
+		.filter(assignment => assignment.startsAt > quoteCreatedAt && assignment.planSortOrder < offer.planSortOrder)
+		.sort((a, b) => a.startsAt - b.startsAt || a.planSortOrder - b.planSortOrder || b.expiresAt - a.expiresAt)[0] ?? null;
+	const referenceAssignment = futureUpgradeBase && (!activeAssignment || offer.planSortOrder <= activeAssignment.planSortOrder)
+		? futureUpgradeBase
+		: activeAssignment;
+	const currentPlanPrice = referenceAssignment && referenceAssignment.planId !== offer.planId
+		? await getReferencePlanPrice(env, offer.assetId, referenceAssignment.planId, quoteCreatedAt)
 		: null;
-	const currentPlan = activeAssignment && activeAssignment.planId === offer.planId
+	const currentPlan = referenceAssignment && referenceAssignment.planId === offer.planId
 		? {
-			id: activeAssignment.planId,
-			name: activeAssignment.planName,
-			sortOrder: activeAssignment.planSortOrder,
-			expiresAt: activeAssignment.expiresAt,
+			id: referenceAssignment.planId,
+			name: referenceAssignment.planName,
+			sortOrder: referenceAssignment.planSortOrder,
+			startsAt: referenceAssignment.startsAt,
+			expiresAt: referenceAssignment.expiresAt,
 			price: {
 				amountBaseUnits: offer.amountBaseUnits,
 				durationDays: offer.durationDays,
 				durationUnit: offer.durationUnit,
 			},
 		}
-		: activeAssignment && currentPlanPrice ? {
-			id: activeAssignment.planId,
-			name: activeAssignment.planName,
-			sortOrder: activeAssignment.planSortOrder,
-			expiresAt: activeAssignment.expiresAt,
+		: referenceAssignment && currentPlanPrice ? {
+			id: referenceAssignment.planId,
+			name: referenceAssignment.planName,
+			sortOrder: referenceAssignment.planSortOrder,
+			startsAt: referenceAssignment.startsAt,
+			expiresAt: referenceAssignment.expiresAt,
 			price: currentPlanPrice,
 		} : null;
 	return calculatePaymentQuote({
