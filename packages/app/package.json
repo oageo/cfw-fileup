@@ -2,11 +2,11 @@
   "name": "app",
   "type": "module",
   "scripts": {
-    "postinstall": "playwright install chromium --with-deps || playwright install chromium",
+    "postinstall": "pnpm generate:viem-chain-assets && (playwright install chromium --with-deps || playwright install chromium)",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && wrangler deploy",
+    "deploy": "pnpm build && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "typecheck:worker": "tsc -p ./src/worker/tsconfig.json --noEmit",
     "typecheck:client": "vue-tsc -p ./src/client/tsconfig.json --noEmit",
@@ -27,7 +27,8 @@
     "test:e2e:fresh": "pnpm db:reset && pnpm db:migrate:local && pnpm test:e2e",
     "playwright:install": "playwright install chromium",
     "playwright:install-deps": "playwright install-deps chromium",
-    "screenshot": "tsx scripts/screenshot-pr.ts"
+    "screenshot": "tsx scripts/screenshot-pr.ts",
+    "generate:viem-chain-assets": "tsx scripts/generate-viem-chain-assets.ts"
   },
   "dependencies": {
     "@hono/standard-validator": "^0.2.2",
@@ -38,6 +39,7 @@
     "@valibot/to-json-schema": "^1.7.0",
     "@vuetify/v0": "1.0.0-alpha.4",
     "@wagmi/vue": "^0.5.16",
+    "@walletconnect/ethereum-provider": "^2.23.9",
     "@zip.js/zip.js": "^2.8.26",
     "bgzf": "workspace:*",
     "dompurify": "^3.4.5",

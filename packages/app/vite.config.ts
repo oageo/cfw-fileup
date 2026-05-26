@@ -1,10 +1,15 @@
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { defineConfig } from 'vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const devTunnelName = process.env.CF_DEV_TUNNEL;
+const require = createRequire(import.meta.url);
+const viemPackageJson = require('viem/package.json') as { version: string };
+const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const devTunnel = devTunnelName === undefined || devTunnelName === ''
 	? false
 	: ['1', 'true', 'quick'].includes(devTunnelName.toLowerCase())
@@ -31,11 +36,23 @@ export default defineConfig({
 			'@': resolve(__dirname, 'src/client'),
 		},
 	},
+	define: {
+		__VIEM_VERSION__: JSON.stringify(viemPackageJson.version),
+	},
 	plugins: [
 		cloudflare({
 			configPath: './wrangler.jsonc',
 			tunnel: devTunnel as boolean,
 		}),
+		{
+			name: 'generate-viem-chain-assets',
+			buildStart() {
+				execFileSync(pnpmCommand, ['generate:viem-chain-assets'], {
+					cwd: __dirname,
+					stdio: 'inherit',
+				});
+			},
+		},
 		vue(),
 		VitePWA({
 			strategies: 'injectManifest',
@@ -108,6 +125,9 @@ export default defineConfig({
 			devOptions: {
 				enabled: true,
 				type: 'module',
+			},
+			injectManifest: {
+				globIgnores: ['assets/chains/**/*'],
 			},
 			workbox: {
 				skipWaiting: true,

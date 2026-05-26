@@ -5,6 +5,7 @@ import { encodeFunctionData } from 'viem';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import { useWallet } from '@/composables/useWallet';
 import WalletSettings from '@/components/WalletSettings.vue';
+import { getChainMetadata } from '@/utils/chain-metadata';
 
 type Offer = ApiSuccess<'/api/billing/list-crypto-offers'>['data'][number];
 type LinkedWallet = ApiSuccess<'/api/account/wallets/list'>['data'][number];
@@ -31,26 +32,6 @@ type PurchasePlan = {
 	plan: Offer['plan'];
 	prices: PurchasePrice[];
 };
-type ChainCatalogEntry = {
-	id: number;
-	name: string;
-	nativeCurrency: {
-		name: string;
-		symbol: string;
-		decimals: number;
-	};
-	rpcUrls: {
-		default: {
-			http: string[];
-		};
-	};
-	blockExplorers?: {
-		default: {
-			url: string;
-		};
-	};
-};
-
 const props = defineProps<{
 	reloadKey?: number;
 }>();
@@ -87,9 +68,10 @@ const error = ref('');
 const success = ref('');
 const purchaseProgress = ref('');
 const walletSetupMode = ref(false);
+const selectingAnotherWallet = ref(false);
 const {
 	walletAddress,
-	walletChainId,
+	connectedWalletConnections,
 	connectWallet,
 	switchOrAddWalletChain,
 	watchWalletAsset,
@@ -97,6 +79,7 @@ const {
 } = useWallet();
 
 const hasLinkedWallets = computed(() => wallets.value.length > 0);
+const hasConnectedPaymentWallet = computed(() => hasConnectedLinkedWallet());
 const paymentAssetOptions = computed<PaymentAssetOption[]>(() => {
 	const assetMap = new Map<string, PaymentAssetOption>();
 	for (const offer of offers.value) {
@@ -228,11 +211,22 @@ const selectedTokenOfferForRegistration = computed(() => selectedPurchasePrice.v
 	&& offer.contractAddress != null
 	&& offer.decimals != null
 )) ?? null);
+const walletSetupShowBack = computed(() => selectingAnotherWallet.value || selectedPurchasePrice.value != null || hasConnectedPaymentWallet.value);
+const connectedWalletConnectionKey = computed(() => connectedWalletConnections.value
+	.map(connection => `${connection.connectorUid}:${connection.chainId}:${connection.address.toLowerCase()}`)
+	.sort()
+	.join('|'));
 
 function hasConnectedLinkedWallet(): boolean {
-	const address = walletAddress.value;
-	if (!address || walletChainId.value == null) return false;
-	return wallets.value.some(wallet => wallet.chainId === walletChainId.value && wallet.address.toLowerCase() === address.toLowerCase());
+	return connectedWalletConnections.value.some(connection => wallets.value.some(wallet => (
+		wallet.chainId === connection.chainId
+		&& wallet.address.toLowerCase() === connection.address.toLowerCase()
+	)));
+}
+
+function reconcileWalletSetupMode(): void {
+	if (loading.value || selectingAnotherWallet.value) return;
+	if (hasConnectedLinkedWallet()) walletSetupMode.value = false;
 }
 
 async function load(): Promise<void> {
@@ -260,7 +254,7 @@ async function load(): Promise<void> {
 		cryptoPaymentsEnabled.value = meta.cryptoPaymentsEnabled ?? false;
 		wallets.value = walletsResult.data;
 		currentPlan.value = currentPlanResult.data;
-		if (!walletSetupMode.value && !hasConnectedLinkedWallet()) walletSetupMode.value = true;
+		reconcileWalletSetupMode();
 
 		if (!cryptoPaymentsEnabled.value) {
 			offers.value = [];
@@ -327,6 +321,7 @@ function openPurchaseDialog(price: PurchasePrice): void {
 			?? price.offers.find(offer => offer.deploymentId != null)?.deploymentId
 			?? null;
 	}
+	walletSetupMode.value = !hasConnectedLinkedWallet();
 }
 
 function closePurchaseDialog(): void {
@@ -553,8 +548,15 @@ watch(paymentTokenOptions, () => {
 });
 
 async function handleWalletReady(): Promise<void> {
+	selectingAnotherWallet.value = false;
 	await load();
 	walletSetupMode.value = false;
+}
+
+function returnToPurchase(): void {
+	selectingAnotherWallet.value = false;
+	walletSetupMode.value = false;
+	if (!hasConnectedPaymentWallet.value) closePurchaseDialog();
 }
 
 function offerKey(offer: Offer): string {
@@ -570,34 +572,9 @@ function connectedWalletForOffer(offer: Offer, address = walletAddress.value): L
 	return walletsForOffer(offer).find(wallet => wallet.address.toLowerCase() === address.toLowerCase()) ?? null;
 }
 
-function isChainCatalogEntry(value: unknown): value is ChainCatalogEntry {
-	if (typeof value !== 'object' || value === null) return false;
-	const maybeChain = value as {
-		id?: unknown;
-		name?: unknown;
-		nativeCurrency?: { name?: unknown; symbol?: unknown; decimals?: unknown };
-		rpcUrls?: { default?: { http?: unknown } };
-	};
-	return typeof maybeChain.id === 'number'
-		&& typeof maybeChain.name === 'string'
-		&& typeof maybeChain.nativeCurrency === 'object'
-		&& maybeChain.nativeCurrency !== null
-		&& typeof maybeChain.nativeCurrency.name === 'string'
-		&& typeof maybeChain.nativeCurrency.symbol === 'string'
-		&& typeof maybeChain.nativeCurrency.decimals === 'number'
-		&& typeof maybeChain.rpcUrls === 'object'
-		&& maybeChain.rpcUrls !== null
-		&& typeof maybeChain.rpcUrls.default === 'object'
-		&& maybeChain.rpcUrls.default !== null
-		&& Array.isArray(maybeChain.rpcUrls.default.http)
-		&& maybeChain.rpcUrls.default.http.every(url => typeof url === 'string');
-}
-
 async function switchOrAddOfferChain(offer: Offer): Promise<void> {
 	if (offer.chainId == null) throw new Error('このプランで利用できるチェーンがありません');
-	const chainCatalog = await import('viem/chains') as Record<string, unknown>;
-	const catalogChain = Object.values(chainCatalog)
-		.find((value): value is ChainCatalogEntry => isChainCatalogEntry(value) && value.id === offer.chainId);
+	const catalogChain = await getChainMetadata(offer.chainId);
 	if (!catalogChain) throw new Error(`chain ${offer.chainId} は viem/chains に見つかりません`);
 	await switchOrAddWalletChain({
 		chainId: offer.chainId,
@@ -605,7 +582,7 @@ async function switchOrAddOfferChain(offer: Offer): Promise<void> {
 		nativeCurrencyName: catalogChain.nativeCurrency.name,
 		nativeCurrencySymbol: catalogChain.nativeCurrency.symbol,
 		nativeCurrencyDecimals: catalogChain.nativeCurrency.decimals,
-		rpcUrls: catalogChain.rpcUrls.default.http,
+		rpcUrls: [...catalogChain.rpcUrls.default.http],
 		blockExplorerUrl: catalogChain.blockExplorers?.default.url ?? null,
 	});
 }
@@ -741,6 +718,10 @@ watch(() => props.reloadKey, () => {
 	void load();
 });
 
+watch(connectedWalletConnectionKey, () => {
+	reconcileWalletSetupMode();
+});
+
 onMounted(load);
 </script>
 
@@ -756,17 +737,10 @@ onMounted(load);
       <div v-if="!cryptoPaymentsEnabled" class="alert alert-info">暗号資産決済は現在利用できません。</div>
 	      <div v-else-if="offers.length === 0" class="text-muted">購入可能なプランはありません。</div>
 	      <div v-else-if="walletSetupMode">
-	        <WalletSettings @changed="load" @ready="handleWalletReady" />
+	        <WalletSettings :show-back="walletSetupShowBack" @back="returnToPurchase" @changed="load" @ready="handleWalletReady" />
 	      </div>
 	      <template v-else>
 	        <div :class="$style.purchaseStack">
-	          <div :class="['card', $style.walletBar]">
-	            <div>
-	              <div :class="$style.walletBarLabel">支払いウォレット</div>
-	              <div :class="$style.walletBarValue">{{ walletAddress }} / chain {{ walletChainId ?? '-' }}</div>
-		              <div :class="$style.walletBarHint">別のアカウントで支払う場合は、ウォレット側でアカウントを切り替えてください。</div>
-		            </div>
-		          </div>
 		          <div :class="['card', $style.tokenFilter]">
 		            <div :class="$style.tokenSelectRow">
 		              <label :class="$style.tokenSelectField">
@@ -904,14 +878,6 @@ onMounted(load);
   gap: 12px;
 }
 
-.walletBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  max-width: none;
-}
-
 .tokenFilterTitle {
   display: block;
   margin-bottom: 6px;
@@ -952,24 +918,6 @@ onMounted(load);
 .tokenAddressLabel {
   display: block;
   margin-bottom: 4px;
-  color: var(--color-text-muted);
-  font-size: 0.8125rem;
-}
-
-.walletBarLabel {
-  margin-bottom: 4px;
-  color: var(--color-text-muted);
-  font-size: 0.875rem;
-}
-
-.walletBarValue {
-  overflow-wrap: anywhere;
-  font-family: var(--font-monospace);
-  font-size: 0.875rem;
-}
-
-.walletBarHint {
-  margin-top: 6px;
   color: var(--color-text-muted);
   font-size: 0.8125rem;
 }
@@ -1129,11 +1077,6 @@ onMounted(load);
 }
 
 @media (max-width: 640px) {
-  .walletBar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .tokenSelectRow {
     grid-template-columns: 1fr;
   }

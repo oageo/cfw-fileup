@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { authStore } from '@/store/auth';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import CryptoPaymentOffers from '@/components/CryptoPaymentOffers.vue';
+import WalletRuntimeProvider from '@/components/WalletRuntimeProvider';
 import WalletSettings from '@/components/WalletSettings.vue';
 
 type Payment = ApiSuccess<'/api/billing/list-my-payments'>['data']['items'][number];
@@ -157,11 +158,17 @@ onMounted(loadPayments);
         <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'wallets' }" role="tab" :aria-selected="activeTab === 'wallets'" @click="setTab('wallets')">ウォレット</button>
       </div>
 
-      <section v-if="activeTab === 'plans'" role="tabpanel">
-        <CryptoPaymentOffers :reload-key="offersReloadKey" @purchased="paymentCompleted" />
-      </section>
+      <WalletRuntimeProvider v-if="activeTab !== 'history'">
+        <section v-if="activeTab === 'plans'" role="tabpanel">
+          <CryptoPaymentOffers :reload-key="offersReloadKey" @purchased="paymentCompleted" />
+        </section>
 
-      <section v-else-if="activeTab === 'history'" role="tabpanel">
+        <section v-else role="tabpanel">
+          <WalletSettings @changed="walletChanged" />
+        </section>
+      </WalletRuntimeProvider>
+
+      <section v-else role="tabpanel">
         <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
         <div v-if="loadingPayments" class="page-loading">
           <span class="spinner" />読み込み中...
@@ -178,10 +185,10 @@ onMounted(loadPayments);
                 <col :class="$style.colTx">
                 <col :class="$style.colPaidAt">
                 <col :class="$style.colActions">
-	              </colgroup>
-	              <thead>
-	                <tr><th>プラン</th><th>支払額</th><th>購入後期限</th><th>計算内容</th><th>Status</th><th>tx</th><th>paidAt</th><th :class="['col-actions', $style.actionsCell]">操作</th></tr>
-	              </thead>
+              </colgroup>
+              <thead>
+                <tr><th>プラン</th><th>支払額</th><th>購入後期限</th><th>計算内容</th><th>Status</th><th>tx</th><th>paidAt</th><th :class="['col-actions', $style.actionsCell]">操作</th></tr>
+              </thead>
               <tbody>
                 <tr v-for="payment in payments" :key="payment.id">
                   <td>
@@ -209,8 +216,8 @@ onMounted(loadPayments);
                     <code :class="$style.hashText" :title="payment.txHash ?? undefined">{{ payment.txHash ?? '-' }}</code>
                   </td>
                   <td>{{ formatDate(payment.paidAt) }}</td>
-	                  <td :class="['col-actions', $style.actionsCell]">
-	                    <button v-show="canCancelPayment(payment)" class="btn btn-secondary btn-sm" :class="$style.actionButton" type="button" :disabled="cancelingPaymentId !== null" @click="cancelPayment(payment)">
+                  <td :class="['col-actions', $style.actionsCell]">
+                    <button v-show="canCancelPayment(payment)" class="btn btn-secondary btn-sm" :class="$style.actionButton" type="button" :disabled="cancelingPaymentId !== null" @click="cancelPayment(payment)">
                       {{ cancelingPaymentId === payment.id ? 'キャンセル中...' : 'キャンセル' }}
                     </button>
                     <button v-show="canCheckPayment(payment)" class="btn btn-secondary btn-sm" :class="$style.actionButton" type="button" :disabled="checkingPaymentId !== null" @click="checkPayment(payment)">
@@ -225,10 +232,6 @@ onMounted(loadPayments);
             </table>
           </div>
         </div>
-      </section>
-
-      <section v-else role="tabpanel">
-        <WalletSettings @changed="walletChanged" />
       </section>
     </template>
   </div>

@@ -38,6 +38,7 @@ lerna-debug.log*
 # playwright
 packages/app/playwright-report/
 packages/app/test-results/
+packages/app/public/assets/chains/
 
 # misc
 .DS_Store

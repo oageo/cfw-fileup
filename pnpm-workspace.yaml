@@ -3,6 +3,7 @@ packages:
 
 allowBuilds:
   '@parcel/watcher': true
+  '@reown/appkit': false
   esbuild: true
   sharp: true
   vue-demi: true

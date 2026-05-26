@@ -2,10 +2,7 @@ import { createApp } from 'vue';
 import './styles/main.css';
 import App from './App.vue';
 
-import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createStoragePlugin, createThemePlugin, V0StyleSheetThemeAdapter } from '@vuetify/v0';
-import { WagmiPlugin } from '@wagmi/vue';
-import { wagmiConfig } from './wagmi';
 
 type ThemeName = 'light' | 'dark';
 
@@ -63,8 +60,6 @@ const themes = {
 	},
 } as const;
 
-const queryClient = new QueryClient();
-
 createApp(App)
 	.use(createStoragePlugin())
 	.use(createThemePlugin({
@@ -74,6 +69,4 @@ createApp(App)
 		adapter: new V0StyleSheetThemeAdapter({ prefix: 'color' }),
 		themes,
 	}))
-	.use(VueQueryPlugin, { queryClient })
-	.use(WagmiPlugin, { config: wagmiConfig })
 	.mount('#app');

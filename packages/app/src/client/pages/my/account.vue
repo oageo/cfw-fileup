@@ -5,6 +5,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import { authStore, fetchCurrentUser, setToken } from '@/store/auth';
+import WalletRuntimeProvider from '@/components/WalletRuntimeProvider';
 import WalletSettings from '@/components/WalletSettings.vue';
 import type { ApiReq } from '../../../shared/api';
 
@@ -229,7 +230,9 @@ onMounted(async () => {
         </div>
       </div>
 
-      <WalletSettings />
+      <WalletRuntimeProvider>
+        <WalletSettings />
+      </WalletRuntimeProvider>
     </template>
   </div>
 </template>

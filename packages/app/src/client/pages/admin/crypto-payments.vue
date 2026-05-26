@@ -5,6 +5,7 @@ import { authStore } from '@/store/auth';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 import SettingItem from '@/components/SettingItem.vue';
+import { getChainMetadata } from '@/utils/chain-metadata';
 import { KNOWN_SETTINGS } from '../../../shared/app-settings';
 
 type Chain = ApiSuccess<'/api/admin/list-payment-chains'>['data'][number];
@@ -15,21 +16,6 @@ type Plan = ApiSuccess<'/api/admin/list-plans'>['data'][number];
 type Order = ApiSuccess<'/api/admin/list-crypto-payment-orders'>['data']['items'][number];
 type ActiveTab = 'chains' | 'assets' | 'deployments' | 'prices' | 'orders';
 type SaveResult = { ok: true; data: unknown } | { ok: false; data: { error?: string; message?: string } };
-type ChainCatalogEntry = {
-	id: number;
-	name: string;
-	nativeCurrency: {
-		name: string;
-		symbol: string;
-		decimals: number;
-	};
-	blockExplorers?: {
-		default: {
-			url: string;
-		};
-	};
-};
-
 const chains = ref<Chain[]>([]);
 const assets = ref<Asset[]>([]);
 const deployments = ref<Deployment[]>([]);
@@ -228,33 +214,11 @@ async function testChainRpc(chain: Chain): Promise<void> {
 	}
 }
 
-function isChainCatalogEntry(value: unknown): value is ChainCatalogEntry {
-	if (typeof value !== 'object' || value === null) return false;
-	const maybeChain = value as {
-		id?: unknown;
-		name?: unknown;
-		nativeCurrency?: {
-			name?: unknown;
-			symbol?: unknown;
-			decimals?: unknown;
-		};
-	};
-	return typeof maybeChain.id === 'number'
-		&& typeof maybeChain.name === 'string'
-		&& typeof maybeChain.nativeCurrency === 'object'
-		&& maybeChain.nativeCurrency !== null
-		&& typeof maybeChain.nativeCurrency.name === 'string'
-		&& typeof maybeChain.nativeCurrency.symbol === 'string'
-		&& typeof maybeChain.nativeCurrency.decimals === 'number';
-}
-
 async function autofillChainFromCatalog(): Promise<void> {
 	chainAutofillLoading.value = true;
 	chainAutofillMessage.value = '';
 	try {
-		const chainCatalog = await import('viem/chains') as Record<string, unknown>;
-		const chain = Object.values(chainCatalog)
-			.find((value): value is ChainCatalogEntry => isChainCatalogEntry(value) && value.id === chainForm.value.chainId);
+		const chain = await getChainMetadata(chainForm.value.chainId);
 		if (!chain) {
 			chainAutofillMessage.value = 'このChain IDはviem/chainsに見つかりませんでした。';
 			return;

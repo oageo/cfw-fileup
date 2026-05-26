@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
-import { appSettings } from '../scheme/index';
+import { appSettings, paymentChains } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { shortGetCache } from '../middleware/short-get-cache';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
+import { getPaymentChainRpcUrl } from '../utils/payment-rpc';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -18,6 +19,8 @@ type MetaResponse = {
 	googleRequired: boolean;
 	indieAuthEnabled: boolean;
 	cryptoPaymentsEnabled: boolean;
+	reownProjectId: string;
+	walletConnectChainIds: number[];
 };
 
 function createMetaResponse(data: MetaResponse): Response {
@@ -61,6 +64,12 @@ app.get('/meta', async (c) => {
 			.where(eq(appSettings.key, 'terms_updated_at'))
 			.get();
 		const cryptoPaymentsEnabled = await canAcceptCryptoPayments(c.env);
+		const walletConnectChains = cryptoPaymentsEnabled
+			? await db
+				.select({ chainId: paymentChains.chainId })
+				.from(paymentChains)
+				.where(eq(paymentChains.isEnabled, true))
+			: [];
 
 		return createMetaResponse({
 			registrationEnabled: mode !== 'closed',
@@ -73,6 +82,10 @@ app.get('/meta', async (c) => {
 			googleRequired,
 			indieAuthEnabled: true,
 			cryptoPaymentsEnabled,
+			reownProjectId: c.env.REOWN_PROJECT_ID ?? '',
+			walletConnectChainIds: walletConnectChains
+				.map(chain => chain.chainId)
+				.filter(chainId => getPaymentChainRpcUrl(c.env, chainId) !== null),
 		});
 	} catch {
 		return createMetaResponse({
@@ -86,6 +99,8 @@ app.get('/meta', async (c) => {
 			googleRequired: false,
 			indieAuthEnabled: true,
 			cryptoPaymentsEnabled: false,
+			reownProjectId: '',
+			walletConnectChainIds: [],
 		});
 	}
 });
