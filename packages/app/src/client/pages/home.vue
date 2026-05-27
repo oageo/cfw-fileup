@@ -9,6 +9,7 @@ import { formatBytes } from '@/utils/byte-size';
 
 type PublicPlan = ApiSuccess<'/api/billing/list-public-plans'>['data'][number];
 type PublicPlanPrice = PublicPlan['prices'][number];
+type PublicPlanPriceDeployment = PublicPlanPrice['deployments'][number];
 type CurrencyOption = {
 	assetId: string;
 	symbol: string;
@@ -53,6 +54,21 @@ const currencyOptions = computed<CurrencyOption[]>(() => {
 		}
 	}
 	return [...map.values()].sort((a, b) => a.symbol.localeCompare(b.symbol) || a.name.localeCompare(b.name));
+});
+const selectedCurrencyDeployments = computed<PublicPlanPriceDeployment[]>(() => {
+	const map = new Map<string, PublicPlanPriceDeployment>();
+	for (const plan of plans.value) {
+		for (const price of plan.prices) {
+			if (price.assetId !== selectedCurrencyAssetId.value) continue;
+			for (const deployment of price.deployments) {
+				map.set(`${deployment.chainId}:${deployment.tokenSymbol}`, deployment);
+			}
+		}
+	}
+	return [...map.values()].sort((a, b) => (
+		a.chainName.localeCompare(b.chainName)
+		|| a.tokenSymbol.localeCompare(b.tokenSymbol)
+	));
 });
 
 async function loadPlans(): Promise<void> {
@@ -192,6 +208,16 @@ onMounted(loadPlans);
               {{ currency.symbol }}
             </button>
           </div>
+          <div v-if="selectedCurrencyDeployments.length > 0" :class="$style.deploymentList" aria-label="対応コインとチェーン">
+            <span
+              v-for="deployment in selectedCurrencyDeployments"
+              :key="`${deployment.chainId}:${deployment.tokenSymbol}`"
+              :class="$style.deploymentBadge"
+            >
+              <strong>{{ deployment.tokenSymbol }}</strong>
+              <span>{{ deployment.chainName }}</span>
+            </span>
+          </div>
         </div>
         <NirA v-if="authStore.user" to="/my/payments" class="btn btn-secondary">購入・支払い管理</NirA>
       </div>
@@ -246,8 +272,21 @@ onMounted(loadPlans);
 }
 
 .hero {
-  margin: -28px -20px 0;
-  color: #ffffff;
+  --hero-text: var(--color-text);
+  --hero-muted: var(--color-text-muted);
+  --hero-kicker: var(--color-primary);
+
+  width: 100vw;
+  margin: -28px calc(50% - 50vw) 0;
+  color: var(--hero-text);
+  background: linear-gradient(180deg, var(--color-surface) 0%, var(--color-bg) 100%);
+}
+
+:global([data-theme="dark"]) .hero {
+  --hero-text: #ffffff;
+  --hero-muted: rgba(255, 255, 255, 0.86);
+  --hero-kicker: rgba(255, 255, 255, 0.78);
+
   background: #111827;
 }
 
@@ -268,7 +307,7 @@ onMounted(loadPlans);
 
 .kicker {
   margin: 0 0 10px;
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--hero-kicker);
   font-size: 0.8125rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -285,7 +324,7 @@ onMounted(loadPlans);
 .lead {
   max-width: 640px;
   margin: 18px 0 0;
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--hero-muted);
   font-size: 1.05rem;
 }
 
@@ -297,13 +336,17 @@ onMounted(loadPlans);
 }
 
 .heroVisual {
+  position: relative;
   display: grid;
   gap: 16px;
   justify-items: center;
   min-width: 0;
+  padding: 24px 0 18px;
 }
 
 .heroVisual img {
+  position: relative;
+  z-index: 1;
   width: min(220px, 58vw);
   aspect-ratio: 1;
   object-fit: contain;
@@ -311,23 +354,91 @@ onMounted(loadPlans);
 }
 
 .heroStats {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
+  max-width: min(360px, 100%);
+  margin-top: 2px;
 }
 
 .heroStats span {
+  --badge-bg: #e0f2fe;
+  --badge-border: #7dd3fc;
+  --badge-text: #075985;
+  --badge-shadow: rgba(2, 132, 199, 0.2);
+
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
-  padding: 4px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--badge-border);
+  border-radius: 999px;
+  background: var(--badge-bg);
+  color: var(--badge-text);
   font-size: 0.8125rem;
+  font-weight: 600;
+  box-shadow:
+    0 12px 24px var(--badge-shadow),
+    0 2px 8px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(14px) saturate(1.15);
+}
+
+.heroStats span:nth-child(1) {
+  --badge-bg: #dcfce7;
+  --badge-border: #86efac;
+  --badge-text: #166534;
+  --badge-shadow: rgba(22, 163, 74, 0.18);
+
+  transform: rotate(-1.5deg);
+}
+
+.heroStats span:nth-child(2) {
+  --badge-bg: #dbeafe;
+  --badge-border: #93c5fd;
+  --badge-text: #1d4ed8;
+  --badge-shadow: rgba(37, 99, 235, 0.18);
+
+  transform: translateY(8px);
+}
+
+.heroStats span:nth-child(3) {
+  --badge-bg: #fae8ff;
+  --badge-border: #e879f9;
+  --badge-text: #86198f;
+  --badge-shadow: rgba(192, 38, 211, 0.18);
+
+  transform: rotate(1.5deg);
+}
+
+:global([data-theme="dark"]) .heroStats span {
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.3),
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+:global([data-theme="dark"]) .heroStats span:nth-child(1) {
+  --badge-bg: rgba(22, 101, 52, 0.72);
+  --badge-border: rgba(134, 239, 172, 0.42);
+  --badge-text: #dcfce7;
+}
+
+:global([data-theme="dark"]) .heroStats span:nth-child(2) {
+  --badge-bg: rgba(30, 64, 175, 0.72);
+  --badge-border: rgba(147, 197, 253, 0.42);
+  --badge-text: #dbeafe;
+}
+
+:global([data-theme="dark"]) .heroStats span:nth-child(3) {
+  --badge-bg: rgba(134, 25, 143, 0.72);
+  --badge-border: rgba(232, 121, 249, 0.42);
+  --badge-text: #fae8ff;
 }
 
 .section {
@@ -382,6 +493,36 @@ onMounted(loadPlans);
 .currencyButtonActive:hover {
   background: var(--color-primary-hover);
   color: #ffffff;
+}
+
+.deploymentList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.deploymentBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface));
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.2;
+}
+
+.deploymentBadge strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.deploymentBadge span {
+  overflow-wrap: anywhere;
 }
 
 .featureGrid,

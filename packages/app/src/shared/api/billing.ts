@@ -95,6 +95,12 @@ const PublicPlanPriceResponse = v.object({
 	decimals: v.number(),
 	durationDays: v.number(),
 	durationUnit: PaymentDurationUnit,
+	deployments: v.array(v.object({
+		chainId: v.number(),
+		chainName: v.string(),
+		tokenSymbol: v.string(),
+		tokenName: v.string(),
+	})),
 });
 
 const PublicPlanResponse = v.pipe(

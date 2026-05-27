@@ -96,7 +96,13 @@ function toggleTheme(): void {
         <NirA to="/" :class="$style.navBrand">{{ appName }}</NirA>
 
         <div :class="$style.navLinks">
-          <NirA to="/my/buckets" :class="$style.navLink">マイバケット</NirA>
+          <template v-if="authStore.user">
+            <NirA to="/my/buckets" :class="$style.navLink">マイバケット</NirA>
+          </template>
+          <template v-else>
+            <NirA to="/signin" :class="$style.navLink">サインイン</NirA>
+            <NirA to="/signup" :class="$style.navLink">サインアップ</NirA>
+          </template>
           <NirA to="/about" :class="$style.navLink">About</NirA>
           <template v-if="authStore.user?.isAdmin">
             <NirA to="/admin" :class="$style.navLink">管理</NirA>
@@ -147,9 +153,6 @@ function toggleTheme(): void {
                 </div>
               </Popover.Content>
             </Popover.Root>
-          </template>
-          <template v-else>
-            <NirA to="/signin" class="btn btn-primary me-2">サインイン</NirA>
           </template>
         </div>
       </div>

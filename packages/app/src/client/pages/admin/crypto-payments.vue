@@ -588,7 +588,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                     <td><span :class="chain.isRpcConfigured ? 'badge badge-success' : 'badge badge-muted'">{{ chain.isRpcConfigured ? '設定済み' : '未設定' }}</span></td>
                     <td>{{ chain.confirmationsRequired }}</td>
                     <td><span :class="['badge', chain.isEnabled ? 'badge-success' : 'badge-muted']">{{ chain.isEnabled ? '有効' : '無効' }}</span></td>
-                    <td class="col-actions">
+                    <td :class="$style.actionButtons">
                       <button class="btn btn-secondary" type="button" :disabled="rpcTestingChainId === chain.chainId" @click="testChainRpc(chain)">
                         {{ rpcTestingChainId === chain.chainId ? '確認中...' : 'RPC確認' }}
                       </button>
@@ -630,7 +630,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                     <td>{{ asset.symbol }}</td>
                     <td>{{ asset.name }}</td>
                     <td><span :class="['badge', asset.isEnabled ? 'badge-success' : 'badge-muted']">{{ asset.isEnabled ? '有効' : '無効' }}</span></td>
-                    <td class="col-actions">
+                    <td :class="$style.actionButtons">
                       <button class="btn btn-secondary btn-sm" type="button" :disabled="saving" @click="toggleAssetEnabled(asset)">
                         {{ asset.isEnabled ? '無効化' : '有効化' }}
                       </button>
@@ -700,7 +700,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                     <td><code>{{ deployment.recipientAddress }}</code></td>
                     <td>{{ deployment.isRpcConfigured ? '設定済み' : '未設定' }}</td>
                     <td><span :class="['badge', deployment.isEnabled ? 'badge-success' : 'badge-muted']">{{ deployment.isEnabled ? '有効' : '無効' }}</span></td>
-                    <td class="col-actions">
+                    <td :class="$style.actionButtons">
                       <button class="btn btn-secondary btn-sm" type="button" :disabled="saving" @click="startEditDeployment(deployment)">編集</button>
                       <button class="btn btn-secondary btn-sm" type="button" :disabled="saving" @click="toggleDeploymentEnabled(deployment)">
                         {{ deployment.isEnabled ? '無効化' : '有効化' }}
@@ -969,7 +969,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
 
 .actionButtons {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
   justify-content: flex-start;

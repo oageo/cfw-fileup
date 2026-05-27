@@ -31,6 +31,7 @@ app.post(
 	validator('json', apiDef['/api/billing/list-public-plans'].req),
 	describeResponse(async (c: JsonCtx<'/api/billing/list-public-plans', Env>) => {
 		const db = getDb(c.env);
+		const now = Date.now();
 		const publicPlans = await db
 			.select({
 				id: plans.id,
@@ -64,12 +65,12 @@ app.post(
 			.innerJoin(paymentChains, eq(paymentAssetDeployments.chainId, paymentChains.chainId))
 			.innerJoin(plans, eq(paymentAssetPlanPrices.planId, plans.id))
 			.where(and(
-				activePriceCondition(Date.now()),
+				activePriceCondition(now),
 				eq(paymentAssetDeployments.isEnabled, true),
 				eq(paymentAssets.isEnabled, true),
 				eq(paymentChains.isEnabled, true),
 				eq(plans.isEnabled, true),
-				or(isNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, Date.now())),
+				or(isNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, now)),
 			))
 			.orderBy(
 				asc(paymentAssets.symbol),
@@ -79,6 +80,29 @@ app.post(
 				asc(paymentAssetPlanPrices.amountBaseUnits),
 				desc(paymentAssetPlanPrices.id),
 			);
+		const deploymentRows = await db
+			.select({
+				assetId: paymentAssets.id,
+				chainId: paymentChains.chainId,
+				chainName: paymentChains.name,
+				tokenSymbol: paymentAssetDeployments.tokenSymbol,
+				tokenName: paymentAssetDeployments.tokenName,
+			})
+			.from(paymentAssets)
+			.innerJoin(paymentAssetDeployments, eq(paymentAssetDeployments.assetId, paymentAssets.id))
+			.innerJoin(paymentChains, eq(paymentAssetDeployments.chainId, paymentChains.chainId))
+			.where(and(
+				eq(paymentAssets.isEnabled, true),
+				eq(paymentAssetDeployments.isEnabled, true),
+				eq(paymentChains.isEnabled, true),
+			))
+			.orderBy(asc(paymentAssets.symbol), asc(paymentChains.name), asc(paymentAssetDeployments.tokenSymbol));
+		const deploymentsByAsset = new Map<string, typeof deploymentRows>();
+		for (const row of deploymentRows) {
+			const deployments = deploymentsByAsset.get(row.assetId) ?? [];
+			deployments.push(row);
+			deploymentsByAsset.set(row.assetId, deployments);
+		}
 		const pricesByPlan = new Map<string, typeof priceRows>();
 		const seenPriceKeys = new Set<string>();
 		for (const row of priceRows) {
@@ -99,6 +123,12 @@ app.post(
 				decimals: price.decimals,
 				durationDays: price.durationDays,
 				durationUnit: price.durationUnit,
+				deployments: (deploymentsByAsset.get(price.assetId) ?? []).map(deployment => ({
+					chainId: deployment.chainId,
+					chainName: deployment.chainName,
+					tokenSymbol: deployment.tokenSymbol,
+					tokenName: deployment.tokenName,
+				})),
 			})),
 		})), 200);
 	}, apiDef['/api/billing/list-public-plans'].res),
