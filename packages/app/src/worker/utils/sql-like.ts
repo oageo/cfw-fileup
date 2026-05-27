@@ -16,3 +16,7 @@ export function prefixLikePattern(prefix: string): string {
 export function likePrefix(column: LikeColumn, prefix: string): SQL {
 	return sql`${column} LIKE ${prefixLikePattern(prefix)} ESCAPE ${'\\'}`;
 }
+
+export function notLikePrefix(column: LikeColumn, prefix: string): SQL {
+	return sql`${column} NOT LIKE ${prefixLikePattern(prefix)} ESCAPE ${'\\'}`;
+}

@@ -1,5 +1,5 @@
-import { eq } from 'drizzle-orm';
-import { appSettings, usedUsernames, usedBucketNames } from '../scheme/index';
+import { eq, sql } from 'drizzle-orm';
+import { appSettings, users, usedBucketNames } from '../scheme/index';
 import { DEFAULT_FORBIDDEN_USERNAMES, DEFAULT_FORBIDDEN_BUCKET_NAMES } from '../../shared/app-settings';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
@@ -38,9 +38,9 @@ export async function validateUsername(
 	}
 
 	const usedEntry = await db
-		.select()
-		.from(usedUsernames)
-		.where(eq(usedUsernames.username, usernameLower))
+		.select({ id: users.id })
+		.from(users)
+		.where(sql`lower(${users.username}) = ${usernameLower}`)
 		.get();
 	if (usedEntry) {
 		return 'Username already exists';

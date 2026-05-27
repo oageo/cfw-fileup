@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, count, lt, sql } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
-import { users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
+import { users, tokens, appSettings, oauthStates } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { generateToken, tokenToBytes, tokenToDigest } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
@@ -253,11 +253,6 @@ app.get('/callback', async (c) => {
 			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 		});
-
-		await db
-			.insert(usedUsernames)
-			.values({ username: username.toLowerCase() })
-			.onConflictDoNothing();
 
 		user = await db.select().from(users).where(eq(users.id, userId)).get();
 		if (!user) {

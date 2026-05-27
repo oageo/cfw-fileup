@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, count, and } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
-import { users, tokens, appSettings, usedUsernames, passkeys, backupCodes } from '../scheme/index';
+import { users, tokens, appSettings, passkeys, backupCodes } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { hashPassword, tokenToDigest, verifyPassword, generateToken } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
@@ -103,12 +103,6 @@ app.post(
 			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 		});
-
-		// lowercaseで used_usernames に登録（削除後も同名再利用不可）
-		await db
-			.insert(usedUsernames)
-			.values({ username: username.toLowerCase() })
-			.onConflictDoNothing();
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();

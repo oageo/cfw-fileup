@@ -8,7 +8,7 @@ import {
 	verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
 import { apiError } from '../utils/api-error';
-import { passkeys, passkeysChallenges, backupCodes, tokens, users, appSettings, usedUsernames } from '../scheme/index';
+import { passkeys, passkeysChallenges, backupCodes, tokens, users, appSettings } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { genEaidx, parseEaidx } from '../../shared/eaid-x';
@@ -638,11 +638,6 @@ app.post(
 			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 		});
-		await db
-			.insert(usedUsernames)
-			.values({ username: username.toLowerCase() })
-			.onConflictDoNothing();
-
 		const passkeyId = genEaidx(Date.now());
 		await db.insert(passkeys).values({
 			id: passkeyId,

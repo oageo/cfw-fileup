@@ -3,7 +3,7 @@ import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm';
 import { createPublicClient, http, getAddress, type Hex } from 'viem';
 import { createSiweMessage, generateSiweNonce, verifySiweMessage } from 'viem/siwe';
-import { misskeyAccounts, paymentChains, plans, users, usedUsernames, tokens, moderationEvents, userPlanAssignments, userWallets, walletLinkChallenges } from '../scheme/index';
+import { misskeyAccounts, paymentChains, plans, users, tokens, moderationEvents, userPlanAssignments, userWallets, walletLinkChallenges } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { authMiddleware } from '../middleware/auth';
 import { hashPassword, verifyPassword } from '../utils/crypto';
@@ -387,12 +387,6 @@ app.post(
 				}
 
 				await db.update(users).set({ username: newUsername }).where(eq(users.id, user.id));
-
-				// lowercaseで used_usernames に登録（削除後も同名再利用不可）
-				await db
-					.insert(usedUsernames)
-					.values({ username: newUsername.toLowerCase() })
-					.onConflictDoNothing();
 			}
 		}
 

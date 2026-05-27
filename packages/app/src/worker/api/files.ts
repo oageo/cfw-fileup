@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, and, gte, desc, sql, count, lt } from 'drizzle-orm';
+import { eq, and, gte, desc, sql, count, lt, ne, type SQL } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
 import { apiError } from '../utils/api-error';
 import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
@@ -21,7 +21,8 @@ import { toFileMutationReference, toFileMutationReferences } from '../utils/file
 import { recordModerationAuditLog, recordModerationEvent } from '../utils/moderation';
 import { hashPassword, tokenToDigest } from '../utils/crypto';
 import { pageParams, type PageInput } from '../utils/pagination';
-import { likePrefix, prefixLikePattern } from '../utils/sql-like';
+import { likePrefix, notLikePrefix, prefixLikePattern } from '../utils/sql-like';
+import { ensureAncestorDirectories } from '../utils/ensure-ancestor-directories';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -498,6 +499,7 @@ app.post(
 			uploadExpiresAt: uploadExpiry,
 			partSize,
 		});
+		await ensureAncestorDirectories(db, bucket.id, body.path);
 
 		return c.json({ fileId, uploadExpiry, partSize }, 200);
 	}, getResponseDefWithAuth('/api/files/create/open')),
@@ -873,59 +875,48 @@ app.post(
 					.select()
 					.from(files)
 					.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.path, target.path)));
-				const whereClauses = ['bucket_id = ?', 'is_closed = 1', 'path = ?'];
-				const params: Array<string | number> = [bucket.id, target.path];
-				const whereSql = whereClauses.join(' AND ');
-				const countRow = await c.env.DB
-					.prepare(`SELECT COUNT(*) AS count FROM files WHERE ${whereSql}`)
-					.bind(...params)
-					.first<{ count: number }>();
-				const countForTarget = countRow?.count ?? 0;
-				if (countForTarget === 0) continue;
-				matchedCount += countForTarget;
+				if (targetFiles.length === 0) continue;
+				matchedCount += targetFiles.length;
 				for (const file of targetFiles) filesToPurge.set(file.id, file);
-				await c.env.DB
-					.prepare(`UPDATE files SET is_listed = ? WHERE ${whereSql}`)
-					.bind(body.isListed ? 1 : 0, ...params)
-					.run();
+				await db.update(files)
+					.set({ isListed: body.isListed })
+					.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), eq(files.path, target.path)));
 				continue;
 			}
 
 			const prefix = target.path === '' || target.path.endsWith('/') ? target.path : `${target.path}/`;
 			const excludePaths = target.excludePaths ?? [];
-			const childFiles = await db
-				.select()
-				.from(files)
-				.where(and(eq(files.bucketId, bucket.id), eq(files.isClosed, true), likePrefix(files.path, prefix)));
-			const directoryWhereClauses = ['bucket_id = ?', 'path LIKE ? ESCAPE \'\\\''];
-			const directoryParams: Array<string | number> = [bucket.id, prefixLikePattern(prefix)];
-			const fileWhereClauses = ['bucket_id = ?', 'is_closed = 1', 'path LIKE ? ESCAPE \'\\\''];
-			const fileParams: Array<string | number> = [bucket.id, prefixLikePattern(prefix)];
+
+			const fileConditions: (SQL | undefined)[] = [
+				eq(files.bucketId, bucket.id),
+				eq(files.isClosed, true),
+				likePrefix(files.path, prefix),
+			];
+			const dirConditions: (SQL | undefined)[] = [
+				eq(directories.bucketId, bucket.id),
+				likePrefix(directories.path, prefix),
+			];
 			for (const excludedPath of excludePaths) {
 				const normalizedExcludedPath = excludedPath.endsWith('/') ? excludedPath : `${excludedPath}/`;
 				if (normalizedExcludedPath === prefix) {
-					directoryWhereClauses.push('path != ?');
-					directoryParams.push(normalizedExcludedPath);
+					dirConditions.push(ne(directories.path, normalizedExcludedPath));
 					continue;
 				}
-				directoryWhereClauses.push('path != ?', 'path NOT LIKE ? ESCAPE \'\\\'');
-				directoryParams.push(normalizedExcludedPath, prefixLikePattern(normalizedExcludedPath));
-				fileWhereClauses.push('path != ?', 'path NOT LIKE ? ESCAPE \'\\\'');
-				fileParams.push(excludedPath, prefixLikePattern(normalizedExcludedPath));
+				dirConditions.push(ne(directories.path, normalizedExcludedPath));
+				dirConditions.push(notLikePrefix(directories.path, normalizedExcludedPath));
+				fileConditions.push(ne(files.path, excludedPath));
+				fileConditions.push(notLikePrefix(files.path, normalizedExcludedPath));
 			}
-			const directoryWhereSql = directoryWhereClauses.join(' AND ');
-			const fileWhereSql = fileWhereClauses.join(' AND ');
-			const directoryCountRow = await c.env.DB
-				.prepare(`SELECT COUNT(*) AS count FROM directories WHERE ${directoryWhereSql}`)
-				.bind(...directoryParams)
-				.first<{ count: number }>();
-			const fileCountRow = await c.env.DB
-				.prepare(`SELECT COUNT(*) AS count FROM files WHERE ${fileWhereSql}`)
-				.bind(...fileParams)
-				.first<{ count: number }>();
-			const directoryCountForTarget = directoryCountRow?.count ?? 0;
-			const fileCountForTarget = fileCountRow?.count ?? 0;
+
+			const childFiles = await db.select().from(files).where(and(...fileConditions));
+			const directoryCountForTarget = (await db
+				.select({ count: count() })
+				.from(directories)
+				.where(and(...dirConditions))
+				.get())?.count ?? 0;
+			const fileCountForTarget = childFiles.length;
 			const countForTarget = directoryCountForTarget + fileCountForTarget;
+
 			if (countForTarget === 0) {
 				const targetDirectory = await db.select({ id: directories.id })
 					.from(directories)
@@ -944,23 +935,13 @@ app.post(
 			}
 			if (countForTarget === 0) continue;
 			matchedCount += directoryCountForTarget > 0 ? directoryCountForTarget : 1;
-			for (const file of childFiles) {
-				if (excludePaths.some((excludePath) => {
-					const normalizedExcludedPath = excludePath.endsWith('/') ? excludePath : `${excludePath}/`;
-					if (normalizedExcludedPath === prefix) return false;
-					if (excludePath.endsWith('/')) return file.path.startsWith(excludePath);
-					return file.path === excludePath || file.path.startsWith(normalizedExcludedPath);
-				})) continue;
-				filesToPurge.set(file.id, file);
-			}
-			await c.env.DB
-				.prepare(`UPDATE files SET is_listed = ? WHERE ${fileWhereSql}`)
-				.bind(body.isListed ? 1 : 0, ...fileParams)
-				.run();
-			await c.env.DB
-				.prepare(`UPDATE directories SET is_listed = ? WHERE ${directoryWhereSql}`)
-				.bind(body.isListed ? 1 : 0, ...directoryParams)
-				.run();
+			for (const file of childFiles) filesToPurge.set(file.id, file);
+			await db.update(files)
+				.set({ isListed: body.isListed })
+				.where(and(...fileConditions));
+			await db.update(directories)
+				.set({ isListed: body.isListed })
+				.where(and(...dirConditions));
 		}
 
 		if (matchedCount === 0) throw apiError(404, 'FILE_NOT_FOUND');
@@ -1262,6 +1243,7 @@ app.post(
 				.update(files)
 				.set({ bucketId: targetBucket.id, path: normalizedTargetPath })
 				.where(eq(files.id, file.id));
+			await ensureAncestorDirectories(db, targetBucket.id, normalizedTargetPath);
 
 			if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
 				await db.update(buckets).set({ usedBytes: sql`MAX(0, ${buckets.usedBytes} - ${movedBytes})` }).where(eq(buckets.id, sourceBucket.id));

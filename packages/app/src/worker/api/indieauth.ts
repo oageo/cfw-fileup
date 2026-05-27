@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, count, lt, sql } from 'drizzle-orm';
 import { apiError } from '../utils/api-error';
-import { misskeyAccounts, users, tokens, appSettings, oauthStates, usedUsernames } from '../scheme/index';
+import { misskeyAccounts, users, tokens, appSettings, oauthStates } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToBytes, tokenToDigest } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
@@ -560,11 +560,6 @@ app.get('/callback', async (c) => {
 			name: account?.name ?? null,
 			createdAt: Date.now(),
 		});
-
-		await db
-			.insert(usedUsernames)
-			.values({ username: username.toLowerCase() })
-			.onConflictDoNothing();
 
 		user = await db.select().from(users).where(eq(users.id, userId)).get();
 		if (!user) {
