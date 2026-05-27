@@ -1,0 +1,1 @@
+DROP INDEX `payment_asset_plan_prices_asset_id_idx`;
