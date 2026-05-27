@@ -20,6 +20,7 @@ import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
+import { getAppName } from '../utils/app-name';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -80,6 +81,7 @@ app.post(
 		const db = getDb(c.env);
 		const user = c.get('user');
 		const { rpID } = getRpInfo(c.req.url);
+		const appName = await getAppName(c.env);
 
 		const existingPasskeys = await db
 			.select({ credentialId: passkeys.credentialId, transports: passkeys.transports })
@@ -87,7 +89,7 @@ app.post(
 			.where(eq(passkeys.userId, user.id));
 
 		const options = await generateRegistrationOptions({
-			rpName: 'CFW FileUp',
+			rpName: appName,
 			rpID,
 			userID: stringToUserId(user.id),
 			userName: user.username,
@@ -470,6 +472,7 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/passkey/signup/begin', Env>) => {
 		const db = getDb(c.env);
 		const { rpID } = getRpInfo(c.req.url);
+		const appName = await getAppName(c.env);
 		const { username, passphrase, turnstileToken } = c.req.valid('json');
 		const trimmed = username.trim();
 
@@ -520,7 +523,7 @@ app.post(
 
 		const tempUserId = genEaidx(Date.now());
 		const options = await generateRegistrationOptions({
-			rpName: 'CFW FileUp',
+			rpName: appName,
 			rpID,
 			userID: stringToUserId(tempUserId),
 			userName: trimmed,

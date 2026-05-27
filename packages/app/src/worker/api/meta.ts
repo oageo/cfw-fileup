@@ -5,10 +5,13 @@ import { getDb } from '../utils/db';
 import { shortGetCache } from '../middleware/short-get-cache';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
 import { getPaymentChainRpcUrl } from '../utils/payment-rpc';
+import { getAppName } from '../utils/app-name';
+import { DEFAULT_APP_NAME } from '../../shared/app-settings';
 
 const app = new Hono<{ Bindings: Env }>();
 
 type MetaResponse = {
+	appName: string;
 	registrationEnabled: boolean;
 	passphraseRequired: boolean;
 	termsUrl: string;
@@ -39,6 +42,7 @@ app.get('/meta', async (c) => {
 	const db = getDb(c.env);
 
 	try {
+		const appName = await getAppName(c.env);
 		const registrationModeSetting = await db
 			.select()
 			.from(appSettings)
@@ -84,6 +88,7 @@ app.get('/meta', async (c) => {
 			: [];
 
 		return createMetaResponse({
+			appName,
 			registrationEnabled: mode !== 'closed',
 			passphraseRequired: mode === 'passphrase',
 			termsUrl: termsUrlSetting?.value ?? '',
@@ -103,6 +108,7 @@ app.get('/meta', async (c) => {
 		});
 	} catch {
 		return createMetaResponse({
+			appName: DEFAULT_APP_NAME,
 			registrationEnabled: true,
 			passphraseRequired: true,
 			termsUrl: '',

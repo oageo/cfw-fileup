@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import * as v from 'valibot';
 import { authStore } from '@/store/auth';
+import { setAppName } from '@/store/app-meta';
 import { apiPost } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 import SettingItem from '@/components/SettingItem.vue';
@@ -36,6 +37,9 @@ async function fetchSettings(): Promise<void> {
 		const map: SettingValues = { ...defaults };
 		for (const s of result.data) {
 			switch (s.key) {
+				case 'app_name':
+					map.app_name = s.value;
+					break;
 				case 'registration_mode':
 					map.registration_mode = s.value;
 					break;
@@ -87,6 +91,7 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
 		const payload = { key, value } as Extract<v.InferOutput<typeof KnownSettingRecordSchema>, { key: TKey }> ;
 		const result = await apiPost('/api/admin/update-setting', payload);
 		if (!result.ok) throw new Error('保存に失敗しました');
+		if (key === 'app_name' && typeof value === 'string') setAppName(value);
 		success.value = `"${key}" を保存しました`;
 	} catch (e) {
 		error.value = String(e);
@@ -117,6 +122,17 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
       </div>
 
       <div v-else :class="$style.settingsGrid">
+        <SettingItem
+          v-model="values['app_name']"
+          :schema="KNOWN_SETTINGS['app_name']"
+          title="アプリ名"
+          :saving="saving['app_name']"
+          :show-save-button="true"
+          @save="saveSetting('app_name', $event)"
+        >
+          ナビゲーションやトップページ、Passkey の表示名などに使われます。
+        </SettingItem>
+
         <SettingItem
           v-model="values['registration_mode']"
           :schema="KNOWN_SETTINGS['registration_mode']"

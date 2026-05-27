@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Archive, Cloud, Download, EyeOff, ShieldCheck, Upload } from '@lucide/vue';
 import NirA from '@/components/NirA.vue';
 import { authStore } from '@/store/auth';
+import { appName } from '@/store/app-meta';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import { formatBytes } from '@/utils/byte-size';
 
@@ -137,7 +138,7 @@ onMounted(loadPlans);
     <section :class="$style.hero">
       <div :class="$style.heroContent">
         <div :class="$style.heroCopy">
-          <p :class="$style.kicker">CFW FileUp</p>
+          <p :class="$style.kicker">{{ appName }}</p>
           <h1>ファイルを置いて、必要な形で届ける</h1>
           <p :class="$style.lead">
             Cloudflare Workers、R2、D1で動くファイルアップローダー。小さな共有から、アーカイブの中身を扱う公開配信まで支えます。

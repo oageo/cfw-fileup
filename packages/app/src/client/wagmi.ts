@@ -32,7 +32,7 @@ function withoutEagerSetup(connectorFactory: ConnectorFactory): ConnectorFactory
 	};
 }
 
-export async function createWagmiConfig(reownProjectId: string, walletConnectChainIds: readonly number[] = []) {
+export async function createWagmiConfig(reownProjectId: string, walletConnectChainIds: readonly number[] = [], appName = 'CFW FileUp') {
 	const chains = await resolveChains(walletConnectChainIds);
 	const connectors = reownProjectId ? await (async () => {
 		const { walletConnect } = await import('@wagmi/vue/connectors');
@@ -42,8 +42,8 @@ export async function createWagmiConfig(reownProjectId: string, walletConnectCha
 				projectId: reownProjectId,
 				isNewChainsStale: false,
 				metadata: {
-					name: 'CFW FileUp',
-					description: 'Upload files to CFW FileUp.',
+					name: appName,
+					description: `Upload files to ${appName}.`,
 					url: window.location.origin,
 					icons: [`${window.location.origin}/icon.any-192.png`],
 				},

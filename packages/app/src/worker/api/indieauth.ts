@@ -10,6 +10,7 @@ import { isValidNameFormat } from '../../shared/name-validation';
 import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
+import { getAppName } from '../utils/app-name';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MISSKEY_OAUTH_SCOPE = 'read:account';
@@ -257,21 +258,32 @@ async function fetchMisskeyAccount(issuer: string, accessToken: string): Promise
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get('/client', (c) => {
+function escapeHtml(value: string): string {
+	return value.replace(/[&<>"']/g, char => ({
+		'&': '&amp;',
+		'<': '&lt;',
+		'>': '&gt;',
+		'"': '&quot;',
+		'\'': '&#39;',
+	})[char] ?? char);
+}
+
+app.get('/client', async (c) => {
 	const requestUrl = new URL(c.req.url);
 	const callbackUri = getCallbackUri(requestUrl);
+	const appName = escapeHtml(await getAppName(c.env));
 
 	return c.html(`<!DOCTYPE html>
 <html>
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>CFW FileUp</title>
+		<title>${appName}</title>
 		<link rel="redirect_uri" href="${callbackUri}">
 	</head>
 	<body>
 		<div class="h-app">
-			<a class="u-url p-name" href="${requestUrl.protocol}//${requestUrl.host}/">CFW FileUp</a>
+			<a class="u-url p-name" href="${requestUrl.protocol}//${requestUrl.host}/">${appName}</a>
 		</div>
 	</body>
 </html>`);

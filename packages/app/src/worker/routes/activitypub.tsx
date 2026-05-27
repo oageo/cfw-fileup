@@ -6,6 +6,7 @@ import { getDb } from '../utils/db';
 import { apiError } from '../utils/api-error';
 import { deleteResolveRouteCache, resolveRouteCache } from '../middleware/resolve-route-cache';
 import { fileMutationEvents, runMutationTask, type FileReference } from '../events/file-mutations';
+import { getAppName } from '../utils/app-name';
 
 const app = new Hono<{ Bindings: Env }>();
 type AppContext = Context<{ Bindings: Env }>;
@@ -46,14 +47,14 @@ function renderActivityPubContent(name: string): string {
 	return String(<ActivityPubFileContent name={name} />);
 }
 
-function bucketActor(origin: string, bucket: typeof buckets.$inferSelect) {
+function bucketActor(origin: string, bucket: typeof buckets.$inferSelect, appName: string) {
 	const id = `${origin}/a/buckets/${bucket.id}`;
 	return {
 		'@context': 'https://www.w3.org/ns/activitystreams',
 		id,
 		type: 'Service',
 		preferredUsername: bucket.name,
-		name: bucket.name,
+		name: `${bucket.name} @ ${appName}`,
 		url: `${origin}/v/${encodeURIComponent(bucket.name)}/`,
 		inbox: `${id}/inbox`,
 		outbox: `${id}/outbox`,
@@ -193,7 +194,8 @@ app.use('/a/*', resolveRouteCache({ externalMaxAgeSeconds: activityPubCacheMaxAg
 app.get('/a/buckets/:bucketId', async (c) => {
 	const db = getDb(c.env);
 	const bucket = await getBucket(db, c.req.param('bucketId'));
-	return activityJson(c, bucketActor(originFromRequest(c.req.raw), bucket));
+	const appName = await getAppName(c.env);
+	return activityJson(c, bucketActor(originFromRequest(c.req.raw), bucket, appName));
 });
 
 app.get('/a/buckets/:bucketId/outbox', async (c) => {

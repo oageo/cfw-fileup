@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Button } from '@vuetify/v0';
 import { BadgeJapaneseYen, ExternalLink } from '@lucide/vue';
 import { authStore } from '@/store/auth';
+import { appName } from '@/store/app-meta';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 
@@ -58,7 +59,7 @@ onMounted(() => {
       <BadgeJapaneseYen :size="18" :stroke-width="2" />
     </div>
     <div :class="$style.body">
-      <div :class="$style.label">CFW FileUp Plan</div>
+      <div :class="$style.label">{{ appName }} Plan</div>
       <p :class="$style.message">{{ message }}</p>
     </div>
     <Button.Root :as="NirA" :to="linkTo" class="btn btn-secondary" :class="$style.action">

@@ -19,6 +19,7 @@ const reloadWalletRuntimeKey: InjectionKey<ReloadWalletRuntime> = Symbol('reload
 let walletRuntimePromise: Promise<WalletRuntime> | null = null;
 
 type WalletRuntimeMeta = {
+	appName: string;
 	reownProjectId: string;
 	walletConnectChainIds: number[];
 };
@@ -31,14 +32,15 @@ function getWalletConnectChainIds(value: unknown): number[] {
 async function getWalletRuntimeMeta(): Promise<WalletRuntimeMeta> {
 	try {
 		const res = await fetch('/api/meta');
-		if (!res.ok) return { reownProjectId: '', walletConnectChainIds: [] };
-		const meta = await res.json() as { reownProjectId?: unknown; walletConnectChainIds?: unknown };
+		if (!res.ok) return { appName: 'CFW FileUp', reownProjectId: '', walletConnectChainIds: [] };
+		const meta = await res.json() as { appName?: unknown; reownProjectId?: unknown; walletConnectChainIds?: unknown };
 		return {
+			appName: typeof meta.appName === 'string' && meta.appName.trim() !== '' ? meta.appName.trim() : 'CFW FileUp',
 			reownProjectId: typeof meta.reownProjectId === 'string' ? meta.reownProjectId : '',
 			walletConnectChainIds: getWalletConnectChainIds(meta.walletConnectChainIds),
 		};
 	} catch {
-		return { reownProjectId: '', walletConnectChainIds: [] };
+		return { appName: 'CFW FileUp', reownProjectId: '', walletConnectChainIds: [] };
 	}
 }
 
@@ -46,7 +48,7 @@ function getWalletRuntime(): Promise<WalletRuntime> {
 	walletRuntimePromise ??= (async () => {
 		const meta = await getWalletRuntimeMeta();
 		return {
-			config: await createWagmiConfig(meta.reownProjectId, meta.walletConnectChainIds),
+			config: await createWagmiConfig(meta.reownProjectId, meta.walletConnectChainIds, meta.appName),
 			queryClient: new QueryClient(),
 		};
 	})();

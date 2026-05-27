@@ -1,6 +1,8 @@
 import * as v from 'valibot';
 import { MAX_APP_SETTING_TEXT_LENGTH } from './const.js';
 
+export const DEFAULT_APP_NAME = 'CFW FileUp';
+
 /** 禁止ユーザー名のデフォルト値（カンマ区切り） */
 export const DEFAULT_FORBIDDEN_USERNAMES =
 	'admin,administrator,root,system,maintainer,host,mod,moderator,owner,superuser,staff,auth,i,me,everyone,all,example,user,users,account,accounts,official,help,helps,support,supports,info,information,informations,announce,announces,announcement,announcements,notice,notification,notifications,dev,developer,developers,tech,cloudflare,cf';
@@ -25,6 +27,7 @@ export const optionalDateSettingSchema = v.union([
  * キーが設定キー、値が valibot スキーマ（v.optional でデフォルト値も内包）。
  */
 export const KNOWN_SETTINGS = {
+	app_name: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(80)), DEFAULT_APP_NAME),
 	registration_mode: v.optional(registrationModeSchema, 'passphrase' satisfies RegistrationMode),
 	google_required: v.optional(v.picklist(['true', 'false']), 'false'),
 	terms_url: v.optional(optionalUrlSettingSchema, ''),

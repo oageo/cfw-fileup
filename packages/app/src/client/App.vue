@@ -4,6 +4,7 @@ import { Button, Popover, useTheme } from '@vuetify/v0';
 import { CircleFadingArrowUp, Download, Moon, Sun, Upload, User } from '@lucide/vue';
 import { mainRouter } from './router';
 import { fetchCurrentUser, authStore, clearAuth } from './store/auth';
+import { appName, loadAppMeta } from './store/app-meta';
 import { navigateFn } from './navigate';
 import NirA from './components/NirA.vue';
 import { connectUploadWorker, latestUploadJob } from './store/upload-worker';
@@ -53,7 +54,7 @@ const navDownloadPhaseText = computed(() => {
 });
 
 (async () => {
-	await fetchCurrentUser();
+	await Promise.all([fetchCurrentUser(), loadAppMeta()]);
 	if (authStore.user) connectUploadWorker();
 	isReady.value = true;
 })();
@@ -92,7 +93,7 @@ function toggleTheme(): void {
   <div :class="$style.layout">
     <header :class="$style.nav">
       <div :class="$style.navInner">
-        <NirA to="/" :class="$style.navBrand">CFW FileUp</NirA>
+        <NirA to="/" :class="$style.navBrand">{{ appName }}</NirA>
 
         <div :class="$style.navLinks">
           <NirA to="/my/buckets" :class="$style.navLink">マイバケット</NirA>
