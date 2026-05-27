@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { appSettings, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
 import { getDb } from './db';
 import { getPaymentChainRpcUrls } from './payment-rpc';
@@ -23,7 +23,7 @@ export async function canAcceptCryptoPayments(env: Env): Promise<boolean> {
 		.innerJoin(paymentChains, eq(paymentAssetDeployments.chainId, paymentChains.chainId))
 		.innerJoin(plans, eq(paymentAssetPlanPrices.planId, plans.id))
 		.where(and(
-			eq(paymentAssetPlanPrices.isEnabled, true),
+			lt(paymentAssetPlanPrices.startsAt, Date.now() + 1),
 			eq(paymentAssetDeployments.isEnabled, true),
 			eq(paymentAssets.isEnabled, true),
 			eq(paymentChains.isEnabled, true),

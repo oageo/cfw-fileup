@@ -1,1 +1,0 @@
-DROP TABLE `used_usernames`;

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, lt, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt, ne, or } from 'drizzle-orm';
 import { createPublicClient, decodeEventLog, http, isAddress, parseAbiItem, TransactionReceiptNotFoundError, type Hex, type TransactionReceipt } from 'viem';
 import { addPaymentDuration } from '../../shared/billing-quote';
 import { genEaidx } from '../../shared/eaid-x';
@@ -285,6 +285,7 @@ async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: nu
 		quoteCurrentPlanExpiresAt: order.quoteCurrentPlanExpiresAt,
 		quoteCreatedAt: order.quoteCreatedAt,
 		quoteDiscountBaseUnits: order.quoteDiscountBaseUnits,
+		quoteDiscountAssignmentIds: parseDiscountAssignmentIds(order.quoteDiscountAssignmentIds),
 		quoteEffectiveStartsAt: order.quoteEffectiveStartsAt,
 		quoteEffectiveExpiresAt: order.quoteEffectiveExpiresAt,
 		now,
@@ -314,14 +315,17 @@ export async function expireDiscountedFuturePlanAssignment(env: Env, order: {
 	quoteCurrentPlanExpiresAt: number | null;
 	quoteCreatedAt: number;
 	quoteDiscountBaseUnits: string;
+	quoteDiscountAssignmentIds?: string[];
 	quoteEffectiveStartsAt: number;
 	quoteEffectiveExpiresAt: number;
 	now: number;
 }): Promise<void> {
+	const quoteDiscountAssignmentIds = order.quoteDiscountAssignmentIds ?? [];
 	if (
 		order.quoteCurrentPlanId === null
 		|| order.quoteCurrentPlanExpiresAt === null
 		|| BigInt(order.quoteDiscountBaseUnits) <= 0n
+		|| quoteDiscountAssignmentIds.length === 0
 	) return;
 
 	const db = getDb(env);
@@ -349,6 +353,7 @@ export async function expireDiscountedFuturePlanAssignment(env: Env, order: {
 		.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
 		.where(and(
 			eq(userPlanAssignments.userId, order.userId),
+			or(...quoteDiscountAssignmentIds.map(id => eq(userPlanAssignments.id, id))),
 			lt(plans.sortOrder, targetPlan.sortOrder),
 			lt(userPlanAssignments.startsAt, order.quoteEffectiveExpiresAt),
 			gt(userPlanAssignments.expiresAt, order.quoteEffectiveStartsAt),
@@ -407,6 +412,16 @@ export function assertValidBigIntString(value: string): void {
 
 export function assertValidPaymentAddress(address: string): void {
 	if (!isAddress(address)) throw apiError(400, 'PAYMENT_TRANSACTION_INVALID');
+}
+
+function parseDiscountAssignmentIds(value: string): string[] {
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0);
+	} catch {
+		return [];
+	}
 }
 
 export function newPaymentId(now = Date.now()): string {

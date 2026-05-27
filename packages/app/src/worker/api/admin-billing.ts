@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, lt, ne } from 'drizzle-orm';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { evaluateDealDisplayEligibility, getPriceDisplayWindow, type PaymentDurationUnit, type PriceHistoryPeriod } from '../../shared/billing-quote';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
-import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPricePeriods, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
+import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
 import { ApiError, apiError } from '../utils/api-error';
 import { getDb } from '../utils/db';
 import { recordModerationAuditLog } from '../utils/moderation';
@@ -28,6 +28,7 @@ type PaymentPriceRuleInput = {
 	amountBaseUnits: string;
 	durationDays: number;
 	durationUnit: PaymentDurationUnit;
+	startsAt: number;
 	expiresAt: number | null;
 };
 
@@ -98,7 +99,7 @@ async function listPrices(env: Env, priceId?: string) {
 			amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
 			durationDays: paymentAssetPlanPrices.durationDays,
 			durationUnit: paymentAssetPlanPrices.durationUnit,
-			isEnabled: paymentAssetPlanPrices.isEnabled,
+			startsAt: paymentAssetPlanPrices.startsAt,
 			expiresAt: paymentAssetPlanPrices.expiresAt,
 			createdAt: paymentAssetPlanPrices.createdAt,
 			updatedAt: paymentAssetPlanPrices.updatedAt,
@@ -117,7 +118,7 @@ async function listPrices(env: Env, priceId?: string) {
 			&& period.durationDays === row.durationDays
 			&& period.durationUnit === row.durationUnit
 		));
-		const fallbackPeriod = toPriceHistoryPeriod({
+		const fallbackPeriod: PriceHistoryPeriod = {
 			id: row.id,
 			priceId: row.id,
 			assetId: row.assetId,
@@ -125,11 +126,10 @@ async function listPrices(env: Env, priceId?: string) {
 			amountBaseUnits: row.amountBaseUnits,
 			durationDays: row.durationDays,
 			durationUnit: row.durationUnit,
-			isEnabled: row.isEnabled,
-			startsAt: row.createdAt,
+			isEnabled: row.startsAt <= now && (row.expiresAt == null || row.expiresAt > now),
+			startsAt: row.startsAt,
 			expiresAt: row.expiresAt,
-			createdAt: row.createdAt,
-		});
+		};
 		const history = pricePeriods.length > 0 ? pricePeriods : [fallbackPeriod];
 		const dealDisplay = evaluateDealDisplayEligibility(history, {
 			assetId: row.assetId,
@@ -167,7 +167,8 @@ async function listPrices(env: Env, priceId?: string) {
 			amountBaseUnits: row.amountBaseUnits,
 			durationDays: row.durationDays,
 			durationUnit: row.durationUnit,
-			isEnabled: row.isEnabled,
+			isEnabled: row.startsAt <= now && (row.expiresAt == null || row.expiresAt > now),
+			startsAt: row.startsAt,
 			expiresAt: row.expiresAt,
 			isRpcConfigured: false,
 			quote: {
@@ -195,71 +196,36 @@ async function getPriceResponse(env: Env, priceId: string) {
 
 async function listPriceHistoryPeriods(env: Env): Promise<PriceHistoryPeriod[]> {
 	return (await getDb(env)
-		.select()
-		.from(paymentAssetPlanPricePeriods)
+		.select({
+			id: paymentAssetPlanPrices.id,
+			assetId: paymentAssetPlanPrices.assetId,
+			planId: paymentAssetPlanPrices.planId,
+			amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
+			durationDays: paymentAssetPlanPrices.durationDays,
+			durationUnit: paymentAssetPlanPrices.durationUnit,
+			startsAt: paymentAssetPlanPrices.startsAt,
+			expiresAt: paymentAssetPlanPrices.expiresAt,
+		})
+		.from(paymentAssetPlanPrices)
 		.orderBy(
-			asc(paymentAssetPlanPricePeriods.assetId),
-			asc(paymentAssetPlanPricePeriods.planId),
-			asc(paymentAssetPlanPricePeriods.durationDays),
-			asc(paymentAssetPlanPricePeriods.durationUnit),
-			asc(paymentAssetPlanPricePeriods.startsAt),
-			asc(paymentAssetPlanPricePeriods.id),
-		)).map(toPriceHistoryPeriod);
-}
-
-function toPriceHistoryPeriod(period: typeof paymentAssetPlanPricePeriods.$inferSelect): PriceHistoryPeriod {
-	return {
+			asc(paymentAssetPlanPrices.assetId),
+			asc(paymentAssetPlanPrices.planId),
+			asc(paymentAssetPlanPrices.durationDays),
+			asc(paymentAssetPlanPrices.durationUnit),
+			asc(paymentAssetPlanPrices.startsAt),
+			asc(paymentAssetPlanPrices.id),
+		)).map(period => ({
 		id: period.id,
-		priceId: period.priceId,
+		priceId: period.id,
 		assetId: period.assetId,
 		planId: period.planId,
 		amountBaseUnits: period.amountBaseUnits,
 		durationDays: period.durationDays,
 		durationUnit: period.durationUnit,
-		isEnabled: period.isEnabled,
+		isEnabled: period.startsAt <= Date.now() && (period.expiresAt == null || period.expiresAt > Date.now()),
 		startsAt: period.startsAt,
 		expiresAt: period.expiresAt,
-		createdAt: period.createdAt,
-	};
-}
-
-async function createPriceHistoryPeriod(env: Env, price: typeof paymentAssetPlanPrices.$inferSelect, now: number): Promise<void> {
-	await getDb(env).insert(paymentAssetPlanPricePeriods).values({
-		id: genEaidx(now),
-		priceId: price.id,
-		assetId: price.assetId,
-		planId: price.planId,
-		amountBaseUnits: price.amountBaseUnits,
-		durationDays: price.durationDays,
-		durationUnit: price.durationUnit,
-		isEnabled: price.isEnabled,
-		startsAt: now,
-		expiresAt: price.expiresAt,
-		createdAt: now,
-	});
-}
-
-async function closeOpenPriceHistoryPeriods(env: Env, priceId: string, now: number): Promise<void> {
-	await getDb(env)
-		.update(paymentAssetPlanPricePeriods)
-		.set({ expiresAt: now })
-		.where(and(
-			eq(paymentAssetPlanPricePeriods.priceId, priceId),
-			or(isNull(paymentAssetPlanPricePeriods.expiresAt), gt(paymentAssetPlanPricePeriods.expiresAt, now)),
-		));
-}
-
-function didPricePeriodChange(
-	existing: typeof paymentAssetPlanPrices.$inferSelect,
-	updated: typeof paymentAssetPlanPrices.$inferSelect,
-): boolean {
-	return existing.assetId !== updated.assetId
-		|| existing.planId !== updated.planId
-		|| existing.amountBaseUnits !== updated.amountBaseUnits
-		|| existing.durationDays !== updated.durationDays
-		|| existing.durationUnit !== updated.durationUnit
-		|| existing.isEnabled !== updated.isEnabled
-		|| existing.expiresAt !== updated.expiresAt;
+	}));
 }
 
 function durationSortValue(value: number, unit: PaymentDurationUnit): number {
@@ -272,28 +238,29 @@ function durationSortValue(value: number, unit: PaymentDurationUnit): number {
 
 async function assertPaymentPriceRules(env: Env, input: PaymentPriceRuleInput): Promise<void> {
 	const db = getDb(env);
-	const now = Date.now();
+	if (input.expiresAt != null && input.expiresAt <= input.startsAt) throw apiError(400, 'PAYMENT_PRICE_ORDER_INVALID');
 	const existingPrices = await db
 		.select({
 			id: paymentAssetPlanPrices.id,
 			amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
 			durationDays: paymentAssetPlanPrices.durationDays,
 			durationUnit: paymentAssetPlanPrices.durationUnit,
+			startsAt: paymentAssetPlanPrices.startsAt,
 			expiresAt: paymentAssetPlanPrices.expiresAt,
 		})
 		.from(paymentAssetPlanPrices)
 		.where(and(
 			eq(paymentAssetPlanPrices.assetId, input.assetId),
 			eq(paymentAssetPlanPrices.planId, input.planId),
-			input.id ? ne(paymentAssetPlanPrices.id, input.id) : undefined,
-			input.expiresAt === null
-				? isNull(paymentAssetPlanPrices.expiresAt)
-				: and(isNotNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, now)),
 		));
 
 	const inputDuration = durationSortValue(input.durationDays, input.durationUnit);
 	const inputAmount = BigInt(input.amountBaseUnits);
+	const inputEnd = input.expiresAt ?? Number.MAX_SAFE_INTEGER;
 	for (const price of existingPrices) {
+		const existingEnd = price.expiresAt ?? Number.MAX_SAFE_INTEGER;
+		const periodsOverlap = input.startsAt < existingEnd && inputEnd > price.startsAt;
+		if (!periodsOverlap) continue;
 		if (input.durationDays === price.durationDays && input.durationUnit === price.durationUnit) {
 			throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
 		}
@@ -359,7 +326,7 @@ function priceAuditData(price: NonNullable<Awaited<ReturnType<typeof getPriceRes
 		amountBaseUnits: price.amountBaseUnits,
 		durationDays: price.durationDays,
 		durationUnit: price.durationUnit,
-		isEnabled: price.isEnabled,
+		startsAt: price.startsAt,
 		expiresAt: price.expiresAt,
 	};
 }
@@ -652,16 +619,16 @@ app.post(
 		]);
 		if (!asset) throw apiError(404, 'PAYMENT_ASSET_NOT_FOUND');
 		if (!plan) throw apiError(404, 'PLAN_NOT_FOUND');
-		await assertPaymentPriceRules(c.env, body);
 		const now = Date.now();
-		const price = { id: genEaidx(now), assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, createdAt: now, updatedAt: now };
+		const startsAt = body.startsAt ?? now;
+		await assertPaymentPriceRules(c.env, { ...body, startsAt });
+		const price = { id: genEaidx(now), assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, startsAt, expiresAt: body.expiresAt, createdAt: now, updatedAt: now };
 		try {
 			await db.insert(paymentAssetPlanPrices).values(price);
 		} catch (e) {
 			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
 			throw e;
 		}
-		await createPriceHistoryPeriod(c.env, price, now);
 		const response = await getPriceResponse(c.env, price.id);
 		if (!response) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
 		await recordModerationAuditLog(c, 'admin_payment_price_created', { data: priceAuditData(response) });
@@ -670,38 +637,23 @@ app.post(
 );
 
 app.post(
-	'/update-payment-asset-plan-price',
-	describeRoute(omitResAndReq(apiDef['/api/admin/update-payment-asset-plan-price'])),
-	validator('json', apiDef['/api/admin/update-payment-asset-plan-price'].req),
-	describeResponse(async (c: JsonCtx<'/api/admin/update-payment-asset-plan-price', Env>) => {
+	'/expire-payment-asset-plan-price',
+	describeRoute(omitResAndReq(apiDef['/api/admin/expire-payment-asset-plan-price'])),
+	validator('json', apiDef['/api/admin/expire-payment-asset-plan-price'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/expire-payment-asset-plan-price', Env>) => {
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
 		const existing = await db.select().from(paymentAssetPlanPrices).where(eq(paymentAssetPlanPrices.id, body.priceId)).get();
 		if (!existing) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
-		const [asset, plan] = await Promise.all([
-			db.select({ id: paymentAssets.id }).from(paymentAssets).where(eq(paymentAssets.id, body.assetId)).get(),
-			db.select({ id: plans.id }).from(plans).where(eq(plans.id, body.planId)).get(),
-		]);
-		if (!asset) throw apiError(404, 'PAYMENT_ASSET_NOT_FOUND');
-		if (!plan) throw apiError(404, 'PLAN_NOT_FOUND');
-		await assertPaymentPriceRules(c.env, { id: body.priceId, ...body });
 		const now = Date.now();
-		const updated = { ...existing, assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, updatedAt: now };
-		try {
-			await db.update(paymentAssetPlanPrices).set(updated).where(eq(paymentAssetPlanPrices.id, body.priceId));
-		} catch (e) {
-			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
-			throw e;
-		}
-		if (didPricePeriodChange(existing, updated)) {
-			await closeOpenPriceHistoryPeriods(c.env, body.priceId, now);
-			await createPriceHistoryPeriod(c.env, updated, now);
-		}
+		const expiresAt = body.expiresAt ?? now;
+		if (expiresAt <= existing.startsAt) throw apiError(400, 'PAYMENT_PRICE_ORDER_INVALID');
+		await db.update(paymentAssetPlanPrices).set({ expiresAt, updatedAt: now }).where(eq(paymentAssetPlanPrices.id, body.priceId));
 		const response = await getPriceResponse(c.env, body.priceId);
 		if (!response) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
 		await recordModerationAuditLog(c, 'admin_payment_price_updated', { data: priceAuditData(response) });
 		return c.json(response, 200);
-	}, getResponseDefWithAuth('/api/admin/update-payment-asset-plan-price')),
+	}, getResponseDefWithAuth('/api/admin/expire-payment-asset-plan-price')),
 );
 
 app.post(

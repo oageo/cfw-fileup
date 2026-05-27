@@ -903,12 +903,13 @@ describe('Crypto payment administration', () => {
 		const { adminToken } = await setupAdminAndUser();
 		const { price } = await createCryptoOffer(adminToken);
 
-		const period = await env.DB.prepare('SELECT price_id, amount_base_units, expires_at FROM payment_asset_plan_price_periods WHERE price_id = ?').bind(price.id).first<{ price_id: string; amount_base_units: string; expires_at: number | null }>();
+		const period = await env.DB.prepare('SELECT id, amount_base_units, starts_at, expires_at FROM payment_asset_plan_prices WHERE id = ?').bind(price.id).first<{ id: string; amount_base_units: string; starts_at: number; expires_at: number | null }>();
 		expect(period).toMatchObject({
-			price_id: price.id,
+			id: price.id,
 			amount_base_units: '30000000',
 			expires_at: null,
 		});
+		expect(period?.starts_at).toEqual(expect.any(Number));
 
 		const listRes = await app.request('/api/admin/list-payment-asset-plan-prices', {
 			method: 'POST',
@@ -927,33 +928,38 @@ describe('Crypto payment administration', () => {
 		expect(prices.find(item => item.id === price.id)?.priceHistory).toHaveLength(1);
 	});
 
-	test('updating a plan price closes the previous history period and creates a new one', async () => {
+	test('creating a replacement plan price uses immutable price rows as history', async () => {
 		const { adminToken } = await setupAdminAndUser();
 		const { plan, asset, price } = await createCryptoOffer(adminToken);
+		const expiresAt = Date.now() + 1_000;
 
-		const updateRes = await app.request('/api/admin/update-payment-asset-plan-price', {
+		const expireRes = await app.request('/api/admin/expire-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ priceId: price.id, expiresAt }),
+		}, env);
+		expect(expireRes.status).toBe(200);
+		const replacementRes = await app.request('/api/admin/create-payment-asset-plan-price', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({
-				priceId: price.id,
 				assetId: asset.id,
 				planId: plan.id,
 				amountBaseUnits: '25000000',
 				durationDays: 90,
 				durationUnit: 'days',
-				isEnabled: true,
-				expiresAt: null,
+				startsAt: expiresAt,
 			}),
 		}, env);
-		expect(updateRes.status).toBe(200);
-		const updated = await updateRes.json() as {
+		expect(replacementRes.status).toBe(200);
+		const updated = await replacementRes.json() as {
 			priceHistory: Array<{ priceId: string; amountBaseUnits: string; startsAt: number; expiresAt: number | null }>;
 			dealDisplay: { canShowDeal: boolean; referenceAmountBaseUnits: string | null };
 			priceDisplayWindow: { previousPeriod: { amountBaseUnits: string } | null; currentPeriod: { amountBaseUnits: string } | null };
 		};
 		expect(updated.priceHistory).toHaveLength(2);
 		expect(updated.priceHistory.map(period => period.amountBaseUnits)).toEqual(['30000000', '25000000']);
-		expect(updated.priceHistory[0]?.expiresAt).not.toBeNull();
+		expect(updated.priceHistory[0]?.expiresAt).toBe(expiresAt);
 		expect(updated.priceDisplayWindow.previousPeriod).toEqual(expect.objectContaining({ amountBaseUnits: '30000000' }));
 		expect(updated.priceDisplayWindow.currentPeriod).toEqual(expect.objectContaining({ amountBaseUnits: '25000000' }));
 	});
@@ -999,7 +1005,7 @@ describe('Crypto payment administration', () => {
 		expect(body.error).toBe('PAYMENT_PRICE_ORDER_INVALID');
 	});
 
-	test('expiring plan prices can overlap regular prices without duration price order checks', async () => {
+	test('overlapping plan prices keep duration price order checks', async () => {
 		const { adminToken } = await setupAdminAndUser();
 		const { plan, asset } = await createCryptoOffer(adminToken);
 
@@ -1015,7 +1021,9 @@ describe('Crypto payment administration', () => {
 				expiresAt: Date.now() + 86_400_000,
 			}),
 		}, env);
-		expect(campaignRes.status).toBe(200);
+		expect(campaignRes.status).toBe(400);
+		const body = await campaignRes.json() as { error: string };
+		expect(body.error).toBe('PAYMENT_PRICE_ORDER_INVALID');
 	});
 
 	test('same chain and contract address cannot be registered twice', async () => {
@@ -1096,20 +1104,12 @@ describe('Crypto payment administration', () => {
 		const { plan, asset, deployment, price } = await createCryptoOffer(adminToken);
 		await enableCryptoPayments();
 		const wallet = await createLinkedWallet(userId);
-		const expiredAt = Date.now() - 1_000;
+		const expiredAt = Date.now() + 1_000;
 
-		const updateRes = await app.request('/api/admin/update-payment-asset-plan-price', {
+		const updateRes = await app.request('/api/admin/expire-payment-asset-plan-price', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
-			body: JSON.stringify({
-				priceId: price.id,
-				assetId: asset.id,
-				planId: plan.id,
-				amountBaseUnits: '30000000',
-				durationDays: 90,
-				durationUnit: 'days',
-				expiresAt: expiredAt,
-			}),
+			body: JSON.stringify({ priceId: price.id, expiresAt: expiredAt }),
 		}, env);
 		expect(updateRes.status).toBe(200);
 
@@ -1122,6 +1122,7 @@ describe('Crypto payment administration', () => {
 				amountBaseUnits: '35000000',
 				durationDays: 90,
 				durationUnit: 'days',
+				startsAt: expiredAt,
 			}),
 		}, env);
 		expect(replacementRes.status).toBe(200);
@@ -1136,6 +1137,8 @@ describe('Crypto payment administration', () => {
 		const adminPrices = await adminListRes.json() as Array<{ id: string; expiresAt: number | null }>;
 		expect(adminPrices).toContainEqual(expect.objectContaining({ id: price.id, expiresAt: expiredAt }));
 		expect(adminPrices).toContainEqual(expect.objectContaining({ id: replacement.id, expiresAt: null }));
+
+		await new Promise(resolve => setTimeout(resolve, 1_100));
 
 		const offersRes = await app.request('/api/billing/list-crypto-offers', {
 			method: 'POST',
@@ -1154,35 +1157,28 @@ describe('Crypto payment administration', () => {
 		}, env);
 		expect(expiredOrderRes.status).toBe(404);
 
-		const expireReplacementRes = await app.request('/api/admin/update-payment-asset-plan-price', {
+		const expireReplacementRes = await app.request('/api/admin/expire-payment-asset-plan-price', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
-			body: JSON.stringify({
-				priceId: replacement.id,
-				assetId: asset.id,
-				planId: plan.id,
-				amountBaseUnits: '35000000',
-				durationDays: 90,
-				durationUnit: 'days',
-				expiresAt: expiredAt,
-			}),
+			body: JSON.stringify({ priceId: replacement.id, expiresAt: Date.now() + 1_000 }),
 		}, env);
 		expect(expireReplacementRes.status).toBe(200);
 
-		const clearExpiresRes = await app.request('/api/admin/update-payment-asset-plan-price', {
+		const restoredPriceRes = await app.request('/api/admin/create-payment-asset-plan-price', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({
-				priceId: price.id,
 				assetId: asset.id,
 				planId: plan.id,
 				amountBaseUnits: '30000000',
 				durationDays: 90,
 				durationUnit: 'days',
-				expiresAt: null,
+				startsAt: Date.now() + 1_000,
 			}),
 		}, env);
-		expect(clearExpiresRes.status).toBe(200);
+		expect(restoredPriceRes.status).toBe(200);
+		const restoredPrice = await restoredPriceRes.json() as { id: string };
+		await new Promise(resolve => setTimeout(resolve, 1_100));
 
 		const restoredOffersRes = await app.request('/api/billing/list-crypto-offers', {
 			method: 'POST',
@@ -1191,10 +1187,10 @@ describe('Crypto payment administration', () => {
 		}, env);
 		expect(restoredOffersRes.status).toBe(200);
 		const restoredOffers = await restoredOffersRes.json() as Array<{ id: string }>;
-		expect(restoredOffers).toContainEqual(expect.objectContaining({ id: price.id }));
+		expect(restoredOffers).toContainEqual(expect.objectContaining({ id: restoredPrice.id }));
 	});
 
-	test('active limited-time plan prices hide matching indefinite prices from user offers', async () => {
+	test('overlapping plan price periods are rejected', async () => {
 		const { adminToken, userToken } = await setupAdminAndUser();
 		const { plan, asset, price } = await createCryptoOffer(adminToken);
 		await enableCryptoPayments();
@@ -1211,8 +1207,7 @@ describe('Crypto payment administration', () => {
 				expiresAt: Date.now() + 86_400_000,
 			}),
 		}, env);
-		expect(limitedRes.status).toBe(200);
-		const limited = await limitedRes.json() as { id: string };
+		expect(limitedRes.status).toBe(400);
 
 		const offersRes = await app.request('/api/billing/list-crypto-offers', {
 			method: 'POST',
@@ -1221,8 +1216,7 @@ describe('Crypto payment administration', () => {
 		}, env);
 		expect(offersRes.status).toBe(200);
 		const offers = await offersRes.json() as Array<{ id: string; amountBaseUnits: string }>;
-		expect(offers).toContainEqual(expect.objectContaining({ id: limited.id, amountBaseUnits: '25000000' }));
-		expect(offers).not.toContainEqual(expect.objectContaining({ id: price.id, amountBaseUnits: '30000000' }));
+		expect(offers).toContainEqual(expect.objectContaining({ id: price.id, amountBaseUnits: '30000000' }));
 	});
 
 	test('user can list offers and create an order with a price snapshot', async () => {
@@ -1296,9 +1290,9 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify(createOrderBodyWithQuote(price.id, usdtDeployment.id, wallet.id, usdtOffer!.quote)),
 		}, env);
 		expect(orderRes.status).toBe(200);
-		const order = await orderRes.json() as { assetSymbol: string; deploymentId: string; contractAddress: string };
+		const order = await orderRes.json() as { tokenSymbol: string; deploymentId: string; contractAddress: string };
 		expect(order).toMatchObject({
-			assetSymbol: 'USDT',
+			tokenSymbol: 'USDT',
 			deploymentId: usdtDeployment.id,
 			contractAddress: usdtContractAddress,
 		});
@@ -1722,6 +1716,7 @@ describe('Crypto payment administration', () => {
 			quoteCurrentPlanExpiresAt: futureDowngradeExpiresAt,
 			quoteCreatedAt: now,
 			quoteDiscountBaseUnits: '30000000',
+			quoteDiscountAssignmentIds: ['assignment-future-downgrade'],
 			quoteEffectiveStartsAt: activeExpiresAt,
 			quoteEffectiveExpiresAt: futureDowngradeExpiresAt,
 			now,
@@ -1754,6 +1749,7 @@ describe('Crypto payment administration', () => {
 			quoteCurrentPlanExpiresAt: activeExpiresAt,
 			quoteCreatedAt: now,
 			quoteDiscountBaseUnits: '30000000',
+			quoteDiscountAssignmentIds: ['assignment-active-basic'],
 			quoteEffectiveStartsAt: now,
 			quoteEffectiveExpiresAt: activeExpiresAt,
 			now,

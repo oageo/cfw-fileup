@@ -1,4 +1,3 @@
--- https://github.com/tamaina/cfw-fileup/issues/110
 CREATE TABLE `crypto_payment_orders` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -10,8 +9,8 @@ CREATE TABLE `crypto_payment_orders` (
 	`asset_id` text,
 	`chain_id` integer NOT NULL,
 	`chain_name` text NOT NULL,
-	`asset_symbol` text NOT NULL,
-	`asset_name` text NOT NULL,
+	`token_symbol` text NOT NULL,
+	`token_name` text NOT NULL,
 	`plan_name` text NOT NULL,
 	`contract_address` text NOT NULL,
 	`recipient_address` text NOT NULL,
@@ -31,6 +30,7 @@ CREATE TABLE `crypto_payment_orders` (
 	`quote_current_plan_price_amount_base_units` text,
 	`quote_current_plan_price_duration_days` integer,
 	`quote_current_plan_price_duration_unit` text,
+	`quote_discount_assignment_ids` text DEFAULT '[]' NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`tx_hash` text,
 	`created_at` integer NOT NULL,
@@ -66,26 +66,6 @@ CREATE TABLE `payment_asset_deployments` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_asset_deployments_chain_contract_idx` ON `payment_asset_deployments` (`chain_id`,`contract_address`);--> statement-breakpoint
 CREATE INDEX `payment_asset_deployments_asset_id_idx` ON `payment_asset_deployments` (`asset_id`);--> statement-breakpoint
-CREATE TABLE `payment_asset_plan_price_periods` (
-	`id` text PRIMARY KEY NOT NULL,
-	`price_id` text NOT NULL,
-	`asset_id` text NOT NULL,
-	`plan_id` text NOT NULL,
-	`amount_base_units` text NOT NULL,
-	`duration_days` integer NOT NULL,
-	`duration_unit` text DEFAULT 'days' NOT NULL,
-	`is_enabled` integer DEFAULT true NOT NULL,
-	`starts_at` integer NOT NULL,
-	`expires_at` integer,
-	`created_at` integer NOT NULL,
-	FOREIGN KEY (`price_id`) REFERENCES `payment_asset_plan_prices`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`asset_id`) REFERENCES `payment_assets`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE INDEX `payment_asset_plan_price_periods_price_id_idx` ON `payment_asset_plan_price_periods` (`price_id`);--> statement-breakpoint
-CREATE INDEX `payment_asset_plan_price_periods_lookup_idx` ON `payment_asset_plan_price_periods` (`asset_id`,`plan_id`,`duration_days`,`duration_unit`,`starts_at`);--> statement-breakpoint
-CREATE INDEX `payment_asset_plan_price_periods_expires_at_idx` ON `payment_asset_plan_price_periods` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `payment_asset_plan_prices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`asset_id` text NOT NULL,
@@ -93,7 +73,7 @@ CREATE TABLE `payment_asset_plan_prices` (
 	`amount_base_units` text NOT NULL,
 	`duration_days` integer NOT NULL,
 	`duration_unit` text DEFAULT 'days' NOT NULL,
-	`is_enabled` integer DEFAULT true NOT NULL,
+	`starts_at` integer NOT NULL,
 	`expires_at` integer,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
@@ -101,9 +81,10 @@ CREATE TABLE `payment_asset_plan_prices` (
 	FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `payment_asset_plan_prices_asset_id_idx` ON `payment_asset_plan_prices` (`asset_id`);--> statement-breakpoint
 CREATE INDEX `payment_asset_plan_prices_plan_id_idx` ON `payment_asset_plan_prices` (`plan_id`);--> statement-breakpoint
+CREATE INDEX `payment_asset_plan_prices_starts_at_idx` ON `payment_asset_plan_prices` (`starts_at`);--> statement-breakpoint
 CREATE INDEX `payment_asset_plan_prices_expires_at_idx` ON `payment_asset_plan_prices` (`expires_at`);--> statement-breakpoint
+CREATE INDEX `payment_asset_plan_prices_asset_plan_period_idx` ON `payment_asset_plan_prices` (`asset_id`,`plan_id`,`duration_days`,`duration_unit`,`starts_at`,`expires_at`);--> statement-breakpoint
 CREATE TABLE `payment_assets` (
 	`id` text PRIMARY KEY NOT NULL,
 	`symbol` text NOT NULL,
@@ -135,6 +116,7 @@ CREATE TABLE `buckets` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `buckets_name_unique` ON `buckets` (`name`);--> statement-breakpoint
+CREATE INDEX `buckets_user_id_idx` ON `buckets` (`user_id`);--> statement-breakpoint
 CREATE TABLE `directories` (
 	`id` text PRIMARY KEY NOT NULL,
 	`bucket_id` text NOT NULL,
@@ -153,6 +135,7 @@ CREATE TABLE `file_access_tokens` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `file_access_tokens_token_unique` ON `file_access_tokens` (`token`);--> statement-breakpoint
+CREATE INDEX `file_access_tokens_file_id_id_idx` ON `file_access_tokens` (`file_id`,`id`);--> statement-breakpoint
 CREATE TABLE `file_reports` (
 	`id` text PRIMARY KEY NOT NULL,
 	`file_id` text NOT NULL,
@@ -203,6 +186,7 @@ CREATE TABLE `files` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `files_r2_key_unique` ON `files` (`r2_key`);--> statement-breakpoint
 CREATE UNIQUE INDEX `files_bucket_path_idx` ON `files` (`bucket_id`,`path`);--> statement-breakpoint
+CREATE INDEX `files_user_id_id_idx` ON `files` (`user_id`,`id`);--> statement-breakpoint
 CREATE TABLE `tar_files` (
 	`id` text PRIMARY KEY NOT NULL,
 	`file_id` text NOT NULL,
@@ -213,6 +197,7 @@ CREATE TABLE `tar_files` (
 	FOREIGN KEY (`file_id`) REFERENCES `files`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `tar_files_file_id_path_idx` ON `tar_files` (`file_id`,`path`);--> statement-breakpoint
 CREATE TABLE `targz_files` (
 	`id` text PRIMARY KEY NOT NULL,
 	`file_id` text NOT NULL,
@@ -227,6 +212,7 @@ CREATE TABLE `targz_files` (
 	FOREIGN KEY (`file_id`) REFERENCES `files`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `targz_files_file_id_path_idx` ON `targz_files` (`file_id`,`path`);--> statement-breakpoint
 CREATE TABLE `upload_parts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`file_id` text NOT NULL,
@@ -259,6 +245,8 @@ CREATE TABLE `tokens` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `tokens_token_unique` ON `tokens` (`token`);--> statement-breakpoint
+CREATE INDEX `tokens_user_id_id_idx` ON `tokens` (`user_id`,`id`);--> statement-breakpoint
+CREATE INDEX `tokens_user_id_is_revoked_idx` ON `tokens` (`user_id`,`is_revoked`);--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
 	`username` text NOT NULL,
@@ -273,6 +261,8 @@ CREATE TABLE `users` (
 	`effective_max_files_per_bucket` integer,
 	`effective_max_daily_uploads` integer,
 	`effective_can_use_download_count` integer DEFAULT false NOT NULL,
+	`effective_show_ads` integer DEFAULT true NOT NULL,
+	`effective_can_disable_file_ads` integer DEFAULT false NOT NULL,
 	`effective_quota_expires_at` integer,
 	`effective_quota_updated_at` integer,
 	`effective_quota_source` text
@@ -281,6 +271,7 @@ CREATE TABLE `users` (
 CREATE UNIQUE INDEX `users_username_unique` ON `users` (`username`);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_google_id_unique` ON `users` (`google_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_misskey_id_unique` ON `users` (`misskey_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `users_username_lower_unique_idx` ON `users` (lower("username"));--> statement-breakpoint
 CREATE TABLE `app_settings` (
 	`key` text PRIMARY KEY NOT NULL,
 	`value` text NOT NULL
@@ -292,7 +283,9 @@ CREATE TABLE `global_quotas` (
 	`max_bucket_size_bytes` integer,
 	`max_files_per_bucket` integer,
 	`max_daily_uploads` integer,
-	`can_use_download_count` integer DEFAULT false NOT NULL
+	`can_use_download_count` integer DEFAULT false NOT NULL,
+	`show_ads` integer DEFAULT true NOT NULL,
+	`can_disable_file_ads` integer DEFAULT false NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `plans` (
@@ -303,6 +296,8 @@ CREATE TABLE `plans` (
 	`max_files_per_bucket` integer,
 	`max_daily_uploads` integer,
 	`can_use_download_count` integer DEFAULT false NOT NULL,
+	`show_ads` integer DEFAULT true NOT NULL,
+	`can_disable_file_ads` integer DEFAULT false NOT NULL,
 	`is_enabled` integer DEFAULT true NOT NULL,
 	`sort_order` integer DEFAULT 0 NOT NULL,
 	`created_at` integer NOT NULL,
@@ -335,6 +330,8 @@ CREATE TABLE `user_quotas` (
 	`max_files_per_bucket` integer,
 	`max_daily_uploads` integer,
 	`can_use_download_count` integer DEFAULT false NOT NULL,
+	`show_ads` integer DEFAULT true NOT NULL,
+	`can_disable_file_ads` integer DEFAULT false NOT NULL,
 	`updated_at` integer NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -371,10 +368,6 @@ CREATE TABLE `passkeys_challenges` (
 --> statement-breakpoint
 CREATE TABLE `used_bucket_names` (
 	`bucket_name` text PRIMARY KEY NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE `used_usernames` (
-	`username` text PRIMARY KEY NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `ip_bans` (

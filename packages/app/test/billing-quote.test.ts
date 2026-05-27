@@ -238,7 +238,6 @@ describe('deal display eligibility', () => {
 			isEnabled: input.isEnabled ?? true,
 			startsAt: input.startsAt ?? now - 56 * day,
 			expiresAt: input.expiresAt ?? now - 7 * day,
-			createdAt: input.createdAt ?? now - 56 * day,
 		};
 	}
 

@@ -1,4 +1,3 @@
-import { sql } from 'drizzle-orm';
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { plans } from './rate-limits';
 import { userWallets } from './user-wallets';
@@ -56,35 +55,15 @@ export const paymentAssetPlanPrices = sqliteTable('payment_asset_plan_prices', {
 	amountBaseUnits: text('amount_base_units').notNull(),
 	durationDays: integer('duration_days').notNull(),
 	durationUnit: text('duration_unit', { enum: ['days', 'months', 'years'] }).notNull().default('days'),
-	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+	startsAt: integer('starts_at').notNull(),
 	expiresAt: integer('expires_at'),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
 }, (table) => [
 	index('payment_asset_plan_prices_plan_id_idx').on(table.planId),
+	index('payment_asset_plan_prices_starts_at_idx').on(table.startsAt),
 	index('payment_asset_plan_prices_expires_at_idx').on(table.expiresAt),
-	index('payment_asset_plan_prices_asset_plan_expires_idx').on(table.assetId, table.planId, table.expiresAt),
-	uniqueIndex('payment_asset_plan_prices_active_duration_unique_idx')
-		.on(table.assetId, table.planId, table.durationDays, table.durationUnit)
-		.where(sql`${table.expiresAt} IS NULL`),
-]);
-
-export const paymentAssetPlanPricePeriods = sqliteTable('payment_asset_plan_price_periods', {
-	id: text('id').primaryKey(),
-	priceId: text('price_id').notNull().references(() => paymentAssetPlanPrices.id, { onDelete: 'cascade' }),
-	assetId: text('asset_id').notNull().references(() => paymentAssets.id, { onDelete: 'cascade' }),
-	planId: text('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
-	amountBaseUnits: text('amount_base_units').notNull(),
-	durationDays: integer('duration_days').notNull(),
-	durationUnit: text('duration_unit', { enum: ['days', 'months', 'years'] }).notNull().default('days'),
-	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
-	startsAt: integer('starts_at').notNull(),
-	expiresAt: integer('expires_at'),
-	createdAt: integer('created_at').notNull(),
-}, (table) => [
-	index('payment_asset_plan_price_periods_price_id_idx').on(table.priceId),
-	index('payment_asset_plan_price_periods_lookup_idx').on(table.assetId, table.planId, table.durationDays, table.durationUnit, table.startsAt),
-	index('payment_asset_plan_price_periods_expires_at_idx').on(table.expiresAt),
+	index('payment_asset_plan_prices_asset_plan_period_idx').on(table.assetId, table.planId, table.durationDays, table.durationUnit, table.startsAt, table.expiresAt),
 ]);
 
 export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
@@ -98,8 +77,8 @@ export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	assetId: text('asset_id').references(() => paymentAssets.id, { onDelete: 'set null' }),
 	chainId: integer('chain_id').notNull(),
 	chainName: text('chain_name').notNull(),
-	assetSymbol: text('asset_symbol').notNull(),
-	assetName: text('asset_name').notNull(),
+	tokenSymbol: text('token_symbol').notNull(),
+	tokenName: text('token_name').notNull(),
 	planName: text('plan_name').notNull(),
 	contractAddress: text('contract_address').notNull(),
 	recipientAddress: text('recipient_address').notNull(),
@@ -119,6 +98,7 @@ export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	quoteCurrentPlanPriceAmountBaseUnits: text('quote_current_plan_price_amount_base_units'),
 	quoteCurrentPlanPriceDurationDays: integer('quote_current_plan_price_duration_days'),
 	quoteCurrentPlanPriceDurationUnit: text('quote_current_plan_price_duration_unit', { enum: ['days', 'months', 'years'] }),
+	quoteDiscountAssignmentIds: text('quote_discount_assignment_ids').notNull().default('[]'),
 	status: text('status', { enum: ['pending', 'paid', 'expired', 'failed'] }).notNull().default('pending'),
 	txHash: text('tx_hash'),
 	createdAt: integer('created_at').notNull(),

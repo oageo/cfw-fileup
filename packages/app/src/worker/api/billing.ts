@@ -4,7 +4,7 @@ import { and, asc, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { addPaymentDuration, calculatePaymentQuote, evaluateDealDisplayEligibility, type PaymentDurationUnit, type PaymentQuote, type PaymentQuoteCurrentPlan, type PriceHistoryPeriod } from '../../shared/billing-quote';
 import { authMiddleware } from '../middleware/auth';
-import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPricePeriods, paymentAssetPlanPrices, paymentAssets, paymentChains, plans, userPlanAssignments, userWallets } from '../scheme/index';
+import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans, userPlanAssignments, userWallets } from '../scheme/index';
 import { checkCryptoPaymentOrder, confirmCryptoPaymentOrder, getCryptoPaymentOrderExpiresAt, markZeroAmountCryptoPaymentOrderPaid } from '../utils/billing';
 import { apiError } from '../utils/api-error';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
@@ -17,6 +17,13 @@ import { genEaidx } from '../../shared/eaid-x';
 
 const app = new Hono<{ Bindings: Env }>();
 const QUOTE_TTL_MS = 15 * 60 * 1000;
+
+function activePriceCondition(now: number) {
+	return and(
+		lt(paymentAssetPlanPrices.startsAt, now + 1),
+		or(isNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, now)),
+	);
+}
 
 app.post(
 	'/list-public-plans',
@@ -57,7 +64,7 @@ app.post(
 			.innerJoin(paymentChains, eq(paymentAssetDeployments.chainId, paymentChains.chainId))
 			.innerJoin(plans, eq(paymentAssetPlanPrices.planId, plans.id))
 			.where(and(
-				eq(paymentAssetPlanPrices.isEnabled, true),
+				activePriceCondition(Date.now()),
 				eq(paymentAssetDeployments.isEnabled, true),
 				eq(paymentAssets.isEnabled, true),
 				eq(paymentChains.isEnabled, true),
@@ -111,6 +118,7 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 	const db = getDb(env);
 	const assignmentRows = await db
 		.select({
+			id: userPlanAssignments.id,
 			planId: userPlanAssignments.planId,
 			startsAt: userPlanAssignments.startsAt,
 			expiresAt: userPlanAssignments.expiresAt,
@@ -189,7 +197,8 @@ async function toPaymentQuoteCurrentPlan(env: Env, offer: {
 	amountBaseUnits: string;
 	durationDays: number;
 	durationUnit: PaymentDurationUnit;
-}, assignment: {
+	}, assignment: {
+	id: string;
 	planId: string;
 	startsAt: number;
 	expiresAt: number;
@@ -220,6 +229,7 @@ async function toPaymentQuoteCurrentPlan(env: Env, offer: {
 	if (price == null) return null;
 	return {
 		id: assignment.planId,
+		assignmentId: assignment.id,
 		name: assignment.planName,
 		sortOrder: assignment.planSortOrder,
 		startsAt: assignment.startsAt,
@@ -234,6 +244,7 @@ async function getReferencePlanPrice(env: Env, assetId: string, planId: string, 
 			amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
 			durationDays: paymentAssetPlanPrices.durationDays,
 			durationUnit: paymentAssetPlanPrices.durationUnit,
+			startsAt: paymentAssetPlanPrices.startsAt,
 			expiresAt: paymentAssetPlanPrices.expiresAt,
 			createdAt: paymentAssetPlanPrices.createdAt,
 		})
@@ -242,9 +253,9 @@ async function getReferencePlanPrice(env: Env, assetId: string, planId: string, 
 			eq(paymentAssetPlanPrices.assetId, assetId),
 			eq(paymentAssetPlanPrices.planId, planId),
 		));
-	const activePrices = currentPlanPrices.filter(price => price.expiresAt == null || price.expiresAt > quoteCreatedAt);
+	const activePrices = currentPlanPrices.filter(price => price.startsAt <= quoteCreatedAt && (price.expiresAt == null || price.expiresAt > quoteCreatedAt));
 	const price = (activePrices.length > 0 ? activePrices : currentPlanPrices)
-		.sort((a, b) => (b.expiresAt ?? Number.MAX_SAFE_INTEGER) - (a.expiresAt ?? Number.MAX_SAFE_INTEGER) || b.createdAt - a.createdAt)[0];
+		.sort((a, b) => b.startsAt - a.startsAt || b.createdAt - a.createdAt)[0];
 	return price ? {
 		amountBaseUnits: price.amountBaseUnits,
 		durationDays: price.durationDays,
@@ -255,6 +266,7 @@ async function getReferencePlanPrice(env: Env, assetId: string, planId: string, 
 async function listEnabledOffers(env: Env, userId: string, quoteCreatedAt = Date.now()) {
 	const db = getDb(env);
 	const historyPeriods = await listPriceHistoryPeriods(env);
+	const now = Date.now();
 	const rows = await db
 		.select({
 			id: paymentAssetPlanPrices.id,
@@ -283,7 +295,7 @@ async function listEnabledOffers(env: Env, userId: string, quoteCreatedAt = Date
 			amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
 			durationDays: paymentAssetPlanPrices.durationDays,
 			durationUnit: paymentAssetPlanPrices.durationUnit,
-			isEnabled: paymentAssetPlanPrices.isEnabled,
+			startsAt: paymentAssetPlanPrices.startsAt,
 			expiresAt: paymentAssetPlanPrices.expiresAt,
 			createdAt: paymentAssetPlanPrices.createdAt,
 			updatedAt: paymentAssetPlanPrices.updatedAt,
@@ -294,12 +306,11 @@ async function listEnabledOffers(env: Env, userId: string, quoteCreatedAt = Date
 		.innerJoin(paymentChains, eq(paymentAssetDeployments.chainId, paymentChains.chainId))
 		.innerJoin(plans, eq(paymentAssetPlanPrices.planId, plans.id))
 		.where(and(
-			eq(paymentAssetPlanPrices.isEnabled, true),
+			activePriceCondition(now),
 			eq(paymentAssetDeployments.isEnabled, true),
 			eq(paymentAssets.isEnabled, true),
 			eq(paymentChains.isEnabled, true),
 			eq(plans.isEnabled, true),
-			or(isNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, Date.now())),
 		))
 		.orderBy(
 			asc(plans.sortOrder),
@@ -328,10 +339,9 @@ async function listEnabledOffers(env: Env, userId: string, quoteCreatedAt = Date
 			amountBaseUnits: row.amountBaseUnits,
 			durationDays: row.durationDays,
 			durationUnit: row.durationUnit,
-			isEnabled: row.isEnabled,
-			startsAt: row.createdAt,
+			isEnabled: row.startsAt <= quoteCreatedAt && (row.expiresAt == null || row.expiresAt > quoteCreatedAt),
+			startsAt: row.startsAt,
 			expiresAt: row.expiresAt,
-			createdAt: row.createdAt,
 		};
 		return {
 			id: row.id,
@@ -362,7 +372,8 @@ async function listEnabledOffers(env: Env, userId: string, quoteCreatedAt = Date
 			amountBaseUnits: row.amountBaseUnits,
 			durationDays: row.durationDays,
 			durationUnit: row.durationUnit,
-			isEnabled: row.isEnabled,
+			isEnabled: row.startsAt <= quoteCreatedAt && (row.expiresAt == null || row.expiresAt > quoteCreatedAt),
+			startsAt: row.startsAt,
 			expiresAt: row.expiresAt,
 			isRpcConfigured: isPaymentChainRpcConfigured(env, row.chainId),
 			quote: await createPaymentOfferQuote(env, userId, {
@@ -413,27 +424,35 @@ function displayPriceKey(row: {
 
 async function listPriceHistoryPeriods(env: Env): Promise<PriceHistoryPeriod[]> {
 	return (await getDb(env)
-		.select()
-		.from(paymentAssetPlanPricePeriods)
+		.select({
+			id: paymentAssetPlanPrices.id,
+			assetId: paymentAssetPlanPrices.assetId,
+			planId: paymentAssetPlanPrices.planId,
+			amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
+			durationDays: paymentAssetPlanPrices.durationDays,
+			durationUnit: paymentAssetPlanPrices.durationUnit,
+			startsAt: paymentAssetPlanPrices.startsAt,
+			expiresAt: paymentAssetPlanPrices.expiresAt,
+		})
+		.from(paymentAssetPlanPrices)
 		.orderBy(
-			asc(paymentAssetPlanPricePeriods.assetId),
-			asc(paymentAssetPlanPricePeriods.planId),
-			asc(paymentAssetPlanPricePeriods.durationDays),
-			asc(paymentAssetPlanPricePeriods.durationUnit),
-			asc(paymentAssetPlanPricePeriods.startsAt),
-			asc(paymentAssetPlanPricePeriods.id),
+			asc(paymentAssetPlanPrices.assetId),
+			asc(paymentAssetPlanPrices.planId),
+			asc(paymentAssetPlanPrices.durationDays),
+			asc(paymentAssetPlanPrices.durationUnit),
+			asc(paymentAssetPlanPrices.startsAt),
+			asc(paymentAssetPlanPrices.id),
 		)).map(period => ({
 		id: period.id,
-		priceId: period.priceId,
+		priceId: period.id,
 		assetId: period.assetId,
 		planId: period.planId,
 		amountBaseUnits: period.amountBaseUnits,
 		durationDays: period.durationDays,
 		durationUnit: period.durationUnit,
-		isEnabled: period.isEnabled,
+		isEnabled: period.startsAt <= Date.now() && (period.expiresAt == null || period.expiresAt > Date.now()),
 		startsAt: period.startsAt,
 		expiresAt: period.expiresAt,
-		createdAt: period.createdAt,
 	}));
 }
 
@@ -471,8 +490,6 @@ app.post(
 				assetId: paymentAssets.id,
 				chainId: paymentChains.chainId,
 				chainName: paymentChains.name,
-				assetSymbol: paymentAssets.symbol,
-				assetName: paymentAssets.name,
 				tokenSymbol: paymentAssetDeployments.tokenSymbol,
 				tokenName: paymentAssetDeployments.tokenName,
 				contractAddress: paymentAssetDeployments.contractAddress,
@@ -481,6 +498,7 @@ app.post(
 				decimals: paymentAssetDeployments.decimals,
 				durationDays: paymentAssetPlanPrices.durationDays,
 				durationUnit: paymentAssetPlanPrices.durationUnit,
+				startsAt: paymentAssetPlanPrices.startsAt,
 				expiresAt: paymentAssetPlanPrices.expiresAt,
 				planName: plans.name,
 				planSortOrder: plans.sortOrder,
@@ -494,12 +512,11 @@ app.post(
 				eq(paymentAssetPlanPrices.id, body.priceId),
 				eq(paymentAssetDeployments.id, body.deploymentId),
 				eq(paymentAssetDeployments.chainId, wallet.chainId),
-				eq(paymentAssetPlanPrices.isEnabled, true),
+				activePriceCondition(Date.now()),
 				eq(paymentAssetDeployments.isEnabled, true),
 				eq(paymentAssets.isEnabled, true),
 				eq(paymentChains.isEnabled, true),
 				eq(plans.isEnabled, true),
-				or(isNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, Date.now())),
 			))
 			.get();
 		if (!price) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
@@ -536,8 +553,8 @@ app.post(
 			assetId: price.assetId,
 			chainId: price.chainId,
 			chainName: price.chainName,
-			assetSymbol: price.tokenSymbol,
-			assetName: price.tokenName,
+			tokenSymbol: price.tokenSymbol,
+			tokenName: price.tokenName,
 			planName: price.planName,
 			contractAddress: price.contractAddress,
 			recipientAddress: price.recipientAddress,
@@ -557,6 +574,7 @@ app.post(
 			quoteCurrentPlanPriceAmountBaseUnits: quote.currentPlan?.priceAmountBaseUnits ?? null,
 			quoteCurrentPlanPriceDurationDays: quote.currentPlan?.priceDurationDays ?? null,
 			quoteCurrentPlanPriceDurationUnit: quote.currentPlan?.priceDurationUnit ?? null,
+			quoteDiscountAssignmentIds: JSON.stringify(quote.discountAssignmentIds),
 			status: 'pending' as const,
 			txHash: null,
 			createdAt: now,

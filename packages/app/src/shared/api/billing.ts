@@ -168,7 +168,6 @@ const PriceHistoryPeriodResponse = v.pipe(
 		isEnabled: v.boolean(),
 		startsAt: v.number(),
 		expiresAt: v.nullable(v.number()),
-		createdAt: v.number(),
 	}),
 	v.metadata({ ref: 'PaymentPriceHistoryPeriod' }),
 );
@@ -202,6 +201,7 @@ const PaymentAssetPlanPriceResponse = v.pipe(
 		durationDays: v.number(),
 		durationUnit: PaymentDurationUnit,
 		isEnabled: v.boolean(),
+		startsAt: v.number(),
 		expiresAt: v.nullable(v.number()),
 		isRpcConfigured: v.boolean(),
 		quote: PaymentOfferQuoteResponse,
@@ -232,6 +232,7 @@ const AdminPaymentAssetPlanPriceResponse = v.pipe(
 		durationDays: v.number(),
 		durationUnit: PaymentDurationUnit,
 		isEnabled: v.boolean(),
+		startsAt: v.number(),
 		expiresAt: v.nullable(v.number()),
 		isRpcConfigured: v.boolean(),
 		quote: PaymentOfferQuoteResponse,
@@ -256,8 +257,8 @@ const CryptoPaymentOrderResponse = v.pipe(
 		planId: IdString,
 		chainId: v.number(),
 		chainName: v.string(),
-		assetSymbol: v.string(),
-		assetName: v.string(),
+		tokenSymbol: v.string(),
+		tokenName: v.string(),
 		planName: v.string(),
 		contractAddress: EthereumAddress,
 		recipientAddress: EthereumAddress,
@@ -321,7 +322,7 @@ const PriceInput = {
 	amountBaseUnits: BigIntString,
 	durationDays: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(3650)),
 	durationUnit: v.optional(PaymentDurationUnit, 'days'),
-	isEnabled: v.optional(v.boolean(), true),
+	startsAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 	expiresAt: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0))), null),
 } as const;
 
@@ -490,11 +491,11 @@ export const billingApiDef = {
 		req: v.object(PriceInput),
 		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: AdminPaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ALREADY_EXISTS', 'PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment asset or plan not found', ['PAYMENT_ASSET_NOT_FOUND', 'PLAN_NOT_FOUND']) },
 	},
-	'/api/admin/update-payment-asset-plan-price': {
-		summary: 'Update payment asset plan price',
+	'/api/admin/expire-payment-asset-plan-price': {
+		summary: 'Expire payment asset plan price',
 		tags: ['admin', 'billing'],
-		req: v.object({ priceId: IdString, ...PriceInput }),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: AdminPaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ALREADY_EXISTS', 'PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment price, asset, or plan not found', ['PAYMENT_PRICE_NOT_FOUND', 'PAYMENT_ASSET_NOT_FOUND', 'PLAN_NOT_FOUND']) },
+		req: v.object({ priceId: IdString, expiresAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))) }),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: AdminPaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment price not found', ['PAYMENT_PRICE_NOT_FOUND']) },
 	},
 	'/api/admin/delete-payment-asset-plan-price': {
 		summary: 'Delete payment asset plan price',

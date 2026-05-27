@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX `payment_asset_plan_prices_active_duration_unique_idx` ON `payment_asset_plan_prices` (`asset_id`,`plan_id`,`duration_days`,`duration_unit`) WHERE "payment_asset_plan_prices"."expires_at" IS NULL;

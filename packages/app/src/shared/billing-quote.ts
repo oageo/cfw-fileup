@@ -8,6 +8,7 @@ export type PaymentQuotePlanPrice = {
 
 export type PaymentQuoteCurrentPlan = {
 	id: string;
+	assignmentId?: string;
 	name: string;
 	sortOrder: number;
 	startsAt?: number;
@@ -31,6 +32,7 @@ export type PaymentQuote = {
 	baseAmountBaseUnits: string;
 	discountBaseUnits: string;
 	payableAmountBaseUnits: string;
+	discountAssignmentIds: string[];
 	effectiveStartsAt: number;
 	effectiveExpiresAt: number;
 	currentPlan: {
@@ -60,7 +62,6 @@ export type PriceHistoryPeriod = {
 	isEnabled: boolean;
 	startsAt: number;
 	expiresAt: number | null;
-	createdAt: number;
 };
 
 export type DealDisplayReason =
@@ -129,6 +130,7 @@ export function calculatePaymentQuote(input: PaymentQuoteInput): PaymentQuote {
 			baseAmountBaseUnits: input.targetPlanPrice.amountBaseUnits,
 			discountBaseUnits: '0',
 			payableAmountBaseUnits: input.targetPlanPrice.amountBaseUnits,
+			discountAssignmentIds: [],
 			effectiveStartsAt: effectiveBaseAt,
 			effectiveExpiresAt,
 			currentPlan: primaryCurrentPlan && !samePlan ? toPaymentQuoteCurrentPlan(primaryCurrentPlan) : null,
@@ -145,6 +147,11 @@ export function calculatePaymentQuote(input: PaymentQuoteInput): PaymentQuote {
 			return sum + BigInt(currentPlan.price.amountBaseUnits) * BigInt(remainingMs) / BigInt(currentDurationMs);
 		}, 0n);
 	const discount = rawDiscount > baseAmount ? baseAmount : rawDiscount;
+	const discountAssignmentIds = discount > 0n
+		? currentPlans
+			.filter(currentPlan => currentPlan.assignmentId != null && currentPlan.id !== input.targetPlanId && currentPlan.sortOrder < input.targetPlanSortOrder)
+			.map(currentPlan => currentPlan.assignmentId as string)
+		: [];
 
 	return {
 		quoteCreatedAt: input.quoteCreatedAt,
@@ -152,6 +159,7 @@ export function calculatePaymentQuote(input: PaymentQuoteInput): PaymentQuote {
 		baseAmountBaseUnits: input.targetPlanPrice.amountBaseUnits,
 		discountBaseUnits: discount.toString(),
 		payableAmountBaseUnits: (baseAmount - discount).toString(),
+		discountAssignmentIds,
 		effectiveStartsAt: effectiveBaseAt,
 		effectiveExpiresAt,
 		currentPlan: toPaymentQuoteCurrentPlan(primaryCurrentPlan),
@@ -271,7 +279,7 @@ function toDealDisplayEvaluation(
 }
 
 function comparePricePeriods(a: PriceHistoryPeriod, b: PriceHistoryPeriod): number {
-	return a.startsAt - b.startsAt || a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+	return a.startsAt - b.startsAt || a.id.localeCompare(b.id);
 }
 
 function findLastPeriodIndex(periods: PriceHistoryPeriod[], priceId: string): number {

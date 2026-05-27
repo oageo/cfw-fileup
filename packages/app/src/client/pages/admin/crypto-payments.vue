@@ -71,7 +71,7 @@ const priceForm = ref({
 	amount: '',
 	durationDays: 90,
 	durationUnit: 'days' as 'days' | 'months' | 'years',
-	isEnabled: true,
+	startsAt: formatDateTimeLocalInput(Date.now()),
 	expiresAt: '',
 });
 
@@ -118,6 +118,7 @@ const canSavePrice = computed(() => (
 	&& Number.isInteger(priceForm.value.durationDays)
 	&& priceForm.value.durationDays >= 1
 	&& ['days', 'months', 'years'].includes(priceForm.value.durationUnit)
+	&& parseDateTimeLocal(priceForm.value.startsAt) !== undefined
 	&& parseDateTimeLocal(priceForm.value.expiresAt) !== undefined
 ));
 
@@ -331,7 +332,7 @@ async function savePrice(): Promise<void> {
 		amountBaseUnits,
 		durationDays: priceForm.value.durationDays,
 		durationUnit: priceForm.value.durationUnit,
-		isEnabled: priceForm.value.isEnabled,
+		startsAt: parseDateTimeLocal(priceForm.value.startsAt) ?? undefined,
 		expiresAt: parseDateTimeLocal(priceForm.value.expiresAt) ?? null,
 	}), '価格を作成しました');
 }
@@ -354,41 +355,29 @@ function closePriceHistoryDialog(): void {
 	historyPrice.value = null;
 }
 
-async function updatePriceExpiresAt(price: Price, expiresAt: number | null): Promise<void> {
-	await save(async () => apiPost('/api/admin/update-payment-asset-plan-price', {
+async function expirePrice(price: Price, expiresAt: number): Promise<void> {
+	await save(async () => apiPost('/api/admin/expire-payment-asset-plan-price', {
 		priceId: price.id,
-		assetId: price.assetId,
-		planId: price.plan.id,
-		amountBaseUnits: price.amountBaseUnits,
-		durationDays: price.durationDays,
-		durationUnit: price.durationUnit,
-		isEnabled: price.isEnabled,
 		expiresAt,
-	}), expiresAt == null ? '価格の失効を取り消しました' : '価格の失効日時を保存しました');
+	}), '価格の終了日時を保存しました');
 	closePriceExpiresAtDialog();
 }
 
 async function savePriceExpiresAt(): Promise<void> {
 	if (!editingPrice.value) return;
 	const expiresAt = parseDateTimeLocal(priceExpiresAtDraft.value);
-	if (expiresAt === undefined) {
-		error.value = '失効日時が不正です';
+	if (expiresAt == null) {
+		error.value = '終了日時を入力してください';
 		return;
 	}
-	await updatePriceExpiresAt(editingPrice.value, expiresAt);
-}
-
-async function clearPriceExpiresAt(): Promise<void> {
-	if (!editingPrice.value) return;
-	priceExpiresAtDraft.value = '';
-	await updatePriceExpiresAt(editingPrice.value, null);
+	await expirePrice(editingPrice.value, expiresAt);
 }
 
 async function expirePriceNow(): Promise<void> {
 	if (!editingPrice.value) return;
 	const now = Date.now();
 	priceExpiresAtDraft.value = formatDateTimeLocalInput(now);
-	await updatePriceExpiresAt(editingPrice.value, now);
+	await expirePrice(editingPrice.value, now);
 }
 
 async function saveCryptoPaymentsEnabled(value: 'true' | 'false'): Promise<void> {
@@ -466,13 +455,13 @@ function formatDateTimeLocalInput(value: number | null): string {
 }
 
 function formatPriceStatus(price: Price): string {
-	if (!price.isEnabled) return '無効';
+	if (price.startsAt > Date.now()) return '予約中';
 	if (price.expiresAt != null && price.expiresAt <= Date.now()) return '失効';
 	return '有効';
 }
 
 function priceStatusBadgeClass(price: Price): string {
-	if (!price.isEnabled) return 'badge-muted';
+	if (price.startsAt > Date.now()) return 'badge-muted';
 	if (price.expiresAt != null && price.expiresAt <= Date.now()) return 'badge-danger';
 	return 'badge-success';
 }
@@ -755,7 +744,10 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                 <option value="years">年</option>
               </select>
             </div>
-            <label :class="$style.checkbox"><input v-model="priceForm.isEnabled" type="checkbox">有効</label>
+            <div class="form-group">
+              <label class="form-label" for="price-starts-at">Starts at</label>
+              <input id="price-starts-at" v-model="priceForm.startsAt" class="form-input" type="datetime-local">
+            </div>
             <div class="form-group">
               <label class="form-label" for="price-expires-at">Expires at</label>
               <input id="price-expires-at" v-model="priceForm.expiresAt" class="form-input" type="datetime-local">
@@ -765,12 +757,13 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
           <div :class="['card', $style.tableCard]">
             <div class="table-responsive">
               <table class="data-table">
-                <thead><tr><th>Offer</th><th>価格</th><th>期間</th><th>失効日時</th><th>状態</th><th>お得表示</th><th></th></tr></thead>
+                <thead><tr><th>Offer</th><th>価格</th><th>期間</th><th>開始日時</th><th>終了日時</th><th>状態</th><th>お得表示</th><th></th></tr></thead>
                 <tbody>
                   <tr v-for="price in prices" :key="price.id">
                     <td>{{ price.plan.name }} / {{ price.assetSymbol }}</td>
                     <td>{{ formatAmount(price.amountBaseUnits, price.decimals ?? getAssetDecimals(price.assetId), price.assetSymbol) }}</td>
                     <td>{{ formatDuration(price.durationDays, price.durationUnit) }}</td>
+                    <td>{{ formatDate(price.startsAt) }}</td>
                     <td>{{ formatDate(price.expiresAt) }}</td>
                     <td><span :class="['badge', priceStatusBadgeClass(price)]">{{ formatPriceStatus(price) }}</span></td>
                     <td>
@@ -784,7 +777,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                       </div>
                     </td>
                   </tr>
-                  <tr v-if="prices.length === 0"><td colspan="7" :class="$style.empty">プラン価格はありません。</td></tr>
+                  <tr v-if="prices.length === 0"><td colspan="8" :class="$style.empty">プラン価格はありません。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -799,7 +792,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                 <tbody>
                   <tr v-for="order in orders" :key="order.id">
                     <td><code>{{ order.id }}</code></td>
-                    <td>{{ order.assetSymbol }}</td>
+                    <td>{{ order.tokenSymbol }}</td>
                     <td>{{ order.chainName }}</td>
                     <td>{{ order.status }}</td>
                     <td><code>{{ order.txHash ?? '-' }}</code></td>
@@ -832,7 +825,6 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
             <div :class="$style.dialogActions">
               <button class="btn btn-primary" type="submit" :disabled="saving">保存</button>
               <button class="btn btn-secondary" type="button" :disabled="saving" @click="expirePriceNow">今すぐ失効</button>
-              <button class="btn btn-secondary" type="button" :disabled="saving || editingPrice.expiresAt == null" @click="clearPriceExpiresAt">失効取り消し</button>
             </div>
           </form>
         </Dialog.Content>

@@ -1,1 +1,0 @@
-CREATE INDEX `payment_asset_plan_prices_asset_plan_expires_idx` ON `payment_asset_plan_prices` (`asset_id`,`plan_id`,`expires_at`);

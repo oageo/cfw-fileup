@@ -5,57 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1779843570398,
-      "tag": "0000_groovy_blue_blade",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1779853688502,
-      "tag": "0001_bumpy_miracleman",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1779870362260,
-      "tag": "0002_illegal_the_hand",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1779870547824,
-      "tag": "0003_faithful_sinister_six",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1779871547929,
-      "tag": "0004_amused_rick_jones",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1779872418863,
-      "tag": "0005_melted_darkstar",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1779872551515,
-      "tag": "0006_dizzy_chat",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1779873000000,
-      "tag": "0007_users_username_lower_unique",
+      "when": 1779885590007,
+      "tag": "0000_sturdy_peter_parker",
       "breakpoints": true
     }
   ]
