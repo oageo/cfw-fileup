@@ -12,7 +12,7 @@ import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
-import { detectExecutableMimeType, hasSuspiciousFileType, inferMimeTypeByExtension, isExecutableMimeType, looksLikeUtf8Text } from '../utils/mime-by-extension';
+import { detectExecutableMimeType, hasSuspiciousFileType, inferMimeTypeByExtension, isExecutableMimeType, looksLikeUtf8Text, preferExtensionMimeTypeForStorage } from '../utils/mime-by-extension';
 import { isValidDirectoryPath, isValidFilePath } from '../../shared/name-validation';
 import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, hasFileDirectoryConflictForFile } from '../utils/path-conflicts';
@@ -714,8 +714,9 @@ app.post(
 			}
 		}
 		const extensionMimeType = inferMimeTypeByExtension(file.path);
+		const storageDetectedMimeType = preferExtensionMimeTypeForStorage(file.path, detectedMimeType);
 		const isUtf8Text = fileSize === 0 || (headerBytes ? looksLikeUtf8Text(headerBytes) : false);
-		const mimeType = detectedMimeType ?? (isUtf8Text ? extensionMimeType : undefined) ?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined) ?? r2Object.httpMetadata?.contentType;
+		const mimeType = storageDetectedMimeType ?? (isUtf8Text ? extensionMimeType : undefined) ?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined) ?? r2Object.httpMetadata?.contentType;
 		const mismatch = hasSuspiciousFileType(file.path, mimeType);
 		if (mismatch && await shouldRejectMismatchedFileType(db)) {
 			throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');

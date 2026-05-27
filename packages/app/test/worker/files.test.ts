@@ -487,6 +487,41 @@ describe('POST /api/files/create/close', () => {
 		});
 	});
 
+	test('stores svg xml content as image/svg+xml', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+		await env.DB.prepare('INSERT INTO app_settings (key, value) VALUES (\'reject_mismatched_file_type\', \'true\')').run();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'vector.svg' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		await env.R2.put(fileId, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>');
+
+		const closeRes = await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+		expect(closeRes.status).toBe(200);
+
+		const metaRes = await app.request('/api/files/meta?bucketName=test_bucket&path=vector.svg', {
+			method: 'GET',
+			headers: authHeaders(token),
+		}, env);
+		expect(metaRes.status).toBe(200);
+		const meta = await metaRes.json() as {
+			mimeType: string;
+			extensionMimeType: string;
+			hasMimeTypeMismatch: boolean;
+		};
+		expect(meta.mimeType).toBe('image/svg+xml');
+		expect(meta.extensionMimeType).toBe('image/svg+xml');
+		expect(meta.hasMimeTypeMismatch).toBe(false);
+	});
+
 	test('reports mismatched executable content in file metadata', async () => {
 		const { token, bucketId } = await setupUserAndBucket();
 

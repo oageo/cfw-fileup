@@ -20,6 +20,13 @@ function normalizeMimeType(mimeType: string): string {
 	return mimeType.split(';', 1)[0].trim().toLowerCase();
 }
 
+export function preferExtensionMimeTypeForStorage(path: string, detectedMimeType: string | undefined): string | undefined {
+	if (normalizeMimeType(detectedMimeType ?? '') === 'application/xml' && inferMimeTypeByExtension(path) === 'image/svg+xml') {
+		return 'image/svg+xml';
+	}
+	return detectedMimeType;
+}
+
 function getExtension(path: string): string | undefined {
 	const filename = path.split('/').pop() ?? path;
 	return filename.includes('.') ? filename.split('.').pop()?.toLowerCase() : undefined;
