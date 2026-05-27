@@ -1,8 +1,8 @@
-import { and, desc, eq, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt, ne } from 'drizzle-orm';
 import { createPublicClient, decodeEventLog, http, isAddress, parseAbiItem, TransactionReceiptNotFoundError, type Hex, type TransactionReceipt } from 'viem';
 import { addPaymentDuration } from '../../shared/billing-quote';
 import { genEaidx } from '../../shared/eaid-x';
-import { cryptoPaymentOrders, paymentChains, userPlanAssignments } from '../scheme/index';
+import { cryptoPaymentOrders, paymentChains, plans, userPlanAssignments } from '../scheme/index';
 import { ApiError, apiError } from './api-error';
 import { getDb } from './db';
 import { getPaymentChainRpcUrl, normalizeEthAddress } from './payment-rpc';
@@ -103,6 +103,40 @@ export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId:
 	if (verificationResult === 'pending') return order;
 
 	return await markCryptoPaymentOrderPaid(env, order, normalizedTxHash, now);
+}
+
+export async function markZeroAmountCryptoPaymentOrderPaid(env: Env, userId: string, orderId: string, now = Date.now()): Promise<typeof cryptoPaymentOrders.$inferSelect> {
+	const db = getDb(env);
+	const order = await db
+		.select()
+		.from(cryptoPaymentOrders)
+		.where(and(eq(cryptoPaymentOrders.id, orderId), eq(cryptoPaymentOrders.userId, userId)))
+		.get();
+
+	if (!order) throw apiError(404, 'PAYMENT_ORDER_NOT_FOUND');
+	if (order.status === 'paid') return order;
+	if (order.status !== 'pending') throw apiError(400, 'PAYMENT_ORDER_EXPIRED');
+	if (BigInt(order.amountBaseUnits) !== 0n) throw apiError(400, 'PAYMENT_QUOTE_INVALID');
+
+	const effectivePeriod = getPaidOrderEffectivePeriod(order, now);
+	const claimedOrders = await db
+		.update(cryptoPaymentOrders)
+		.set({
+			status: 'paid',
+			paidAt: now,
+			quoteEffectiveStartsAt: effectivePeriod.startsAt,
+			quoteEffectiveExpiresAt: effectivePeriod.expiresAt,
+			updatedAt: now,
+		})
+		.where(and(eq(cryptoPaymentOrders.id, order.id), eq(cryptoPaymentOrders.status, 'pending')))
+		.returning();
+	if (claimedOrders.length === 0) throw apiError(400, 'PAYMENT_TRANSACTION_ALREADY_USED');
+	const claimedOrder = claimedOrders[0] as OrderForConfirmation;
+
+	await applyPaidOrderPlan(env, claimedOrder, now);
+	await refreshEffectiveQuotaForUser(env, order.userId, now);
+
+	return claimedOrder;
 }
 
 async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation, normalizedTxHash: Hex, now: number): Promise<OrderForConfirmation> {
@@ -223,11 +257,14 @@ async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: nu
 
 	await expireDiscountedFuturePlanAssignment(env, {
 		userId: order.userId,
+		targetPlanId: order.planId,
 		quoteCurrentPlanId: order.quoteCurrentPlanId,
 		quoteCurrentPlanExpiresAt: order.quoteCurrentPlanExpiresAt,
 		quoteCreatedAt: order.quoteCreatedAt,
 		quoteDiscountBaseUnits: order.quoteDiscountBaseUnits,
 		quoteEffectiveStartsAt: order.quoteEffectiveStartsAt,
+		quoteEffectiveExpiresAt: order.quoteEffectiveExpiresAt,
+		now,
 	});
 
 	await db
@@ -249,27 +286,87 @@ async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: nu
 
 export async function expireDiscountedFuturePlanAssignment(env: Env, order: {
 	userId: string;
+	targetPlanId: string;
 	quoteCurrentPlanId: string | null;
 	quoteCurrentPlanExpiresAt: number | null;
 	quoteCreatedAt: number;
 	quoteDiscountBaseUnits: string;
 	quoteEffectiveStartsAt: number;
+	quoteEffectiveExpiresAt: number;
+	now: number;
 }): Promise<void> {
 	if (
 		order.quoteCurrentPlanId === null
 		|| order.quoteCurrentPlanExpiresAt === null
-		|| order.quoteEffectiveStartsAt <= order.quoteCreatedAt
 		|| BigInt(order.quoteDiscountBaseUnits) <= 0n
 	) return;
 
-	await getDb(env)
-		.delete(userPlanAssignments)
+	const db = getDb(env);
+	const targetPlan = await db
+		.select({ sortOrder: plans.sortOrder })
+		.from(plans)
+		.where(eq(plans.id, order.targetPlanId))
+		.get();
+	if (!targetPlan) return;
+
+	const discountedAssignments = await db
+		.select({
+			id: userPlanAssignments.id,
+			userId: userPlanAssignments.userId,
+			planId: userPlanAssignments.planId,
+			startsAt: userPlanAssignments.startsAt,
+			expiresAt: userPlanAssignments.expiresAt,
+			priceAssetId: userPlanAssignments.priceAssetId,
+			priceAmountBaseUnits: userPlanAssignments.priceAmountBaseUnits,
+			priceDurationDays: userPlanAssignments.priceDurationDays,
+			priceDurationUnit: userPlanAssignments.priceDurationUnit,
+			createdAt: userPlanAssignments.createdAt,
+		})
+		.from(userPlanAssignments)
+		.innerJoin(plans, eq(userPlanAssignments.planId, plans.id))
 		.where(and(
 			eq(userPlanAssignments.userId, order.userId),
-			eq(userPlanAssignments.planId, order.quoteCurrentPlanId),
-			eq(userPlanAssignments.startsAt, order.quoteEffectiveStartsAt),
-			eq(userPlanAssignments.expiresAt, order.quoteCurrentPlanExpiresAt),
-		));
+			lt(plans.sortOrder, targetPlan.sortOrder),
+			lt(userPlanAssignments.startsAt, order.quoteEffectiveExpiresAt),
+			gt(userPlanAssignments.expiresAt, order.quoteEffectiveStartsAt),
+		))
+		.orderBy(asc(userPlanAssignments.startsAt), asc(userPlanAssignments.expiresAt));
+
+	for (const assignment of discountedAssignments) {
+		const overlapsStart = assignment.startsAt < order.quoteEffectiveStartsAt;
+		const overlapsEnd = assignment.expiresAt > order.quoteEffectiveExpiresAt;
+		if (!overlapsStart && !overlapsEnd) {
+			await db.delete(userPlanAssignments).where(eq(userPlanAssignments.id, assignment.id));
+		} else if (overlapsStart && overlapsEnd) {
+			await db
+				.update(userPlanAssignments)
+				.set({ expiresAt: order.quoteEffectiveStartsAt, updatedAt: order.now })
+				.where(eq(userPlanAssignments.id, assignment.id));
+			await db.insert(userPlanAssignments).values({
+				id: genEaidx(order.now),
+				userId: assignment.userId,
+				planId: assignment.planId,
+				startsAt: order.quoteEffectiveExpiresAt,
+				expiresAt: assignment.expiresAt,
+				priceAssetId: assignment.priceAssetId,
+				priceAmountBaseUnits: assignment.priceAmountBaseUnits,
+				priceDurationDays: assignment.priceDurationDays,
+				priceDurationUnit: assignment.priceDurationUnit,
+				createdAt: order.now,
+				updatedAt: order.now,
+			});
+		} else if (overlapsStart) {
+			await db
+				.update(userPlanAssignments)
+				.set({ expiresAt: order.quoteEffectiveStartsAt, updatedAt: order.now })
+				.where(eq(userPlanAssignments.id, assignment.id));
+		} else {
+			await db
+				.update(userPlanAssignments)
+				.set({ startsAt: order.quoteEffectiveExpiresAt, updatedAt: order.now })
+				.where(eq(userPlanAssignments.id, assignment.id));
+		}
+	}
 }
 
 export function normalizeTransactionHash(txHash: string): Hex {

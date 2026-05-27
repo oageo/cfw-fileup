@@ -2,10 +2,10 @@ import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { and, asc, desc, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
-import { calculatePaymentQuote, evaluateDealDisplayEligibility, type PaymentDurationUnit, type PaymentQuote, type PriceHistoryPeriod } from '../../shared/billing-quote';
+import { addPaymentDuration, calculatePaymentQuote, evaluateDealDisplayEligibility, type PaymentDurationUnit, type PaymentQuote, type PaymentQuoteCurrentPlan, type PriceHistoryPeriod } from '../../shared/billing-quote';
 import { authMiddleware } from '../middleware/auth';
 import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPricePeriods, paymentAssetPlanPrices, paymentAssets, paymentChains, plans, userPlanAssignments, userWallets } from '../scheme/index';
-import { checkCryptoPaymentOrder, confirmCryptoPaymentOrder, getCryptoPaymentOrderExpiresAt } from '../utils/billing';
+import { checkCryptoPaymentOrder, confirmCryptoPaymentOrder, getCryptoPaymentOrderExpiresAt, markZeroAmountCryptoPaymentOrderPaid } from '../utils/billing';
 import { apiError } from '../utils/api-error';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
 import { getDb } from '../utils/db';
@@ -52,43 +52,43 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 	const activeAssignment = assignmentRows
 		.filter(assignment => assignment.startsAt <= quoteCreatedAt && assignment.expiresAt > quoteCreatedAt)
 		.sort((a, b) => b.planSortOrder - a.planSortOrder || b.expiresAt - a.expiresAt)[0] ?? null;
+	const activeUpgradeBase = activeAssignment && offer.planSortOrder > activeAssignment.planSortOrder
+		? activeAssignment
+		: null;
 	const futureUpgradeBase = assignmentRows
 		.filter(assignment => assignment.startsAt > quoteCreatedAt && assignment.planSortOrder < offer.planSortOrder)
 		.sort((a, b) => a.startsAt - b.startsAt || a.planSortOrder - b.planSortOrder || b.expiresAt - a.expiresAt)[0] ?? null;
-	const referenceAssignment = futureUpgradeBase && (!activeAssignment || offer.planSortOrder <= activeAssignment.planSortOrder)
-		? futureUpgradeBase
-		: activeAssignment;
-	const assignmentPrice = referenceAssignment?.priceAssetId === offer.assetId
-		? {
-			amountBaseUnits: referenceAssignment.priceAmountBaseUnits,
-			durationDays: referenceAssignment.priceDurationDays,
-			durationUnit: referenceAssignment.priceDurationUnit,
-		}
+	const futureSamePlanTail = assignmentRows
+		.filter(assignment => assignment.planId === offer.planId && assignment.startsAt > quoteCreatedAt)
+		.sort((a, b) => b.expiresAt - a.expiresAt || b.startsAt - a.startsAt)[0] ?? null;
+	const higherPlanTail = assignmentRows
+		.filter(assignment => assignment.planSortOrder > offer.planSortOrder)
+		.sort((a, b) => b.expiresAt - a.expiresAt || b.startsAt - a.startsAt)[0] ?? null;
+	const scheduleTail = [futureSamePlanTail, higherPlanTail]
+		.filter(assignment => assignment != null)
+		.sort((a, b) => b.expiresAt - a.expiresAt || b.startsAt - a.startsAt)[0] ?? null;
+	const referenceAssignment = activeUpgradeBase ?? futureUpgradeBase ?? scheduleTail ?? activeAssignment;
+	const referencePlan = referenceAssignment
+		? await toPaymentQuoteCurrentPlan(env, offer, referenceAssignment, quoteCreatedAt)
 		: null;
-	const currentPlanPrice = referenceAssignment && referenceAssignment.planId !== offer.planId && assignmentPrice == null
-		? await getReferencePlanPrice(env, offer.assetId, referenceAssignment.planId, quoteCreatedAt)
+	const upgradeBaseAt = referencePlan && referencePlan.id !== offer.planId && referencePlan.sortOrder < offer.planSortOrder
+		? Math.max(quoteCreatedAt, referencePlan.startsAt ?? quoteCreatedAt)
 		: null;
-	const currentPlan = referenceAssignment && referenceAssignment.planId === offer.planId
-		? {
-			id: referenceAssignment.planId,
-			name: referenceAssignment.planName,
-			sortOrder: referenceAssignment.planSortOrder,
-			startsAt: referenceAssignment.startsAt,
-			expiresAt: referenceAssignment.expiresAt,
-			price: assignmentPrice ?? {
-				amountBaseUnits: offer.amountBaseUnits,
-				durationDays: offer.durationDays,
-				durationUnit: offer.durationUnit,
-			},
-		}
-		: referenceAssignment && (assignmentPrice ?? currentPlanPrice) ? {
-			id: referenceAssignment.planId,
-			name: referenceAssignment.planName,
-			sortOrder: referenceAssignment.planSortOrder,
-			startsAt: referenceAssignment.startsAt,
-			expiresAt: referenceAssignment.expiresAt,
-			price: assignmentPrice ?? currentPlanPrice!,
-		} : null;
+	const upgradeExpiresAt = upgradeBaseAt == null
+		? null
+		: addPaymentDuration(upgradeBaseAt, offer.durationDays, offer.durationUnit);
+	const currentPlans = upgradeBaseAt == null || upgradeExpiresAt == null
+		? undefined
+		: (await Promise.all(
+			assignmentRows
+				.filter(assignment => (
+					assignment.planSortOrder < offer.planSortOrder
+					&& assignment.expiresAt > upgradeBaseAt
+					&& assignment.startsAt < upgradeExpiresAt
+				))
+				.sort((a, b) => a.startsAt - b.startsAt || a.expiresAt - b.expiresAt)
+				.map(assignment => toPaymentQuoteCurrentPlan(env, offer, assignment, quoteCreatedAt)),
+		)).filter(plan => plan != null);
 	return calculatePaymentQuote({
 		quoteCreatedAt,
 		quoteTtlMs: QUOTE_TTL_MS,
@@ -99,8 +99,54 @@ async function createPaymentOfferQuote(env: Env, userId: string, offer: {
 			durationDays: offer.durationDays,
 			durationUnit: offer.durationUnit,
 		},
-		currentPlan,
+		currentPlan: referencePlan,
+		currentPlans,
 	});
+}
+
+async function toPaymentQuoteCurrentPlan(env: Env, offer: {
+	assetId: string;
+	planId: string;
+	amountBaseUnits: string;
+	durationDays: number;
+	durationUnit: PaymentDurationUnit;
+}, assignment: {
+	planId: string;
+	startsAt: number;
+	expiresAt: number;
+	priceAssetId: string;
+	priceAmountBaseUnits: string;
+	priceDurationDays: number;
+	priceDurationUnit: PaymentDurationUnit;
+	planName: string;
+	planSortOrder: number;
+}, quoteCreatedAt: number): Promise<PaymentQuoteCurrentPlan | null> {
+	const assignmentPrice = assignment.priceAssetId === offer.assetId
+		? {
+			amountBaseUnits: assignment.priceAmountBaseUnits,
+			durationDays: assignment.priceDurationDays,
+			durationUnit: assignment.priceDurationUnit,
+		}
+		: null;
+	const currentPlanPrice = assignment.planId !== offer.planId && assignmentPrice == null
+		? await getReferencePlanPrice(env, offer.assetId, assignment.planId, quoteCreatedAt)
+		: null;
+	const price = assignment.planId === offer.planId
+		? assignmentPrice ?? {
+			amountBaseUnits: offer.amountBaseUnits,
+			durationDays: offer.durationDays,
+			durationUnit: offer.durationUnit,
+		}
+		: assignmentPrice ?? currentPlanPrice;
+	if (price == null) return null;
+	return {
+		id: assignment.planId,
+		name: assignment.planName,
+		sortOrder: assignment.planSortOrder,
+		startsAt: assignment.startsAt,
+		expiresAt: assignment.expiresAt,
+		price,
+	};
 }
 
 async function getReferencePlanPrice(env: Env, assetId: string, planId: string, quoteCreatedAt: number) {
@@ -393,7 +439,7 @@ app.post(
 		if (quote.payableAmountBaseUnits !== body.quotedAmountBaseUnits) {
 			throw apiError(400, 'PAYMENT_QUOTE_INVALID');
 		}
-		if (BigInt(quote.payableAmountBaseUnits) <= 0n) {
+		if (BigInt(quote.payableAmountBaseUnits) < 0n) {
 			throw apiError(400, 'PAYMENT_QUOTE_INVALID');
 		}
 		const order = {
@@ -436,6 +482,11 @@ app.post(
 			paidAt: null,
 		};
 		await db.insert(cryptoPaymentOrders).values(order);
+		if (BigInt(order.amountBaseUnits) === 0n) {
+			const paidOrder = await markZeroAmountCryptoPaymentOrderPaid(c.env, user.id, order.id, now);
+			await recordModerationEvent(c, 'crypto_payment_order_confirmed', { orderId: paidOrder.id, chainId: paidOrder.chainId, txHash: paidOrder.txHash }, user.id, user.tokenId);
+			return c.json(paidOrder, 200);
+		}
 		return c.json(order, 200);
 	}, getResponseDefWithAuth('/api/billing/create-crypto-order')),
 );

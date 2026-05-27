@@ -149,6 +149,65 @@ describe('billing quote calculation', () => {
 		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: 'plan-basic', sortOrder: 10 }));
 	});
 
+	test('discounts all lower scheduled plans overlapping the upgraded period', () => {
+		const futureStartsAt = Date.UTC(2026, 10, 26, 16, 0, 0);
+		const secondStartsAt = futureStartsAt + 90 * 86_400_000;
+		const quote = calculatePaymentQuote({
+			quoteCreatedAt: baseAt,
+			quoteTtlMs: 15 * 60 * 1000,
+			targetPlanId: 'plan-pro',
+			targetPlanSortOrder: 20,
+			targetPlanPrice: {
+				amountBaseUnits: '750000',
+				durationDays: 3,
+				durationUnit: 'months',
+			},
+			currentPlan: {
+				id: 'plan-basic',
+				name: 'Basic',
+				sortOrder: 10,
+				startsAt: futureStartsAt,
+				expiresAt: secondStartsAt,
+				price: {
+					amountBaseUnits: '50000',
+					durationDays: 90,
+					durationUnit: 'days',
+				},
+			},
+			currentPlans: [
+				{
+					id: 'plan-basic',
+					name: 'Basic',
+					sortOrder: 10,
+					startsAt: futureStartsAt,
+					expiresAt: secondStartsAt,
+					price: {
+						amountBaseUnits: '50000',
+						durationDays: 90,
+						durationUnit: 'days',
+					},
+				},
+				{
+					id: 'plan-basic',
+					name: 'Basic',
+					sortOrder: 10,
+					startsAt: secondStartsAt,
+					expiresAt: secondStartsAt + 90 * 86_400_000,
+					price: {
+						amountBaseUnits: '50000',
+						durationDays: 90,
+						durationUnit: 'days',
+					},
+				},
+			],
+		});
+
+		expect(quote.discountBaseUnits).toBe('51111');
+		expect(quote.payableAmountBaseUnits).toBe('698889');
+		expect(quote.effectiveStartsAt).toBe(futureStartsAt);
+		expect(quote.effectiveExpiresAt).toBe(Date.UTC(2027, 1, 26, 16, 0, 0));
+	});
+
 	test('adds calendar months without overflowing into the next month', () => {
 		const jan31 = Date.UTC(2026, 0, 31, 10, 0, 0);
 

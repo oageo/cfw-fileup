@@ -701,6 +701,13 @@ async function buyOffer(offer: Offer): Promise<void> {
 			quoteCreatedAt: offer.quote.quoteCreatedAt,
 		});
 		if (!orderResult.ok) throw new Error(orderResult.data.message);
+		if (orderResult.data.status === 'paid') {
+			success.value = '割引により支払いは不要でした。プランを反映しました';
+			closePurchaseDialog();
+			await load();
+			emit('purchased');
+			return;
+		}
 		const txHash = await sendTokenTransfer(from, orderResult.data.contractAddress, orderResult.data.recipientAddress, orderResult.data.amountBaseUnits, offer.chainId);
 		purchaseProgress.value = '支払いを送信しました。ブロックチェーン上で確認中です。この画面を閉じても、決済履歴の「チェーン確認」ボタンで反映を再確認できます。';
 		const confirmResult = await apiPost('/api/billing/confirm-crypto-order', { orderId: orderResult.data.id, txHash });

@@ -22,6 +22,7 @@ export type PaymentQuoteInput = {
 	targetPlanSortOrder: number;
 	targetPlanPrice: PaymentQuotePlanPrice;
 	currentPlan: PaymentQuoteCurrentPlan | null;
+	currentPlans?: PaymentQuoteCurrentPlan[];
 };
 
 export type PaymentQuote = {
@@ -111,15 +112,17 @@ export function addPaymentDuration(baseMs: number, value: number, unit: PaymentD
 
 export function calculatePaymentQuote(input: PaymentQuoteInput): PaymentQuote {
 	const baseAmount = BigInt(input.targetPlanPrice.amountBaseUnits);
-	const samePlan = input.currentPlan?.id === input.targetPlanId;
-	const downgrade = input.currentPlan != null && !samePlan && input.targetPlanSortOrder < input.currentPlan.sortOrder;
-	const currentPlanStartsAt = input.currentPlan?.startsAt ?? input.quoteCreatedAt;
-	const effectiveBaseAt = (samePlan || downgrade) && input.currentPlan
-		? input.currentPlan.expiresAt
+	const currentPlans = input.currentPlans ?? (input.currentPlan ? [input.currentPlan] : []);
+	const primaryCurrentPlan = input.currentPlan ?? currentPlans[0] ?? null;
+	const samePlan = primaryCurrentPlan?.id === input.targetPlanId;
+	const downgrade = primaryCurrentPlan != null && !samePlan && input.targetPlanSortOrder < primaryCurrentPlan.sortOrder;
+	const currentPlanStartsAt = primaryCurrentPlan?.startsAt ?? input.quoteCreatedAt;
+	const effectiveBaseAt = (samePlan || downgrade) && primaryCurrentPlan
+		? primaryCurrentPlan.expiresAt
 		: Math.max(input.quoteCreatedAt, currentPlanStartsAt);
 	const effectiveExpiresAt = addPaymentDuration(effectiveBaseAt, input.targetPlanPrice.durationDays, input.targetPlanPrice.durationUnit);
 
-	if (!input.currentPlan || samePlan || downgrade) {
+	if (!primaryCurrentPlan || samePlan || downgrade) {
 		return {
 			quoteCreatedAt: input.quoteCreatedAt,
 			quoteExpiresAt: input.quoteCreatedAt + input.quoteTtlMs,
@@ -128,14 +131,19 @@ export function calculatePaymentQuote(input: PaymentQuoteInput): PaymentQuote {
 			payableAmountBaseUnits: input.targetPlanPrice.amountBaseUnits,
 			effectiveStartsAt: effectiveBaseAt,
 			effectiveExpiresAt,
-			currentPlan: input.currentPlan && !samePlan ? toPaymentQuoteCurrentPlan(input.currentPlan) : null,
+			currentPlan: primaryCurrentPlan && !samePlan ? toPaymentQuoteCurrentPlan(primaryCurrentPlan) : null,
 		};
 	}
 
-	const discountBaseAt = Math.max(input.quoteCreatedAt, currentPlanStartsAt);
-	const remainingMs = Math.max(0, input.currentPlan.expiresAt - discountBaseAt);
-	const currentDurationMs = Math.max(1, addPaymentDuration(discountBaseAt, input.currentPlan.price.durationDays, input.currentPlan.price.durationUnit) - discountBaseAt);
-	const rawDiscount = BigInt(input.currentPlan.price.amountBaseUnits) * BigInt(remainingMs) / BigInt(currentDurationMs);
+	const rawDiscount = currentPlans
+		.filter(currentPlan => currentPlan.id !== input.targetPlanId && currentPlan.sortOrder < input.targetPlanSortOrder)
+		.reduce((sum, currentPlan) => {
+			const discountBaseAt = Math.max(input.quoteCreatedAt, currentPlan.startsAt ?? input.quoteCreatedAt, effectiveBaseAt);
+			const discountEndAt = Math.min(currentPlan.expiresAt, effectiveExpiresAt);
+			const remainingMs = Math.max(0, discountEndAt - discountBaseAt);
+			const currentDurationMs = Math.max(1, addPaymentDuration(discountBaseAt, currentPlan.price.durationDays, currentPlan.price.durationUnit) - discountBaseAt);
+			return sum + BigInt(currentPlan.price.amountBaseUnits) * BigInt(remainingMs) / BigInt(currentDurationMs);
+		}, 0n);
 	const discount = rawDiscount > baseAmount ? baseAmount : rawDiscount;
 
 	return {
@@ -146,7 +154,7 @@ export function calculatePaymentQuote(input: PaymentQuoteInput): PaymentQuote {
 		payableAmountBaseUnits: (baseAmount - discount).toString(),
 		effectiveStartsAt: effectiveBaseAt,
 		effectiveExpiresAt,
-		currentPlan: toPaymentQuoteCurrentPlan(input.currentPlan),
+		currentPlan: toPaymentQuoteCurrentPlan(primaryCurrentPlan),
 	};
 }
 
