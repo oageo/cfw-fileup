@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 import { users } from './users';
 
 export const buckets = sqliteTable('buckets', {
@@ -6,4 +6,6 @@ export const buckets = sqliteTable('buckets', {
 	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
 	name: text('name').notNull().unique(),
 	usedBytes: integer('used_bytes').notNull().default(0),
-});
+}, (table) => [
+	index('buckets_user_id_idx').on(table.userId),
+]);

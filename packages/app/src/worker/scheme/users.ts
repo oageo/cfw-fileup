@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 import { binaryBlob } from './binary-blob';
 
 export const users = sqliteTable('users', {
@@ -28,7 +28,10 @@ export const tokens = sqliteTable('tokens', {
 	token: binaryBlob('token').notNull().unique(),
 	isRevoked: integer('is_revoked', { mode: 'boolean' }).notNull().default(false),
 	reauthenticatedAt: integer('reauthenticated_at'),
-});
+}, (table) => [
+	index('tokens_user_id_id_idx').on(table.userId, table.id),
+	index('tokens_user_id_is_revoked_idx').on(table.userId, table.isRevoked),
+]);
 
 export const oauthStates = sqliteTable('oauth_states', {
 	id: text('id').primaryKey(),

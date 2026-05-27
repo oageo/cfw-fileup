@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { buckets } from './buckets';
 import { users } from './users';
 import { binaryBlob } from './binary-blob';
@@ -27,6 +27,7 @@ export const files = sqliteTable('files', {
 	partSize: integer('part_size').notNull().default(32 * 1024 * 1024),
 }, (table) => [
 	uniqueIndex('files_bucket_path_idx').on(table.bucketId, table.path),
+	index('files_user_id_id_idx').on(table.userId, table.id),
 ]);
 
 export const targzFiles = sqliteTable('targz_files', {
@@ -40,7 +41,9 @@ export const targzFiles = sqliteTable('targz_files', {
 	aEnd: integer('a_end').notNull(),
 	rStartOffset: integer('r_start_offset').notNull(),
 	rEndOffset: integer('r_end_offset').notNull(),
-});
+}, (table) => [
+	uniqueIndex('targz_files_file_id_path_idx').on(table.fileId, table.path),
+]);
 
 export const tarFiles = sqliteTable('tar_files', {
 	id: text('id').primaryKey(),
@@ -49,7 +52,9 @@ export const tarFiles = sqliteTable('tar_files', {
 	mimeType: text('mime_type').notNull(),
 	offset: integer('offset').notNull(),
 	size: integer('size').notNull(),
-});
+}, (table) => [
+	uniqueIndex('tar_files_file_id_path_idx').on(table.fileId, table.path),
+]);
 
 export const uploadParts = sqliteTable('upload_parts', {
 	id: text('id').primaryKey(),
