@@ -2,11 +2,20 @@ import { defineConfig } from 'vitest/config';
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 
 const noisyWorkerdWebSocketDisconnectLog = 'workerd/api/web-socket.c++:828: disconnected: WebSocket peer disconnected';
+const noisyWorkerdNetworkLogs = [
+	'connect(): Connection refused',
+	'Network connection lost.',
+];
 
 function installWorkerdLogFilter(stream: NodeJS.WriteStream): void {
 	const originalWrite = stream.write.bind(stream);
 	stream.write = ((chunk: Uint8Array | string, encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void) => {
 		const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
+		if (noisyWorkerdNetworkLogs.some(pattern => text.includes(pattern))) {
+			if (typeof encodingOrCallback === 'function') encodingOrCallback();
+			callback?.();
+			return true;
+		}
 		if (!text.includes(noisyWorkerdWebSocketDisconnectLog)) {
 			return originalWrite(chunk, encodingOrCallback as BufferEncoding, callback);
 		}
