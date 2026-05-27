@@ -14,6 +14,8 @@ type AppContext = Context<{ Bindings: Env }>;
 const activityJsonContentType = 'application/activity+json; charset=utf-8';
 const publicAddress = 'https://www.w3.org/ns/activitystreams#Public';
 const activityPubCacheMaxAgeSeconds = 5 * 60;
+const activityPubJsonCacheVariant = 'activity-json';
+const activityPubBrowserCacheVariant = 'browser';
 let activityPubCachePurgeListenersRegistered = false;
 
 function originFromRequest(request: Request): string {
@@ -21,7 +23,26 @@ function originFromRequest(request: Request): string {
 }
 
 function activityJson(c: AppContext, value: unknown): Response {
-	return c.json(value, 200, { 'Content-Type': activityJsonContentType });
+	return c.json(value, 200, {
+		'Content-Type': activityJsonContentType,
+		'Vary': 'Accept',
+	});
+}
+
+function redirectToFilePage(c: AppContext, url: string): Response {
+	const response = c.redirect(url, 302);
+	response.headers.set('Vary', 'Accept');
+	return response;
+}
+
+function acceptsActivityJson(request: Request): boolean {
+	const accept = request.headers.get('Accept')?.toLowerCase() ?? '';
+	return accept.includes('application/activity+json') || accept.includes('application/ld+json');
+}
+
+function activityPubCacheVariant(request: Request): string {
+	if (!new URL(request.url).pathname.startsWith('/a/files/')) return '';
+	return acceptsActivityJson(request) ? activityPubJsonCacheVariant : activityPubBrowserCacheVariant;
 }
 
 function basename(path: string): string {
@@ -32,19 +53,18 @@ function encodeFilePath(path: string): string {
 	return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
 }
 
+function fileViewUrl(origin: string, bucketName: string, filePath: string, entryPath?: string): string {
+	const encodedFilePath = encodeFilePath(filePath);
+	return entryPath !== undefined
+		? `${origin}/v/${encodeURIComponent(bucketName)}/${encodedFilePath}/${encodeURIComponent(':entries')}/${encodeURIComponent(entryPath)}`
+		: `${origin}/v/${encodeURIComponent(bucketName)}/${encodedFilePath}`;
+}
+
 function documentTypeForMime(mimeType: string | null): 'Audio' | 'Document' | 'Image' | 'Video' {
 	if (mimeType?.startsWith('image/')) return 'Image';
 	if (mimeType?.startsWith('video/')) return 'Video';
 	if (mimeType?.startsWith('audio/')) return 'Audio';
 	return 'Document';
-}
-
-function ActivityPubFileContent(props: { name: string }) {
-	return <p>{props.name}</p>;
-}
-
-function renderActivityPubContent(name: string): string {
-	return String(<ActivityPubFileContent name={name} />);
 }
 
 function bucketActor(origin: string, bucket: typeof buckets.$inferSelect, appName: string) {
@@ -87,9 +107,6 @@ function fileNote(options: {
 	const objectId = entry !== undefined
 		? `${options.origin}/a/files/${options.file.id}/${encodeURIComponent(':entries')}/${encodedEntryPath}`
 		: `${options.origin}/a/files/${options.file.id}`;
-	const viewUrl = entry !== undefined
-		? `${options.origin}/v/${encodeURIComponent(options.bucket.name)}/${encodedFilePath}/${encodeURIComponent(':entries')}/${encodedEntryPath}`
-		: `${options.origin}/v/${encodeURIComponent(options.bucket.name)}/${encodedFilePath}`;
 	const downloadUrl = entry !== undefined
 		? `${options.origin}/d/${options.file.id}/${encodeURIComponent(':entries')}/${encodedEntryPath}`
 		: `${options.origin}/d/${options.file.id}`;
@@ -105,9 +122,6 @@ function fileNote(options: {
 		to: [publicAddress],
 		cc: [`${actorId}/followers`],
 		published: parseEaidx(options.file.id).date.toISOString(),
-		name,
-		content: renderActivityPubContent(name),
-		url: viewUrl,
 		attachment: [{
 			type: documentTypeForMime(mimeType),
 			name,
@@ -141,9 +155,14 @@ function getActivityPubEntryCachePath(fileId: string, entryPath: string): string
 }
 
 function purgeActivityPubFileCache(env: Env, origin: string, file: FileReference): Promise<Array<PromiseSettledResult<boolean>>> {
+	const deleteFileCache = (path: string) => [
+		deleteResolveRouteCache(env, path, origin),
+		deleteResolveRouteCache(env, path, origin, activityPubJsonCacheVariant),
+		deleteResolveRouteCache(env, path, origin, activityPubBrowserCacheVariant),
+	];
 	return Promise.allSettled([
-		deleteResolveRouteCache(env, getActivityPubFileCachePath(file.id), origin),
-		...(file.entryPaths ?? []).map(entryPath => deleteResolveRouteCache(env, getActivityPubEntryCachePath(file.id, entryPath), origin)),
+		...deleteFileCache(getActivityPubFileCachePath(file.id)),
+		...(file.entryPaths ?? []).flatMap(entryPath => deleteFileCache(getActivityPubEntryCachePath(file.id, entryPath))),
 	]);
 }
 
@@ -189,7 +208,10 @@ function registerActivityPubCachePurgeListeners(): void {
 
 registerActivityPubCachePurgeListeners();
 
-app.use('/a/*', resolveRouteCache({ externalMaxAgeSeconds: activityPubCacheMaxAgeSeconds }));
+app.use('/a/*', resolveRouteCache({
+	externalMaxAgeSeconds: activityPubCacheMaxAgeSeconds,
+	cacheKeyVariant: activityPubCacheVariant,
+}));
 
 app.get('/a/buckets/:bucketId', async (c) => {
 	const db = getDb(c.env);
@@ -221,6 +243,9 @@ app.get('/a/files/:fileId/:entryMarker/:entryPath{.+}', async (c) => {
 	const db = getDb(c.env);
 	const { file, bucket } = await getPublicFile(db, c.req.param('fileId'));
 	const entryPath = c.req.param('entryPath');
+	if (!acceptsActivityJson(c.req.raw)) {
+		return redirectToFilePage(c, fileViewUrl(originFromRequest(c.req.raw), bucket.name, file.path, entryPath));
+	}
 	const entry = file.isTar
 		? await db.select().from(tarFiles).where(and(eq(tarFiles.fileId, file.id), eq(tarFiles.path, entryPath))).get()
 		: file.isTargz
@@ -238,6 +263,9 @@ app.get('/a/files/:fileId/:entryMarker/:entryPath{.+}', async (c) => {
 app.get('/a/files/:fileId', async (c) => {
 	const db = getDb(c.env);
 	const { file, bucket } = await getPublicFile(db, c.req.param('fileId'));
+	if (!acceptsActivityJson(c.req.raw)) {
+		return redirectToFilePage(c, fileViewUrl(originFromRequest(c.req.raw), bucket.name, file.path));
+	}
 	return activityJson(c, fileNote({ origin: originFromRequest(c.req.raw), bucket, file }));
 });
 

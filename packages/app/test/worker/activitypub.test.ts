@@ -48,6 +48,10 @@ function envWithAssets(): Env {
 	};
 }
 
+const activityJsonRequest = {
+	headers: { Accept: 'application/activity+json' },
+};
+
 describe('ActivityPub routes', () => {
 	test('serves a bucket actor', async () => {
 		const { bucketId } = await setupPublicFile();
@@ -77,19 +81,20 @@ describe('ActivityPub routes', () => {
 	test('serves a public file as Note with attachment', async () => {
 		const { bucketId, fileId } = await setupPublicFile();
 
-		const res = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const res = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(res.status).toBe(200);
 		const note = await res.json() as {
 			id: string;
 			type: string;
 			attributedTo: string;
-			url: string;
 			attachment: Array<{ type: string; name: string; url: string }>;
 		};
 		expect(note.id).toBe(`https://example.test/a/files/${fileId}`);
 		expect(note.type).toBe('Note');
 		expect(note.attributedTo).toBe(`https://example.test/a/buckets/${bucketId}`);
-		expect(note.url).toBe('https://example.test/v/ap_bucket/hello.txt');
+		expect(note).not.toHaveProperty('name');
+		expect(note).not.toHaveProperty('content');
+		expect(note).not.toHaveProperty('url');
 		expect(note.attachment[0]).toEqual(expect.objectContaining({
 			type: 'Document',
 			name: 'hello.txt',
@@ -97,10 +102,22 @@ describe('ActivityPub routes', () => {
 		}));
 	});
 
+	test('redirects browser requests for ActivityPub file notes to the file page', async () => {
+		const { fileId } = await setupPublicFile('dir/hello #1 & 2.txt');
+
+		const res = await app.request(`https://example.test/a/files/${fileId}`, {
+			headers: { Accept: 'text/html' },
+			redirect: 'manual',
+		}, env);
+		expect(res.status).toBe(302);
+		expect(res.headers.get('Vary')).toBe('Accept');
+		expect(res.headers.get('Location')).toBe('https://example.test/v/ap_bucket/dir/hello%20%231%20%26%202.txt');
+	});
+
 	test('does not serve an unlisted public file as Note', async () => {
 		const { fileId } = await setupPublicFile('hidden.txt', { isListed: false });
 
-		const res = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const res = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(res.status).toBe(404);
 	});
 
@@ -172,18 +189,42 @@ describe('ActivityPub routes', () => {
 	test('serves ActivityPub file notes from resolve route cache', async () => {
 		const { fileId } = await setupPublicFile('cached-note.txt');
 
-		const firstRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const firstRes = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(firstRes.status).toBe(200);
 		expect(firstRes.headers.get('X-Cache')).toBe('MISS');
 		expect(firstRes.headers.get('Cache-Control')).toBe('public, max-age=300');
 		await firstRes.text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
-		const secondRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const secondRes = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(secondRes.status).toBe(200);
 		expect(secondRes.headers.get('X-Cache')).toBe('HIT');
-		const note = await secondRes.json() as { url: string };
-		expect(note.url).toBe('https://example.test/v/ap_bucket/cached-note.txt');
+		const note = await secondRes.json() as Record<string, unknown>;
+		expect(note).not.toHaveProperty('url');
+	});
+
+	test('keeps ActivityPub JSON cache separate from browser redirects', async () => {
+		const { fileId } = await setupPublicFile('cache-variant.txt');
+		const noteUrl = `https://example.test/a/files/${fileId}`;
+
+		const firstJsonRes = await app.request(noteUrl, activityJsonRequest, env);
+		expect(firstJsonRes.status).toBe(200);
+		expect(firstJsonRes.headers.get('X-Cache')).toBe('MISS');
+		await firstJsonRes.text();
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const browserRes = await app.request(noteUrl, {
+			headers: { Accept: 'text/html' },
+			redirect: 'manual',
+		}, env);
+		expect(browserRes.status).toBe(302);
+		expect(browserRes.headers.get('X-Cache')).toBeNull();
+		expect(browserRes.headers.get('Vary')).toBe('Accept');
+		expect(browserRes.headers.get('Location')).toBe('https://example.test/v/ap_bucket/cache-variant.txt');
+
+		const secondJsonRes = await app.request(noteUrl, activityJsonRequest, env);
+		expect(secondJsonRes.status).toBe(200);
+		expect(secondJsonRes.headers.get('X-Cache')).toBe('HIT');
 	});
 
 	test('purges /v and /a file resolve caches when a file is deleted', async () => {
@@ -192,7 +233,7 @@ describe('ActivityPub routes', () => {
 		const viewRes = await app.request('https://example.test/v/ap_bucket/delete-cached.txt', {}, envWithAssets());
 		expect(viewRes.headers.get('X-Cache')).toBe('MISS');
 		await viewRes.text();
-		const noteRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const noteRes = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(noteRes.headers.get('X-Cache')).toBe('MISS');
 		await noteRes.text();
 		await new Promise(resolve => setTimeout(resolve, 0));
@@ -211,7 +252,7 @@ describe('ActivityPub routes', () => {
 		expect(afterDeleteViewRes.headers.get('Link')).toBeNull();
 		expect(await afterDeleteViewRes.text()).not.toContain(`/a/files/${fileId}`);
 
-		const afterDeleteNoteRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const afterDeleteNoteRes = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(afterDeleteNoteRes.status).toBe(404);
 	});
 
@@ -219,7 +260,7 @@ describe('ActivityPub routes', () => {
 		const { token, bucketId, fileId } = await setupPublicFile('unlist-cached.txt');
 
 		await (await app.request('https://example.test/v/ap_bucket/unlist-cached.txt', {}, envWithAssets())).text();
-		await (await app.request(`https://example.test/a/files/${fileId}`, {}, env)).text();
+		await (await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env)).text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
 		const updateRes = await app.request('https://example.test/api/files/update-listing', {
@@ -235,7 +276,7 @@ describe('ActivityPub routes', () => {
 		expect(viewRes.headers.get('Link')).toBeNull();
 		expect(await viewRes.text()).not.toContain(`/a/files/${fileId}`);
 
-		const noteRes = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
+		const noteRes = await app.request(`https://example.test/a/files/${fileId}`, activityJsonRequest, env);
 		expect(noteRes.status).toBe(404);
 	});
 
@@ -244,7 +285,7 @@ describe('ActivityPub routes', () => {
 		const viewUrl = 'https://example.test/v/ap_bucket/unlist-query-cached.txt';
 
 		await (await app.request(`${viewUrl}?preview=1`, {}, envWithAssets())).text();
-		await (await app.request(`https://example.test/a/files/${fileId}?preview=1`, {}, env)).text();
+		await (await app.request(`https://example.test/a/files/${fileId}?preview=1`, activityJsonRequest, env)).text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
 		const updateRes = await app.request('https://example.test/api/files/update-listing', {
@@ -260,7 +301,7 @@ describe('ActivityPub routes', () => {
 		expect(viewRes.headers.get('Link')).toBeNull();
 		expect(await viewRes.text()).not.toContain(`/a/files/${fileId}`);
 
-		const noteRes = await app.request(`https://example.test/a/files/${fileId}?preview=2`, {}, env);
+		const noteRes = await app.request(`https://example.test/a/files/${fileId}?preview=2`, activityJsonRequest, env);
 		expect(noteRes.status).toBe(404);
 	});
 
@@ -331,20 +372,22 @@ describe('ActivityPub routes', () => {
 		const { fileId: privateFileId } = await setupPublicFile('private.txt', { visibility: 'private', isListed: true });
 		const { fileId: passphraseFileId } = await setupPublicFile('passphrase.txt', { visibility: 'passphrase', isListed: true, passphrase: 'secret' });
 
-		const privateRes = await app.request(`https://example.test/a/files/${privateFileId}`, {}, env);
+		const privateRes = await app.request(`https://example.test/a/files/${privateFileId}`, activityJsonRequest, env);
 		expect(privateRes.status).toBe(404);
-		const passphraseRes = await app.request(`https://example.test/a/files/${passphraseFileId}`, {}, env);
+		const passphraseRes = await app.request(`https://example.test/a/files/${passphraseFileId}`, activityJsonRequest, env);
 		expect(passphraseRes.status).toBe(404);
 	});
 
-	test('encodes file paths in public Note URLs', async () => {
+	test('encodes file paths in public note browser redirects', async () => {
 		const { fileId } = await setupPublicFile('dir/hello #1 & 2.txt');
 
-		const res = await app.request(`https://example.test/a/files/${fileId}`, {}, env);
-		expect(res.status).toBe(200);
-		const note = await res.json() as { content: string; url: string };
-		expect(note.url).toBe('https://example.test/v/ap_bucket/dir/hello%20%231%20%26%202.txt');
-		expect(note.content).toBe('<p>hello #1 &amp; 2.txt</p>');
+		const res = await app.request(`https://example.test/a/files/${fileId}`, {
+			headers: { Accept: 'text/html' },
+			redirect: 'manual',
+		}, env);
+		expect(res.status).toBe(302);
+		expect(res.headers.get('Vary')).toBe('Accept');
+		expect(res.headers.get('Location')).toBe('https://example.test/v/ap_bucket/dir/hello%20%231%20%26%202.txt');
 	});
 
 	test('serves a public tar entry as its own Note', async () => {
@@ -360,15 +403,39 @@ describe('ActivityPub routes', () => {
 		}, env);
 
 		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
-		const res = await app.request(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`, {}, env);
+		const res = await app.request(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`, activityJsonRequest, env);
 		expect(res.status).toBe(200);
-		const note = await res.json() as { id: string; url: string; attachment: Array<{ name: string; url: string }> };
+		const note = await res.json() as { id: string; attachment: Array<{ name: string; url: string }> };
 		expect(note.id).toBe(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`);
-		expect(note.url).toBe(`https://example.test/v/ap_bucket/archive.tar/%3Aentries/${encodedEntryPath}`);
+		expect(note).not.toHaveProperty('name');
+		expect(note).not.toHaveProperty('content');
+		expect(note).not.toHaveProperty('url');
 		expect(note.attachment[0]).toEqual(expect.objectContaining({
 			name: 'entry.txt',
 			url: `https://example.test/d/${fileId}/%3Aentries/${encodedEntryPath}`,
 		}));
+	});
+
+	test('redirects browser requests for ActivityPub archive entry notes to the entry page', async () => {
+		const { token, fileId } = await setupPublicFile('archive.tar');
+
+		await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'dir/entry.txt', mimeType: 'text/plain', offset: 0, size: 5 }],
+			}),
+		}, env);
+
+		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
+		const res = await app.request(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`, {
+			headers: { Accept: 'text/html' },
+			redirect: 'manual',
+		}, env);
+		expect(res.status).toBe(302);
+		expect(res.headers.get('Vary')).toBe('Accept');
+		expect(res.headers.get('Location')).toBe(`https://example.test/v/ap_bucket/archive.tar/%3Aentries/${encodedEntryPath}`);
 	});
 
 	test('adds ActivityPub alternate tags to public archive entry pages', async () => {
@@ -407,7 +474,7 @@ describe('ActivityPub routes', () => {
 		const viewUrl = `https://example.test/v/ap_bucket/delete-archive.tar/%3Aentries/${encodedEntryPath}`;
 		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
 		await (await app.request(viewUrl, {}, envWithAssets())).text();
-		await (await app.request(noteUrl, {}, env)).text();
+		await (await app.request(noteUrl, activityJsonRequest, env)).text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
 		const deleteRes = await app.request('https://example.test/api/files/delete', {
@@ -423,7 +490,7 @@ describe('ActivityPub routes', () => {
 		expect(viewRes.headers.get('Link')).toBeNull();
 		await viewRes.text();
 
-		const noteRes = await app.request(noteUrl, {}, env);
+		const noteRes = await app.request(noteUrl, activityJsonRequest, env);
 		expect(noteRes.status).toBe(404);
 	});
 
@@ -443,7 +510,7 @@ describe('ActivityPub routes', () => {
 		const viewUrl = `https://example.test/v/ap_bucket/dir/delete-archive.tar/%3Aentries/${encodedEntryPath}`;
 		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
 		await (await app.request(viewUrl, {}, envWithAssets())).text();
-		await (await app.request(noteUrl, {}, env)).text();
+		await (await app.request(noteUrl, activityJsonRequest, env)).text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
 		const deleteRes = await app.request('https://example.test/api/directories/delete', {
@@ -459,7 +526,7 @@ describe('ActivityPub routes', () => {
 		expect(viewRes.headers.get('Link')).toBeNull();
 		await viewRes.text();
 
-		const noteRes = await app.request(noteUrl, {}, env);
+		const noteRes = await app.request(noteUrl, activityJsonRequest, env);
 		expect(noteRes.status).toBe(404);
 	});
 
@@ -479,7 +546,7 @@ describe('ActivityPub routes', () => {
 		const viewUrl = `https://example.test/v/ap_bucket/bucket-delete-archive.tar/%3Aentries/${encodedEntryPath}`;
 		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
 		await (await app.request(viewUrl, {}, envWithAssets())).text();
-		await (await app.request(noteUrl, {}, env)).text();
+		await (await app.request(noteUrl, activityJsonRequest, env)).text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
 		const deleteRes = await app.request('https://example.test/api/buckets/delete', {
@@ -495,7 +562,7 @@ describe('ActivityPub routes', () => {
 		expect(viewRes.headers.get('Link')).toBeNull();
 		await viewRes.text();
 
-		const noteRes = await app.request(noteUrl, {}, env);
+		const noteRes = await app.request(noteUrl, activityJsonRequest, env);
 		expect(noteRes.status).toBe(404);
 	});
 
@@ -516,7 +583,7 @@ describe('ActivityPub routes', () => {
 		const viewUrl = `https://example.test/v/ap_bucket/admin-delete-archive.tar/%3Aentries/${encodedEntryPath}`;
 		const noteUrl = `https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`;
 		await (await app.request(viewUrl, {}, envWithAssets())).text();
-		await (await app.request(noteUrl, {}, env)).text();
+		await (await app.request(noteUrl, activityJsonRequest, env)).text();
 		await new Promise(resolve => setTimeout(resolve, 0));
 
 		const deleteRes = await app.request('https://example.test/api/admin/delete-file', {
@@ -532,7 +599,7 @@ describe('ActivityPub routes', () => {
 		expect(viewRes.headers.get('Link')).toBeNull();
 		await viewRes.text();
 
-		const noteRes = await app.request(noteUrl, {}, env);
+		const noteRes = await app.request(noteUrl, activityJsonRequest, env);
 		expect(noteRes.status).toBe(404);
 	});
 
@@ -549,7 +616,7 @@ describe('ActivityPub routes', () => {
 		}, env);
 
 		const encodedEntryPath = encodeURIComponent('dir/entry.txt');
-		const res = await app.request(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`, {}, env);
+		const res = await app.request(`https://example.test/a/files/${fileId}/%3Aentries/${encodedEntryPath}`, activityJsonRequest, env);
 		expect(res.status).toBe(404);
 	});
 });

@@ -8,14 +8,16 @@ const internalStatusTextHeader = 'X-Cfw-Fileup-Cache-Status-Text';
 
 type ResolveRouteCacheOptions = {
 	externalMaxAgeSeconds?: number;
+	cacheKeyVariant?: (request: Request) => string;
 };
 
-export function createResolveRouteCacheRequest(input: Request | URL | string): Request {
+export function createResolveRouteCacheRequest(input: Request | URL | string, variant?: string): Request {
 	const sourceUrl = input instanceof Request ? new URL(input.url) : new URL(input);
 	const keyUrl = new URL('https://cache.cfw-fileup.local/resolve-route');
 	keyUrl.searchParams.set('v', '1');
 	keyUrl.searchParams.set('origin', sourceUrl.origin);
 	keyUrl.searchParams.set('path', sourceUrl.pathname);
+	if (variant !== undefined && variant !== '') keyUrl.searchParams.set('variant', variant);
 	return new Request(keyUrl, { method: 'GET' });
 }
 
@@ -44,8 +46,8 @@ function stripInternalHeaders(response: Response): Response {
 	});
 }
 
-async function matchResolveRouteCache(env: Env, request: Request): Promise<Response | null> {
-	const cacheRequest = createResolveRouteCacheRequest(request);
+async function matchResolveRouteCache(env: Env, request: Request, variant?: string): Promise<Response | null> {
+	const cacheRequest = createResolveRouteCacheRequest(request, variant);
 	const cache = await openWorkerCache(env, workerCacheBaseNames.resolveRoute);
 	const cached = await cache.match(cacheRequest);
 	if (cached === undefined) return null;
@@ -63,8 +65,9 @@ function putResolveRouteCache(
 	request: Request,
 	response: Response,
 	waitUntil: (promise: Promise<void>) => void,
+	variant?: string,
 ): void {
-	const cacheRequest = createResolveRouteCacheRequest(request);
+	const cacheRequest = createResolveRouteCacheRequest(request, variant);
 	const cacheResponse = response.clone();
 	const putPromise = (async () => {
 		const cache = await openWorkerCache(env, workerCacheBaseNames.resolveRoute);
@@ -95,7 +98,8 @@ export function resolveRouteCache(options: ResolveRouteCacheOptions = {}) {
 			return;
 		}
 
-		const cached = await matchResolveRouteCache(c.env, c.req.raw);
+		const cacheKeyVariant = options.cacheKeyVariant?.(c.req.raw);
+		const cached = await matchResolveRouteCache(c.env, c.req.raw, cacheKeyVariant);
 		if (cached !== null) {
 			const headers = new Headers(cached.headers);
 			headers.set('X-Cache', 'HIT');
@@ -124,11 +128,11 @@ export function resolveRouteCache(options: ResolveRouteCacheOptions = {}) {
 			headers,
 		});
 
-		putResolveRouteCache(c.env, c.req.raw, c.res, (promise) => c.executionCtx.waitUntil(promise));
+		putResolveRouteCache(c.env, c.req.raw, c.res, (promise) => c.executionCtx.waitUntil(promise), cacheKeyVariant);
 	});
 }
 
-export async function deleteResolveRouteCache(env: Env, path: string, origin = 'https://cache.cfw-fileup.local'): Promise<boolean> {
+export async function deleteResolveRouteCache(env: Env, path: string, origin = 'https://cache.cfw-fileup.local', variant?: string): Promise<boolean> {
 	const cache = await openWorkerCache(env, workerCacheBaseNames.resolveRoute);
-	return cache.delete(createResolveRouteCacheRequest(new URL(path, origin)));
+	return cache.delete(createResolveRouteCacheRequest(new URL(path, origin), variant));
 }
