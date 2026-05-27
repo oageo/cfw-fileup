@@ -8,6 +8,14 @@ export interface UploadWorkerFileEntry {
 	file: File;
 }
 
+export interface UploadImageCompressionOptions {
+	enabled: boolean;
+	quality: number;
+	maxWidth: number;
+	maxHeight: number;
+	mimeType: 'image/jpeg' | 'image/webp';
+}
+
 export interface UploadJobRequest {
 	bucketId: string;
 	bucketName: string;
@@ -19,6 +27,7 @@ export interface UploadJobRequest {
 	passphrase?: string;
 	isDownloadCountEnabled?: boolean;
 	isDownloadCountVisible?: boolean;
+	imageCompression?: UploadImageCompressionOptions;
 	files: UploadWorkerFileEntry[];
 	totalBytes: number;
 	authToken: string | null;

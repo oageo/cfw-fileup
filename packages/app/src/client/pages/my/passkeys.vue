@@ -165,125 +165,127 @@ onMounted(async () => {
       パスキー（FIDO2 / WebAuthn）を登録すると、パスワード不要でサインインできます。
     </p>
 
-    <!-- Backup codes section -->
-    <div :class="['card', $style.backupCard, shouldWarnBackupCodes && $style.backupCardWarning]">
-      <h3 :class="['card-title', $style.backupTitle]">バックアップコード</h3>
-      <p :class="$style.backupDescription">
-        パスキーが使えない場合、安全のためバックアップコードを入力する必要があります。<br>
-        新しいコードを生成すると、古いコードはすべて無効になります。
-      </p>
-      <div v-if="backupCodeStatus" :class="$style.backupStatus">
-        <span v-if="backupCodeStatus.count === 0" :class="$style.mutedText">
-          バックアップコードが生成されていません
-        </span>
-        <span v-else>
-          残り <strong>{{ backupCodeStatus.remaining }}</strong> / {{ backupCodeStatus.count }} コード
-        </span>
-      </div>
-      <div v-if="passkeys.length === 0" :class="$style.mutedText">
-        バックアップコードを生成するには、先にパスキーを登録してください。
-      </div>
-      <div v-else-if="backupCodes.length === 0">
-        <Button.Root
-          :class="shouldWarnBackupCodes ? ['btn', 'btn-danger', $style.backupNeedsBtn] : ['btn', 'btn-secondary']"
-          :loading="generatingCodes"
-          @click="backupCodeStatus && backupCodeStatus.count > 0 ? showGenerateConfirm = true : generateBackupCodes()"
-        >
-          <Button.Loading>生成中...</Button.Loading>
-          <Button.Content>バックアップコードを生成</Button.Content>
-        </Button.Root>
-      </div>
-      <div v-if="shouldWarnBackupCodes" class="alert alert-warning">
-        パスキーをなくしたときにログインできなくなる可能性があります。バックアップコードを生成して安全な場所に保管してください。
-      </div>
-
-      <div v-if="backupCodeError" :class="['alert', 'alert-error', $style.inlineAlert]">
-        {{ backupCodeError }}
-      </div>
-
-      <div v-if="backupCodes.length > 0" :class="$style.backupCodesSection">
-        <p :class="$style.backupCodesWarning">
-          ⚠️ このコードは今後表示されません。必ず安全な場所に保存してください。
+    <div :class="$style.cardStack">
+      <!-- Backup codes section -->
+      <div :class="['card', $style.backupCard, shouldWarnBackupCodes && $style.backupCardWarning]">
+        <h3 :class="['card-title', $style.backupTitle]">バックアップコード</h3>
+        <p :class="$style.backupDescription">
+          パスキーが使えない場合、安全のためバックアップコードを入力する必要があります。<br>
+          新しいコードを生成すると、古いコードはすべて無効になります。
         </p>
-        <div :class="$style.backupCodesGrid">
-          <div
-            v-for="code in backupCodes"
-            :key="code"
-            :class="$style.backupCode"
+        <div v-if="backupCodeStatus" :class="$style.backupStatus">
+          <span v-if="backupCodeStatus.count === 0" :class="$style.mutedText">
+            バックアップコードが生成されていません
+          </span>
+          <span v-else>
+            残り <strong>{{ backupCodeStatus.remaining }}</strong> / {{ backupCodeStatus.count }} コード
+          </span>
+        </div>
+        <div v-if="passkeys.length === 0" :class="$style.mutedText">
+          バックアップコードを生成するには、先にパスキーを登録してください。
+        </div>
+        <div v-else-if="backupCodes.length === 0">
+          <Button.Root
+            :class="shouldWarnBackupCodes ? ['btn', 'btn-danger', $style.backupNeedsBtn] : ['btn', 'btn-secondary']"
+            :loading="generatingCodes"
+            @click="backupCodeStatus && backupCodeStatus.count > 0 ? showGenerateConfirm = true : generateBackupCodes()"
           >
-            {{ formatBackupCode(code) }}
+            <Button.Loading>生成中...</Button.Loading>
+            <Button.Content>バックアップコードを生成</Button.Content>
+          </Button.Root>
+        </div>
+        <div v-if="shouldWarnBackupCodes" class="alert alert-warning">
+          パスキーをなくしたときにログインできなくなる可能性があります。バックアップコードを生成して安全な場所に保管してください。
+        </div>
+
+        <div v-if="backupCodeError" :class="['alert', 'alert-error', $style.inlineAlert]">
+          {{ backupCodeError }}
+        </div>
+
+        <div v-if="backupCodes.length > 0" :class="$style.backupCodesSection">
+          <p :class="$style.backupCodesWarning">
+            ⚠️ このコードは今後表示されません。必ず安全な場所に保存してください。
+          </p>
+          <div :class="$style.backupCodesGrid">
+            <div
+              v-for="code in backupCodes"
+              :key="code"
+              :class="$style.backupCode"
+            >
+              {{ formatBackupCode(code) }}
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Register section -->
-    <div :class="['card', $style.registerCard]">
-      <h3 :class="['card-title', $style.sectionTitle]">新しいパスキーを登録</h3>
-      <Form @submit="registerPasskey">
-        <div :class="['form-group', $style.formGroup]">
-          <label class="form-label" for="passkey-name">パスキー名（任意）</label>
-          <input
-            id="passkey-name"
-            v-model="newPasskeyName"
-            class="form-input"
-            type="text"
-            placeholder="例: iPhoneのFace ID"
-            maxlength="64"
-          >
-          <div class="form-hint">このデバイスや認証器を識別するための名前</div>
+      <!-- Register section -->
+      <div :class="['card', $style.registerCard]">
+        <h3 :class="['card-title', $style.sectionTitle]">新しいパスキーを登録</h3>
+        <Form @submit="registerPasskey">
+          <div :class="['form-group', $style.formGroup]">
+            <label class="form-label" for="passkey-name">パスキー名（任意）</label>
+            <input
+              id="passkey-name"
+              v-model="newPasskeyName"
+              class="form-input"
+              type="text"
+              placeholder="例: iPhoneのFace ID"
+              maxlength="64"
+            >
+            <div class="form-hint">このデバイスや認証器を識別するための名前</div>
+          </div>
+          <div :class="$style.registerActions">
+            <Button.Root
+              class="btn btn-primary"
+              type="submit"
+              :loading="registering"
+            >
+              <Button.Loading>登録中...</Button.Loading>
+              <Button.Content>登録</Button.Content>
+            </Button.Root>
+          </div>
+        </Form>
+        <div v-if="registerSuccess" :class="['alert', 'alert-success', $style.inlineAlert]">
+          {{ registerSuccess }}
         </div>
-        <div :class="$style.registerActions">
-          <Button.Root
-            class="btn btn-primary"
-            type="submit"
-            :loading="registering"
-          >
-            <Button.Loading>登録中...</Button.Loading>
-            <Button.Content>登録</Button.Content>
-          </Button.Root>
+        <div v-if="registerError" :class="['alert', 'alert-error', $style.inlineAlert]">
+          {{ registerError }}
         </div>
-      </Form>
-      <div v-if="registerSuccess" :class="['alert', 'alert-success', $style.inlineAlert]">
-        {{ registerSuccess }}
       </div>
-      <div v-if="registerError" :class="['alert', 'alert-error', $style.inlineAlert]">
-        {{ registerError }}
-      </div>
-    </div>
 
-    <!-- Passkey list -->
-    <div :class="['card', $style.passkeyCard]">
-      <h3 :class="['card-title', $style.sectionTitle]">登録済みパスキー</h3>
-      <div v-if="loading" :class="$style.mutedText">読み込み中...</div>
-      <div v-else-if="error" class="alert alert-error">{{ error }}</div>
-      <div v-else-if="passkeys.length === 0" :class="$style.emptyText">
-        登録済みのパスキーはありません。
-      </div>
-      <div v-else class="table-responsive">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>名前</th>
-              <th>登録日時</th>
-              <th class="col-actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="pk in passkeys" :key="pk.id">
-              <td :class="$style.passkeyName">{{ pk.name ?? '（名前なし）' }}</td>
-              <td class="col-muted">{{ formatDate(pk.createdAt) }}</td>
-              <td class="col-actions">
-                <Button.Root
-                  :class="['btn', 'btn-ghost', $style.deleteButton]"
-                  @click="deletePasskey(pk.id)"
-                >
-                  <Button.Content>削除</Button.Content>
-                </Button.Root>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- Passkey list -->
+      <div :class="['card', $style.passkeyCard]">
+        <h3 :class="['card-title', $style.sectionTitle]">登録済みパスキー</h3>
+        <div v-if="loading" :class="$style.mutedText">読み込み中...</div>
+        <div v-else-if="error" class="alert alert-error">{{ error }}</div>
+        <div v-else-if="passkeys.length === 0" :class="$style.emptyText">
+          登録済みのパスキーはありません。
+        </div>
+        <div v-else class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>名前</th>
+                <th>登録日時</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="pk in passkeys" :key="pk.id">
+                <td :class="$style.passkeyName">{{ pk.name ?? '（名前なし）' }}</td>
+                <td class="col-muted">{{ formatDate(pk.createdAt) }}</td>
+                <td class="col-actions">
+                  <Button.Root
+                    :class="['btn', 'btn-ghost', $style.deleteButton]"
+                    @click="deletePasskey(pk.id)"
+                  >
+                    <Button.Content>削除</Button.Content>
+                  </Button.Root>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -313,6 +315,11 @@ onMounted(async () => {
   margin-bottom: 24px;
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+
+.cardStack {
+  display: grid;
+  gap: 16px;
 }
 
 .registerCard {
@@ -360,7 +367,6 @@ onMounted(async () => {
 
 .backupCard {
   padding: 16px;
-  margin-top: 32px;
 }
 
 .backupCardWarning {

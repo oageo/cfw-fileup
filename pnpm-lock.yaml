@@ -27,6 +27,9 @@ importers:
       '@lucide/vue':
         specifier: ^1.16.0
         version: 1.16.0(vue@3.5.34(typescript@6.0.3))
+      '@misskey-dev/browser-image-resizer':
+        specifier: ^2024.1.0
+        version: 2024.1.0
       '@pdfme/common':
         specifier: ^6.1.2
         version: 6.1.2
@@ -1648,6 +1651,9 @@ packages:
 
   '@marijn/find-cluster-break@1.0.2':
     resolution: {integrity: sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g==}
+
+  '@misskey-dev/browser-image-resizer@2024.1.0':
+    resolution: {integrity: sha512-4EnO0zLW5NDtng3Gaz5MuT761uiuoOuplwX18wBqgj8w56LTU5BjLn/vbHwDIIe0j2gwqDYhMb7bDjmr1/Fomg==}
 
   '@misskey-dev/eslint-plugin@2.2.0':
     resolution: {integrity: sha512-NlDtaFRaO2r4KRnacTiYK2Ax/z95ZvhszQ3gfZ7VWWQzPvgoQHSEBT6q94i1/HPzWrcR+l+76c3Y3T1V/yVPeg==}
@@ -7397,6 +7403,8 @@ snapshots:
       vue: 3.5.34(typescript@6.0.3)
 
   '@marijn/find-cluster-break@1.0.2': {}
+
+  '@misskey-dev/browser-image-resizer@2024.1.0': {}
 
   '@misskey-dev/eslint-plugin@2.2.0(@eslint/compat@2.1.0(eslint@9.39.4))(@eslint/js@9.39.4)(@stylistic/eslint-plugin@5.10.0(eslint@9.39.4))(@typescript-eslint/eslint-plugin@8.59.3(@typescript-eslint/parser@8.59.3(eslint@9.39.4)(typescript@6.0.3))(eslint@9.39.4)(typescript@6.0.3))(@typescript-eslint/parser@8.59.3(eslint@9.39.4)(typescript@6.0.3))(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.59.3(eslint@9.39.4)(typescript@6.0.3))(eslint@9.39.4))(eslint@9.39.4)(globals@17.6.0)':
     dependencies:

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Archive, Cloud, Download, EyeOff, ShieldCheck, Upload } from '@lucide/vue';
+import { Archive, Cloud, Download, EyeOff, Image, ShieldCheck, Upload } from '@lucide/vue';
 import NirA from '@/components/NirA.vue';
 import { authStore } from '@/store/auth';
 import { appName } from '@/store/app-meta';
@@ -10,6 +10,12 @@ import { formatBytes } from '@/utils/byte-size';
 type PublicPlan = ApiSuccess<'/api/billing/list-public-plans'>['data'][number];
 type PublicPlanPrice = PublicPlan['prices'][number];
 type PublicPlanPriceDeployment = PublicPlanPrice['deployments'][number];
+type FeatureItem = {
+	title: string;
+	description: string;
+	icon: typeof Cloud;
+	to?: string;
+};
 type CurrencyOption = {
 	assetId: string;
 	symbol: string;
@@ -21,7 +27,7 @@ const selectedCurrencyAssetId = ref('');
 const loadingPlans = ref(true);
 const error = ref('');
 
-const featureItems = [
+const featureItems: FeatureItem[] = [
 	{
 		title: 'Workers + R2で軽く配信',
 		description: 'Cloudflare Workers と R2 を使い、アップロードしたファイルをそのまま公開・共有できます。',
@@ -36,6 +42,12 @@ const featureItems = [
 		title: 'ダウンロードと公開範囲を管理',
 		description: 'アクセストークン、広告表示、ダウンロード数など、公開後の運用に必要な制御を備えています。',
 		icon: ShieldCheck,
+	},
+	{
+		title: '画像をローカルで圧縮',
+		description: 'ブラウザ内で画像をJPEGへ圧縮し、アップロード前に保存できます。',
+		icon: Image,
+		to: '/tools/media-compress',
 	},
 ];
 
@@ -189,6 +201,7 @@ onMounted(loadPlans);
           <component :is="feature.icon" :size="22" :stroke-width="2" :class="$style.featureIcon" />
           <h3>{{ feature.title }}</h3>
           <p>{{ feature.description }}</p>
+          <NirA v-if="feature.to" :to="feature.to" class="btn btn-secondary" :class="$style.featureAction">開く</NirA>
         </article>
       </div>
     </section>
@@ -533,6 +546,8 @@ onMounted(loadPlans);
 }
 
 .featureCard {
+  display: flex;
+  flex-direction: column;
   max-width: none;
 }
 
@@ -547,8 +562,13 @@ onMounted(loadPlans);
 }
 
 .featureCard p {
-  margin-bottom: 0;
+  margin-bottom: 14px;
   color: var(--color-text-muted);
+}
+
+.featureAction {
+  margin-top: auto;
+  align-self: flex-start;
 }
 
 .planCard {

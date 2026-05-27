@@ -20,6 +20,7 @@ import { takeShareTargetPayload } from '../../shared/share-target-store';
 import { readBlobTextPreview } from '@/utils/text-preview';
 import { formatBytes } from '@/utils/byte-size';
 import type { ZipExtractWorkerMessage } from '@/workers/zip-extract.worker';
+import type { UploadWorkerFileEntry } from '@/workers/upload-worker-types';
 
 type ArchiveMode = 'individual' | 'gz' | 'tar' | 'targz';
 
@@ -47,6 +48,13 @@ const selectedTree = ref<UploadTree | null>(null);
 const selectedEntry = ref<UploadEntry | null>(null);
 const uploadPrefix = ref('');
 const archiveMode = ref<ArchiveMode>('individual');
+const compressImagesOnUpload = ref(false);
+const imageCompressionDialogOpen = ref(false);
+const imageCompressionMimeType = ref<'image/webp' | 'image/jpeg'>('image/webp');
+const canEncodeWebp = ref(true);
+const imageCompressionQuality = ref(0.7);
+const imageCompressionMaxWidth = ref(1920);
+const imageCompressionMaxHeight = ref(1920);
 const libraryName = ref('');
 const visibility = ref<FileVisibility>('public');
 const isListed = ref(true);
@@ -97,14 +105,39 @@ interface ZipExtractDoneResult {
 	needsPassword: boolean;
 }
 
-function getUploadPaths(): string[] {
-	if (!selectedTree.value) return [];
+async function detectWebpEncodingSupport(): Promise<boolean> {
+	if (typeof OffscreenCanvas !== 'undefined') {
+		const canvas = new OffscreenCanvas(1, 1);
+		const blob = await canvas.convertToBlob({ type: 'image/webp' }).catch(() => null);
+		if (blob?.type === 'image/webp') return true;
+	}
+	const canvas = document.createElement('canvas');
+	canvas.width = 1;
+	canvas.height = 1;
+	const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp'));
+	return blob?.type === 'image/webp';
+}
+
+function shouldCompressImagePath(entry: UploadWorkerFileEntry): boolean {
+	return compressImagesOnUpload.value && archiveMode.value === 'individual' && entry.file.type.startsWith('image/');
+}
+
+function compressedImageUploadPath(path: string): string {
+	const extension = imageCompressionMimeType.value === 'image/webp' ? '.webp' : '.jpg';
+	const dot = path.lastIndexOf('.');
+	const slash = path.lastIndexOf('/');
+	if (dot > slash) return `${path.slice(0, dot)}${extension}`;
+	return `${path}${extension}`;
+}
+
+function getUploadPaths(entries: readonly UploadWorkerFileEntry[] | null = selectedTree.value?.entries ?? null): string[] {
+	if (!entries) return [];
 	if (archiveMode.value === 'tar') return [`${uploadPrefix.value}${archiveUploadBaseName.value}.tar`];
 	if (archiveMode.value === 'targz') return [`${uploadPrefix.value}${archiveUploadBaseName.value}.tar.gz`];
-	return selectedTree.value.entries.map(entry =>
+	return entries.map(entry =>
 		archiveMode.value === 'gz'
 			? `${uploadPrefix.value}${entry.path}.gz`
-			: `${uploadPrefix.value}${entry.path}`,
+			: `${uploadPrefix.value}${shouldCompressImagePath(entry) ? compressedImageUploadPath(entry.path) : entry.path}`,
 	);
 }
 
@@ -119,9 +152,21 @@ function validateUploadPaths(paths: string[]): boolean {
 		return false;
 	}
 	const tooLongPath = paths.find(path => path.length > MAX_FILE_PATH_LENGTH);
-	if (!tooLongPath) return true;
-	uploadError.value = `パスは${MAX_FILE_PATH_LENGTH}文字以内で入力してください: ${tooLongPath}`;
-	return false;
+	if (tooLongPath) {
+		uploadError.value = `パスは${MAX_FILE_PATH_LENGTH}文字以内で入力してください: ${tooLongPath}`;
+		return false;
+	}
+	const seen = new Set<string>();
+	const duplicatePath = paths.find(path => {
+		if (seen.has(path)) return true;
+		seen.add(path);
+		return false;
+	});
+	if (duplicatePath) {
+		uploadError.value = `同じアップロード先になるファイルがあります: ${duplicatePath}`;
+		return false;
+	}
+	return true;
 }
 
 const hasSelection = computed(() => selectedTree.value != null && selectedTree.value.entries.length > 0);
@@ -1187,7 +1232,7 @@ async function executeUpload(): Promise<void> {
 	}
 
 	// Pre-upload existence check
-	const paths = getUploadPaths();
+	const paths = getUploadPaths(files);
 	if (!validateUploadPaths(paths)) return;
 	if (paths.length > 0) {
 		const conflicts: string[] = [];
@@ -1242,6 +1287,13 @@ async function executeUpload(): Promise<void> {
 		passphrase: passphrase.value || undefined,
 		isDownloadCountEnabled: isDownloadCountEnabled.value,
 		isDownloadCountVisible: isDownloadCountEnabled.value ? isDownloadCountVisible.value : false,
+		imageCompression: {
+			enabled: compressImagesOnUpload.value && archiveMode.value === 'individual',
+			quality: imageCompressionQuality.value,
+			maxWidth: imageCompressionMaxWidth.value,
+			maxHeight: imageCompressionMaxHeight.value,
+			mimeType: imageCompressionMimeType.value,
+		},
 		files,
 		totalBytes: tree.totalSize,
 		authToken: authStore.token,
@@ -1250,6 +1302,10 @@ async function executeUpload(): Promise<void> {
 }
 
 onMounted(async () => {
+	canEncodeWebp.value = await detectWebpEncodingSupport();
+	if (!canEncodeWebp.value && imageCompressionMimeType.value === 'image/webp') {
+		imageCompressionMimeType.value = 'image/jpeg';
+	}
 	await loadBucket();
 	const pending = takePendingUpload();
 	if (pending) {
@@ -1270,81 +1326,82 @@ onMounted(async () => {
     <div v-if="!authStore.user" class="alert alert-info">ログインが必要です。</div>
     <div v-else-if="loadError" class="alert alert-error">{{ loadError }}</div>
     <template v-else>
-      <!-- アップロード先選択 -->
-      <div :class="['card']">
-        <p class="card-title">アップロード先</p>
-        <div :class="$style.destinationRow">
-          <template v-if="selectedBucketName">
-            <span :class="[$style.destinationDisplay, 'font-mono']">{{ selectedBucketName }}/{{ uploadPrefix }}</span>
-            <Button.Root class="btn btn-secondary" @click="destinationDialogOpen = true">
-              <Button.Content>変更</Button.Content>
-            </Button.Root>
-          </template>
-          <template v-else>
-            <Button.Root class="btn btn-primary" @click="destinationDialogOpen = true">
-              <Button.Content>アップロード先を選択</Button.Content>
-            </Button.Root>
-          </template>
+      <div :class="$style.uploadStack">
+        <!-- アップロード先選択 -->
+        <div :class="['card']">
+          <p class="card-title">アップロード先</p>
+          <div :class="$style.destinationRow">
+            <template v-if="selectedBucketName">
+              <span :class="[$style.destinationDisplay, 'font-mono']">{{ selectedBucketName }}/{{ uploadPrefix }}</span>
+              <Button.Root class="btn btn-secondary" @click="destinationDialogOpen = true">
+                <Button.Content>変更</Button.Content>
+              </Button.Root>
+            </template>
+            <template v-else>
+              <Button.Root class="btn btn-primary" @click="destinationDialogOpen = true">
+                <Button.Content>アップロード先を選択</Button.Content>
+              </Button.Root>
+            </template>
+          </div>
+          <UploadDestinationDialog
+            v-model:open="destinationDialogOpen"
+            :initial-bucket-name="selectedBucketName"
+            :initial-prefix="uploadPrefix"
+            @select="({ bucketName, prefix }) => { selectedBucketName = bucketName; uploadPrefix = prefix; }"
+          />
         </div>
-        <UploadDestinationDialog
-          v-model:open="destinationDialogOpen"
-          :initial-bucket-name="selectedBucketName"
-          :initial-prefix="uploadPrefix"
-          @select="({ bucketName, prefix }) => { selectedBucketName = bucketName; uploadPrefix = prefix; }"
-        />
-      </div>
 
-      <!-- ファイル選択 -->
-      <div
-        :class="['card', $style.dropSection, { [$style.dropSectionActive]: isDragOver }]"
-        @dragenter.prevent="isDragOver = true"
-        @dragover.prevent="isDragOver = true"
-        @dragleave.prevent="isDragOver = false"
-        @drop.prevent="handleDrop"
-      >
-        <p :class="['card-title', $style.fileSelectCardTitle]">
-          ファイル選択
-          <span v-if="selectedTree" class="badge badge-info">
-            {{ selectedTree.entries.length }} ファイル / {{ formatBytes(selectedTree.totalSize) }}
-          </span>
-        </p>
-        <p :class="[$style.dropHint]">ここにファイルやフォルダをドラッグ＆ドロップで追加</p>
+        <!-- ファイル選択 -->
+        <div
+          :class="['card', $style.dropSection, { [$style.dropSectionActive]: isDragOver }]"
+          @dragenter.prevent="isDragOver = true"
+          @dragover.prevent="isDragOver = true"
+          @dragleave.prevent="isDragOver = false"
+          @drop.prevent="handleDrop"
+        >
+          <p :class="['card-title', $style.fileSelectCardTitle]">
+            ファイル選択
+            <span v-if="selectedTree" class="badge badge-info">
+              {{ selectedTree.entries.length }} ファイル / {{ formatBytes(selectedTree.totalSize) }}
+            </span>
+          </p>
+          <p :class="[$style.dropHint]">ここにファイルやフォルダをドラッグ＆ドロップで追加</p>
 
-        <div class="flex items-center gap-2 flex-wrap mt-2">
-          <label :class="[$style.fileLabel, 'btn', 'btn-primary']">
-            ファイルを選択
-            <input
-              type="file"
-              multiple
-              :class="$style.hiddenInput"
-              @change="handleFileInputChange"
+          <div class="flex items-center gap-2 flex-wrap mt-2">
+            <label :class="[$style.fileLabel, 'btn', 'btn-primary']">
+              ファイルを選択
+              <input
+                type="file"
+                multiple
+                :class="$style.hiddenInput"
+                @change="handleFileInputChange"
+              >
+            </label>
+
+            <label :class="[$style.fileLabel, 'btn', 'btn-primary']">
+              フォルダを選択
+              <input
+                type="file"
+                webkitdirectory
+                multiple
+                :class="$style.hiddenInput"
+                @change="handleFileInputChange"
+              >
+            </label>
+
+            <Button.Root
+              v-if="selectedTree"
+              class="btn btn-secondary"
+              @click="clearSelectedTree"
             >
-          </label>
+              <Button.Content>初期化</Button.Content>
+            </Button.Root>
 
-          <label :class="[$style.fileLabel, 'btn', 'btn-primary']">
-            フォルダを選択
-            <input
-              type="file"
-              webkitdirectory
-              multiple
-              :class="$style.hiddenInput"
-              @change="handleFileInputChange"
-            >
-          </label>
-
-          <Button.Root
-            v-if="selectedTree"
-            class="btn btn-secondary"
-            @click="clearSelectedTree"
-          >
-            <Button.Content>初期化</Button.Content>
-          </Button.Root>
-
-        </div>
-        <div v-if="selectionError" class="alert alert-error mt-3">{{ selectionError }}</div>
-        <div v-if="zipWarnings.length > 0" class="alert alert-info mt-3">
-          <div v-for="warning in zipWarnings" :key="warning">{{ warning }}</div>
-        </div>
+          </div>
+          <div v-if="selectionError" class="alert alert-error mt-3">{{ selectionError }}</div>
+          <div v-if="zipWarnings.length > 0" class="alert alert-info mt-3">
+            <div v-for="warning in zipWarnings" :key="warning">{{ warning }}</div>
+          </div>
 
         <div v-if="hasSelection" class="mt-3">
           <div :class="$style.fileBrowser">
@@ -1494,37 +1551,63 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- オプション -->
-      <div class="card">
-        <p class="card-title">オプション</p>
-        <FileVisibilitySettings
-          v-model:visibility="visibility"
-          v-model:isListed="isListed"
-          v-model:passphrase="passphrase"
-          v-model:isDownloadCountEnabled="isDownloadCountEnabled"
-          v-model:isDownloadCountVisible="isDownloadCountVisible"
-          :can-use-download-count="canUseDownloadCount"
-          :show-download-count-settings="true"
-          passphrase-autocomplete="off"
-        />
-      </div>
+        <!-- オプション -->
+        <div class="card">
+          <p class="card-title">オプション</p>
+          <div :class="$style.optionSection">
+            <div :class="$style.imageCompressionHeader">
+              <label :class="['checkbox-label', archiveMode !== 'individual' ? $style.optionDisabled : null]">
+                <input
+                  v-model="compressImagesOnUpload"
+                  type="checkbox"
+                  :disabled="archiveMode !== 'individual'"
+                >
+                <span>画像を圧縮してアップロード</span>
+              </label>
+              <Button.Root
+                class="btn btn-secondary"
+                :disabled="archiveMode !== 'individual'"
+                @click="imageCompressionDialogOpen = true"
+              >
+                <Button.Content>圧縮設定</Button.Content>
+              </Button.Root>
+            </div>
+            <p :class="$style.optionHint">
+              個別アップロード時のみ、画像をJPEGへ変換してからアップロードします。EXIFなどのメタデータは引き継がれません。
+            </p>
+            <p :class="$style.optionSummary">
+              {{ imageCompressionMimeType === 'image/webp' ? 'WebP' : 'JPEG' }} / 品質 {{ imageCompressionQuality }} / 最大 {{ imageCompressionMaxWidth }} x {{ imageCompressionMaxHeight }}
+            </p>
+          </div>
+          <FileVisibilitySettings
+            v-model:visibility="visibility"
+            v-model:isListed="isListed"
+            v-model:passphrase="passphrase"
+            v-model:isDownloadCountEnabled="isDownloadCountEnabled"
+            v-model:isDownloadCountVisible="isDownloadCountVisible"
+            :can-use-download-count="canUseDownloadCount"
+            :show-download-count-settings="true"
+            passphrase-autocomplete="off"
+          />
+        </div>
 
-      <!-- 開始ボタン -->
-      <div class="mt-4">
-        <Button.Root
-          class="btn btn-primary btn-lg w-full"
-          :class="$style.fullButton"
-          :disabled="!selectedTree || selectedTree.entries.length === 0 || uploadDone && !uploadError"
-          @click="startUpload"
-        >
-          <Button.Content>アップロード開始</Button.Content>
-        </Button.Root>
-      </div>
+        <!-- 開始ボタン -->
+        <div>
+          <Button.Root
+            class="btn btn-primary btn-lg w-full"
+            :class="$style.fullButton"
+            :disabled="!selectedTree || selectedTree.entries.length === 0 || uploadDone && !uploadError"
+            @click="startUpload"
+          >
+            <Button.Content>アップロード開始</Button.Content>
+          </Button.Root>
+        </div>
 
-      <div v-if="uploadError" class="alert alert-error mt-3">{{ uploadError }}</div>
-      <div v-if="uploadDone" class="alert alert-success mt-3">
-        アップロードジョブを開始しました。
-        <NirA to="/my/uploadings?tab=browser" :class="$style.doneLink">進捗を見る →</NirA>
+        <div v-if="uploadError" class="alert alert-error">{{ uploadError }}</div>
+        <div v-if="uploadDone" class="alert alert-success">
+          アップロードジョブを開始しました。
+          <NirA to="/my/uploadings?tab=browser" :class="$style.doneLink">進捗を見る →</NirA>
+        </div>
       </div>
 
       <ConfirmDialog
@@ -1593,6 +1676,66 @@ onMounted(async () => {
           </div>
         </Dialog.Content>
       </Dialog.Root>
+
+      <Dialog.Root :model-value="imageCompressionDialogOpen" @update:model-value="imageCompressionDialogOpen = $event">
+        <Dialog.Content :class="$style.dialog">
+          <div :class="$style.dialogInner">
+            <div :class="$style.dialogHeader">
+              <Dialog.Title :class="$style.dialogTitle">画像圧縮設定</Dialog.Title>
+              <Dialog.Close class="btn btn-ghost btn-icon" aria-label="閉じる">✕</Dialog.Close>
+            </div>
+            <p :class="$style.dialogDescription">
+              アップロード前に画像を変換します。WebP非対応ブラウザではJPEGへフォールバックします。EXIFなどのメタデータは引き継がれません。
+            </p>
+            <label class="form-group">
+              <span class="form-label">出力形式</span>
+              <select v-model="imageCompressionMimeType" class="form-input">
+                <option value="image/webp" :disabled="!canEncodeWebp">WebP</option>
+                <option value="image/jpeg">JPEG</option>
+              </select>
+            </label>
+            <p v-if="!canEncodeWebp" :class="$style.dialogDescription">
+              このブラウザではWebP出力を利用できないため、JPEGでアップロードします。
+            </p>
+            <label class="form-group">
+              <span class="form-label">品質</span>
+              <input
+                v-model.number="imageCompressionQuality"
+                class="form-input"
+                type="number"
+                min="0.1"
+                max="1"
+                step="0.05"
+              >
+            </label>
+            <label class="form-group">
+              <span class="form-label">最大幅</span>
+              <input
+                v-model.number="imageCompressionMaxWidth"
+                class="form-input"
+                type="number"
+                min="1"
+                step="1"
+              >
+            </label>
+            <label class="form-group">
+              <span class="form-label">最大高さ</span>
+              <input
+                v-model.number="imageCompressionMaxHeight"
+                class="form-input"
+                type="number"
+                min="1"
+                step="1"
+              >
+            </label>
+            <div :class="$style.dialogActions">
+              <Button.Root class="btn btn-primary" @click="imageCompressionDialogOpen = false">
+                <Button.Content>閉じる</Button.Content>
+              </Button.Root>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
     </template>
   </div>
 </template>
@@ -1655,6 +1798,11 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.uploadStack {
+  display: grid;
+  gap: 16px;
+}
+
 .destinationRow {
   display: flex;
   align-items: center;
@@ -1701,6 +1849,39 @@ onMounted(async () => {
 .dropHint {
   color: var(--color-text-muted);
   font-size: 0.8125rem;
+}
+
+.optionSection {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.optionDisabled {
+  opacity: 0.58;
+}
+
+.imageCompressionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.optionHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.optionSummary {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
 .fileBrowser {

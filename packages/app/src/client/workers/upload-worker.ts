@@ -1,9 +1,12 @@
 /// <reference lib="webworker" />
 
+import { readAndCompressImage } from '@misskey-dev/browser-image-resizer';
 import { BgzfTarArchiver, TarArchiver, type ArchiveProgress, type TarGzIndex, type TarIndex } from 'bgzf';
 import type {
+	UploadImageCompressionOptions,
 	UploadJobRequest,
 	UploadJobSnapshot,
+	UploadWorkerFileEntry,
 	UploadWorkerClientMessage,
 	UploadWorkerServerMessage,
 } from './upload-worker-types';
@@ -85,8 +88,8 @@ async function pump(): Promise<void> {
 			const item = queue.shift()!;
 			updateJob(item.id, { status: 'running' });
 			try {
-				const completedPath = await executeUpload(item.id, item.request);
-				updateJob(item.id, { status: 'done', uploadedBytes: item.request.totalBytes, completedPath });
+				const result = await executeUpload(item.id, item.request);
+				updateJob(item.id, { status: 'done', uploadedBytes: result.totalBytes, totalBytes: result.totalBytes, completedPath: result.completedPath });
 			} catch (err) {
 				updateJob(item.id, { status: 'error', error: err instanceof Error ? err.message : String(err) });
 			}
@@ -402,30 +405,89 @@ async function deleteFromOpfs(name: string): Promise<void> {
 	await root.removeEntry(name).catch(() => {});
 }
 
-async function executeUpload(id: string, request: UploadJobRequest): Promise<string> {
+type PreparedUploadEntry = UploadWorkerFileEntry & {
+	readonly originalSize: number;
+};
+
+function isImageCompressionEnabled(request: UploadJobRequest): request is UploadJobRequest & { imageCompression: UploadImageCompressionOptions } {
+	return request.mode === 'individual' && request.imageCompression?.enabled === true;
+}
+
+function compressedImagePathForMimeType(path: string, mimeType: UploadImageCompressionOptions['mimeType']): string {
+	const extension = mimeType === 'image/webp' ? '.webp' : '.jpg';
+	const dot = path.lastIndexOf('.');
+	const slash = path.lastIndexOf('/');
+	if (dot > slash) return `${path.slice(0, dot)}${extension}`;
+	return `${path}${extension}`;
+}
+
+async function canEncodeImageMimeType(mimeType: UploadImageCompressionOptions['mimeType']): Promise<boolean> {
+	if (typeof OffscreenCanvas !== 'undefined') {
+		const canvas = new OffscreenCanvas(1, 1);
+		const blob = await canvas.convertToBlob({ type: mimeType }).catch(() => null);
+		if (blob?.type === mimeType) return true;
+	}
+	return mimeType === 'image/jpeg';
+}
+
+async function resolveImageCompressionMimeType(mimeType: UploadImageCompressionOptions['mimeType']): Promise<UploadImageCompressionOptions['mimeType']> {
+	if (mimeType === 'image/jpeg') return 'image/jpeg';
+	return await canEncodeImageMimeType('image/webp') ? 'image/webp' : 'image/jpeg';
+}
+
+async function prepareUploadEntry(entry: UploadWorkerFileEntry, request: UploadJobRequest): Promise<PreparedUploadEntry> {
+	if (!isImageCompressionEnabled(request) || !entry.file.type.startsWith('image/')) {
+		return { ...entry, originalSize: entry.file.size };
+	}
+
+	const mimeType = await resolveImageCompressionMimeType(request.imageCompression.mimeType);
+	const blob = await readAndCompressImage(entry.file, {
+		quality: request.imageCompression.quality,
+		maxWidth: request.imageCompression.maxWidth,
+		maxHeight: request.imageCompression.maxHeight,
+		mimeType,
+		argorithm: null,
+		processByHalf: true,
+	});
+	const name = compressedImagePathForMimeType(entry.file.name, mimeType);
+	return {
+		path: compressedImagePathForMimeType(entry.path, mimeType),
+		file: new File([blob], name, { type: mimeType, lastModified: entry.file.lastModified }),
+		originalSize: entry.file.size,
+	};
+}
+
+async function executeUpload(id: string, request: UploadJobRequest): Promise<{ completedPath: string; totalBytes: number }> {
 	const files = request.files;
 	let cumulativeBytes = 0;
+	let totalBytes = request.totalBytes;
 	let completedPath = '';
 
 	if (request.mode === 'individual' || request.mode === 'gz') {
 		for (let i = 0; i < files.length; i++) {
 			const entry = files[i];
-			const path = request.mode === 'gz' ? `${request.prefix}${entry.path}.gz` : `${request.prefix}${entry.path}`;
 			updateJob(id, { filename: entry.path, fileIndex: i, totalFiles: files.length, uploadedBytes: cumulativeBytes });
+			const preparedEntry = await prepareUploadEntry(entry, request);
+			if (preparedEntry.file.size !== preparedEntry.originalSize || preparedEntry.path !== entry.path) {
+				totalBytes += preparedEntry.file.size - preparedEntry.originalSize;
+				request.totalBytes = totalBytes;
+				updateJob(id, { filename: preparedEntry.path, totalBytes });
+			}
+			const path = request.mode === 'gz' ? `${request.prefix}${preparedEntry.path}.gz` : `${request.prefix}${preparedEntry.path}`;
 			if (request.mode === 'gz') {
-				await uploadStream(entry.file.stream().pipeThrough(new CompressionStream('gzip')), path, request, (n) => {
+				await uploadStream(preparedEntry.file.stream().pipeThrough(new CompressionStream('gzip')), path, request, (n) => {
 					updateJob(id, { uploadedBytes: cumulativeBytes + n });
 				});
 			} else {
-				await uploadBlob(entry.file, path, request, (n) => {
+				await uploadBlob(preparedEntry.file, path, request, (n) => {
 					updateJob(id, { uploadedBytes: cumulativeBytes + n });
 				});
 			}
-			cumulativeBytes += entry.file.size;
+			cumulativeBytes += preparedEntry.file.size;
 			completedPath = path;
 			updateJob(id, { fileIndex: i + 1, uploadedBytes: cumulativeBytes });
 		}
-		return completedPath;
+		return { completedPath, totalBytes };
 	}
 
 	updateJob(id, { filename: '', fileIndex: 0, totalFiles: 0, uploadedBytes: 0 });
@@ -437,7 +499,7 @@ async function executeUpload(id: string, request: UploadJobRequest): Promise<str
 		await uploadArchiveStream(archiver.stream, archiver.index, archivePath, '/api/files/create/tar-index', request, (n) => {
 			updateJob(id, { uploadedBytes: n });
 		});
-		return archivePath;
+		return { completedPath: archivePath, totalBytes };
 	}
 
 	const archivePath = `${request.prefix}${request.archiveBaseName}.tar.gz`;
@@ -447,7 +509,7 @@ async function executeUpload(id: string, request: UploadJobRequest): Promise<str
 	await uploadArchiveStream(archiver.stream, archiver.index, archivePath, '/api/files/create/targz-index', request, (n) => {
 		updateJob(id, { uploadedBytes: n });
 	});
-	return archivePath;
+	return { completedPath: archivePath, totalBytes };
 }
 
 function delay(ms: number): Promise<void> {

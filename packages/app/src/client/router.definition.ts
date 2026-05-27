@@ -88,6 +88,11 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/upload.vue')),
 	},
 	{
+		path: '/tools/media-compress',
+		name: 'tools-media-compress',
+		component: page(() => import('@/pages/tools/media-compress.vue')),
+	},
+	{
 		path: '/v/:bucketName/:filePath(*)?',
 		name: 'browse',
 		component: page(() => import('@/pages/browse.vue')),
