@@ -63,6 +63,7 @@ export const paymentAssetPlanPrices = sqliteTable('payment_asset_plan_prices', {
 	index('payment_asset_plan_prices_asset_id_idx').on(table.assetId),
 	index('payment_asset_plan_prices_plan_id_idx').on(table.planId),
 	index('payment_asset_plan_prices_expires_at_idx').on(table.expiresAt),
+	index('payment_asset_plan_prices_asset_plan_expires_idx').on(table.assetId, table.planId, table.expiresAt),
 ]);
 
 export const paymentAssetPlanPricePeriods = sqliteTable('payment_asset_plan_price_periods', {
