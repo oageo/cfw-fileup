@@ -96,6 +96,7 @@ function toggleTheme(): void {
 
         <div :class="$style.navLinks">
           <NirA to="/my/buckets" :class="$style.navLink">マイバケット</NirA>
+          <NirA to="/about" :class="$style.navLink">About</NirA>
           <template v-if="authStore.user?.isAdmin">
             <NirA to="/admin" :class="$style.navLink">管理</NirA>
           </template>

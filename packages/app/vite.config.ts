@@ -8,8 +8,12 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 const devTunnelName = process.env.CF_DEV_TUNNEL;
 const require = createRequire(import.meta.url);
+const rootPackageJson = require('../../package.json') as { repository?: string | { url?: string } };
 const viemPackageJson = require('viem/package.json') as { version: string };
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const repositoryUrl = typeof rootPackageJson.repository === 'string'
+	? rootPackageJson.repository
+	: rootPackageJson.repository?.url ?? '';
 const devTunnel = devTunnelName === undefined || devTunnelName === ''
 	? false
 	: ['1', 'true', 'quick'].includes(devTunnelName.toLowerCase())
@@ -38,6 +42,7 @@ export default defineConfig({
 	},
 	define: {
 		__VIEM_VERSION__: JSON.stringify(viemPackageJson.version),
+		__REPOSITORY_URL__: JSON.stringify(repositoryUrl),
 	},
 	plugins: [
 		cloudflare({

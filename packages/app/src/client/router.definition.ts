@@ -63,6 +63,11 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/plan-purchase-rules.vue')),
 	},
 	{
+		path: '/about',
+		name: 'about',
+		component: page(() => import('@/pages/about.vue')),
+	},
+	{
 		path: '/my/passkeys',
 		name: 'my-passkeys',
 		component: page(() => import('@/pages/my/passkeys.vue')),
