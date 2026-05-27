@@ -67,6 +67,7 @@ const selectedDialogDeploymentId = ref<string | null>(null);
 const error = ref('');
 const success = ref('');
 const purchaseProgress = ref('');
+const purchaseRulesAgreed = ref(false);
 const walletSetupMode = ref(false);
 const selectingAnotherWallet = ref(false);
 const {
@@ -313,6 +314,7 @@ function selectPaymentAsset(assetId: string): void {
 
 function openPurchaseDialog(price: PurchasePrice): void {
 	selectedPurchasePriceId.value = price.id;
+	purchaseRulesAgreed.value = false;
 	if (
 		selectedDialogDeploymentId.value == null
 		|| !price.offers.some(offer => offer.deploymentId === selectedDialogDeploymentId.value)
@@ -327,6 +329,7 @@ function openPurchaseDialog(price: PurchasePrice): void {
 function closePurchaseDialog(): void {
 	selectedPurchasePriceId.value = null;
 	selectedDialogDeploymentId.value = null;
+	purchaseRulesAgreed.value = false;
 }
 
 function onPurchaseDialogOpenChange(value: boolean): void {
@@ -563,7 +566,7 @@ function canRegisterFilterToken(): boolean {
 }
 
 function canBuySelectedOffer(): boolean {
-	return buyingOfferId.value === null && selectedDialogCanBuy.value;
+	return buyingOfferId.value === null && selectedDialogCanBuy.value && purchaseRulesAgreed.value;
 }
 
 function formatDateOrDash(value: number | null): string {
@@ -949,6 +952,13 @@ onMounted(load);
 		                <p :class="$style.paymentCheckHint">
 		                  送信後すぐに確認できない場合があります。この画面を閉じた後は、決済履歴の「チェーン確認」ボタンで反映を再確認できます。
 		                </p>
+		                <label :class="$style.purchaseRulesAgreement">
+		                  <input v-model="purchaseRulesAgreed" type="checkbox">
+		                  <span>
+		                    <a href="/plan-purchase-rules" target="_blank" rel="noopener noreferrer">契約条項、プラン適用期間と割引ルール</a>
+		                    を確認しました
+		                  </span>
+		                </label>
 		                <button class="btn btn-primary" type="button" :disabled="!canBuySelectedOffer()" @click="buySelectedOffer">
 		                  <span v-if="selectedDialogOffer && buyingOfferId === selectedDialogOffer.id" class="btn-spinner" aria-hidden="true" />
 		                  {{ dialogPurchaseButtonLabel() }}
@@ -1177,6 +1187,23 @@ onMounted(load);
   color: var(--color-text-muted);
   font-size: 0.875rem;
   line-height: 1.55;
+}
+
+.purchaseRulesAgreement {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--color-text);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.purchaseRulesAgreement input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  accent-color: var(--color-primary);
 }
 
 .limitedDateSuffix {

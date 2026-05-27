@@ -58,6 +58,11 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/my/payments.vue')),
 	},
 	{
+		path: '/plan-purchase-rules',
+		name: 'plan-purchase-rules',
+		component: page(() => import('@/pages/plan-purchase-rules.vue')),
+	},
+	{
 		path: '/my/passkeys',
 		name: 'my-passkeys',
 		component: page(() => import('@/pages/my/passkeys.vue')),
