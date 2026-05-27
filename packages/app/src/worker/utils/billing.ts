@@ -68,7 +68,15 @@ export async function confirmCryptoPaymentOrder(env: Env, userId: string, orderI
 		submittedOrder = submittedOrders[0] as OrderForConfirmation;
 	}
 
-	const verificationResult = await verifyCryptoPaymentTransaction(env, submittedOrder, normalizedTxHash);
+	let verificationResult: PaymentVerificationResult;
+	try {
+		verificationResult = await verifyCryptoPaymentTransaction(env, submittedOrder, normalizedTxHash);
+	} catch (e) {
+		if (e instanceof ApiError && e.code === 'PAYMENT_TRANSACTION_INVALID') {
+			await markCryptoPaymentOrderFailed(db, order.id, now);
+		}
+		throw e;
+	}
 	if (verificationResult === 'pending') return submittedOrder;
 
 	return await markCryptoPaymentOrderPaid(env, submittedOrder, normalizedTxHash, now);
@@ -99,7 +107,15 @@ export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId:
 	}
 
 	const normalizedTxHash = normalizeTransactionHash(order.txHash);
-	const verificationResult = await verifyCryptoPaymentTransaction(env, order, normalizedTxHash);
+	let verificationResult: PaymentVerificationResult;
+	try {
+		verificationResult = await verifyCryptoPaymentTransaction(env, order, normalizedTxHash);
+	} catch (e) {
+		if (e instanceof ApiError && e.code === 'PAYMENT_TRANSACTION_INVALID') {
+			await markCryptoPaymentOrderFailed(db, order.id, now);
+		}
+		throw e;
+	}
 	if (verificationResult === 'pending') return order;
 
 	return await markCryptoPaymentOrderPaid(env, order, normalizedTxHash, now);
@@ -137,6 +153,12 @@ export async function markZeroAmountCryptoPaymentOrderPaid(env: Env, userId: str
 	await refreshEffectiveQuotaForUser(env, order.userId, now);
 
 	return claimedOrder;
+}
+
+async function markCryptoPaymentOrderFailed(db: ReturnType<typeof getDb>, orderId: string, now: number): Promise<void> {
+	await db.update(cryptoPaymentOrders)
+		.set({ status: 'failed', updatedAt: now })
+		.where(and(eq(cryptoPaymentOrders.id, orderId), eq(cryptoPaymentOrders.status, 'pending')));
 }
 
 async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation, normalizedTxHash: Hex, now: number): Promise<OrderForConfirmation> {

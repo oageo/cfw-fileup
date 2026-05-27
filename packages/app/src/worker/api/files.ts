@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { eq, and, gte, desc, sql, count, lt, ne, type SQL } from 'drizzle-orm';
+import { eq, and, gte, desc, sql, count, lt, lte, ne, type SQL } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
 import { apiError } from '../utils/api-error';
 import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
@@ -687,11 +687,6 @@ app.post(
 			throw apiError(400, 'UPLOAD_HAS_NOT_BEEN_COMPLETED');
 		}
 
-		if (quota.maxBucketSizeBytes !== null) {
-			if (bucket.usedBytes + r2Object.size > quota.maxBucketSizeBytes) {
-				throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
-			}
-		}
 		if (body.isDownloadCountEnabled && !quota.canUseDownloadCount) {
 			throw apiError(403, 'FORBIDDEN');
 		}
@@ -727,6 +722,16 @@ app.post(
 			throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');
 		}
 
+		const updatedBuckets = await db.update(buckets)
+			.set({ usedBytes: sql`${buckets.usedBytes} + ${fileSize}` })
+			.where(quota.maxBucketSizeBytes !== null
+				? and(eq(buckets.id, bucket.id), lte(sql`${buckets.usedBytes} + ${fileSize}`, quota.maxBucketSizeBytes))
+				: eq(buckets.id, bucket.id))
+			.returning({ id: buckets.id });
+		if (quota.maxBucketSizeBytes !== null && updatedBuckets.length === 0) {
+			throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
+		}
+
 		await db
 			.update(files)
 			.set({
@@ -740,11 +745,6 @@ app.post(
 				mimeType,
 			})
 			.where(eq(files.id, file.id));
-
-		await db
-			.update(buckets)
-			.set({ usedBytes: sql`${buckets.usedBytes} + ${fileSize}` })
-			.where(eq(buckets.id, bucket.id));
 		await recordModerationEvent(c, 'file_uploaded', {
 			fileId: file.id,
 			bucketId: bucket.id,
