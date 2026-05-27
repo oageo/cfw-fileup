@@ -87,6 +87,33 @@ const PlanSummaryResponse = v.object({
 	sortOrder: v.number(),
 });
 
+const PublicPlanPriceResponse = v.object({
+	assetId: IdString,
+	assetSymbol: v.string(),
+	assetName: v.string(),
+	amountBaseUnits: BigIntString,
+	decimals: v.number(),
+	durationDays: v.number(),
+	durationUnit: PaymentDurationUnit,
+});
+
+const PublicPlanResponse = v.pipe(
+	v.object({
+		id: IdString,
+		name: v.string(),
+		maxBuckets: v.nullable(v.number()),
+		maxBucketSizeBytes: v.nullable(v.number()),
+		maxFilesPerBucket: v.nullable(v.number()),
+		maxDailyUploads: v.nullable(v.number()),
+		canUseDownloadCount: v.boolean(),
+		showAds: v.boolean(),
+		canDisableFileAds: v.boolean(),
+		sortOrder: v.number(),
+		prices: v.array(PublicPlanPriceResponse),
+	}),
+	v.metadata({ ref: 'PublicPlan' }),
+);
+
 const PaymentOfferQuoteResponse = v.object({
 	quoteCreatedAt: v.number(),
 	quoteExpiresAt: v.number(),
@@ -302,6 +329,12 @@ const OkResponse = { 200: { description: 'Success', content: { 'application/json
 const AuthErrors = {};
 
 export const billingApiDef = {
+	'/api/billing/list-public-plans': {
+		summary: 'List public enabled plans',
+		tags: ['billing'],
+		req: v.object({}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(PublicPlanResponse) } } } },
+	},
 	'/api/billing/list-crypto-offers': {
 		summary: 'List enabled crypto payment offers',
 		tags: ['billing'],

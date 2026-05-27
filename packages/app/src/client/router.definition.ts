@@ -20,7 +20,7 @@ export const ROUTE_DEF = [
 	{
 		path: '/',
 		name: 'home',
-		component: page(() => import('@/pages/not-found.vue')),
+		component: page(() => import('@/pages/home.vue')),
 	},
 	{
 		path: '/signin',

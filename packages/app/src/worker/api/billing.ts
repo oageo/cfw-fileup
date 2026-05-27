@@ -18,6 +18,85 @@ import { genEaidx } from '../../shared/eaid-x';
 const app = new Hono<{ Bindings: Env }>();
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 
+app.post(
+	'/list-public-plans',
+	describeRoute(omitResAndReq(apiDef['/api/billing/list-public-plans'])),
+	validator('json', apiDef['/api/billing/list-public-plans'].req),
+	describeResponse(async (c: JsonCtx<'/api/billing/list-public-plans', Env>) => {
+		const db = getDb(c.env);
+		const publicPlans = await db
+			.select({
+				id: plans.id,
+				name: plans.name,
+				maxBuckets: plans.maxBuckets,
+				maxBucketSizeBytes: plans.maxBucketSizeBytes,
+				maxFilesPerBucket: plans.maxFilesPerBucket,
+				maxDailyUploads: plans.maxDailyUploads,
+				canUseDownloadCount: plans.canUseDownloadCount,
+				showAds: plans.showAds,
+				canDisableFileAds: plans.canDisableFileAds,
+				sortOrder: plans.sortOrder,
+			})
+			.from(plans)
+			.where(eq(plans.isEnabled, true))
+			.orderBy(asc(plans.sortOrder), asc(plans.createdAt), asc(plans.id));
+		const priceRows = await db
+			.select({
+				planId: plans.id,
+				assetId: paymentAssets.id,
+				assetSymbol: paymentAssets.symbol,
+				assetName: paymentAssets.name,
+				amountBaseUnits: paymentAssetPlanPrices.amountBaseUnits,
+				decimals: paymentAssetDeployments.decimals,
+				durationDays: paymentAssetPlanPrices.durationDays,
+				durationUnit: paymentAssetPlanPrices.durationUnit,
+			})
+			.from(paymentAssetPlanPrices)
+			.innerJoin(paymentAssets, eq(paymentAssetPlanPrices.assetId, paymentAssets.id))
+			.innerJoin(paymentAssetDeployments, eq(paymentAssetDeployments.assetId, paymentAssets.id))
+			.innerJoin(paymentChains, eq(paymentAssetDeployments.chainId, paymentChains.chainId))
+			.innerJoin(plans, eq(paymentAssetPlanPrices.planId, plans.id))
+			.where(and(
+				eq(paymentAssetPlanPrices.isEnabled, true),
+				eq(paymentAssetDeployments.isEnabled, true),
+				eq(paymentAssets.isEnabled, true),
+				eq(paymentChains.isEnabled, true),
+				eq(plans.isEnabled, true),
+				or(isNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, Date.now())),
+			))
+			.orderBy(
+				asc(paymentAssets.symbol),
+				asc(plans.sortOrder),
+				asc(paymentAssetPlanPrices.durationUnit),
+				asc(paymentAssetPlanPrices.durationDays),
+				asc(paymentAssetPlanPrices.amountBaseUnits),
+				desc(paymentAssetPlanPrices.id),
+			);
+		const pricesByPlan = new Map<string, typeof priceRows>();
+		const seenPriceKeys = new Set<string>();
+		for (const row of priceRows) {
+			const key = `${row.planId}:${row.assetId}:${row.amountBaseUnits}:${row.decimals}:${row.durationDays}:${row.durationUnit}`;
+			if (seenPriceKeys.has(key)) continue;
+			seenPriceKeys.add(key);
+			const planPrices = pricesByPlan.get(row.planId) ?? [];
+			planPrices.push(row);
+			pricesByPlan.set(row.planId, planPrices);
+		}
+		return c.json(publicPlans.map(plan => ({
+			...plan,
+			prices: (pricesByPlan.get(plan.id) ?? []).map(price => ({
+				assetId: price.assetId,
+				assetSymbol: price.assetSymbol,
+				assetName: price.assetName,
+				amountBaseUnits: price.amountBaseUnits,
+				decimals: price.decimals,
+				durationDays: price.durationDays,
+				durationUnit: price.durationUnit,
+			})),
+		})), 200);
+	}, apiDef['/api/billing/list-public-plans'].res),
+);
+
 app.use(authMiddleware);
 
 async function createPaymentOfferQuote(env: Env, userId: string, offer: {

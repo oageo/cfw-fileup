@@ -103,7 +103,6 @@ code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; 
   box-shadow: var(--shadow-sm);
   padding: 24px;
 }
-.card + .card { margin-top: 16px; }
 .card-title {
   font-size: 1em;
   font-weight: 600;
