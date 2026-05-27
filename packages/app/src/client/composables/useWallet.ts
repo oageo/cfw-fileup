@@ -6,7 +6,6 @@ import {
 	useConnect,
 	useConfig,
 	useConnectors,
-	useDisconnect,
 	useSendTransaction,
 	useSignMessage,
 	useSwitchChain,
@@ -64,29 +63,13 @@ type WalletProvider = {
 	request(args: { method: string; params?: unknown[] | Record<string, unknown> }): Promise<unknown>;
 };
 
-type WalletEventProvider = WalletProvider & {
-	on?: (event: 'accountsChanged' | 'chainChanged', listener: (payload: unknown) => void) => void;
-	removeListener?: (event: 'accountsChanged' | 'chainChanged', listener: (payload: unknown) => void) => void;
-	off?: (event: 'accountsChanged' | 'chainChanged', listener: (payload: unknown) => void) => void;
-};
-
 type WalletConnectionLike = {
 	accounts: readonly Address[];
 	chainId: number;
 	connector: Connector;
 };
 
-type WalletProviderSubscription = {
-	provider: WalletEventProvider;
-	accountsChanged: (payload: unknown) => void;
-	chainChanged: (payload: unknown) => void;
-};
-
 type WalletConfig = ReturnType<typeof useConfig>;
-
-const walletProviderSubscriptions = new Map<string, WalletProviderSubscription>();
-const pendingWalletProviderSubscriptionConnectorUids = new Set<string>();
-let walletProviderSubscriptionUsers = 0;
 
 function chainIdHex(chainId: number): `0x${string}` {
 	return `0x${chainId.toString(16)}`;
@@ -106,9 +89,67 @@ function isChainNotConfiguredError(error: unknown): boolean {
 	return cause instanceof Error && isChainNotConfiguredError(cause);
 }
 
+function isWalletConnectStaleSessionError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	// WalletConnect reports this when the wallet has already deleted the session topic.
+	return message.includes('No matching key')
+		&& message.includes('session topic');
+}
+
+function isWalletConnectStorageKey(key: string): boolean {
+	const normalized = key.toLowerCase();
+	return normalized.includes('walletconnect')
+		|| normalized.includes('wallet_connect')
+		|| normalized.includes('wc@');
+}
+
+async function deleteBrowserDatabase(name: string): Promise<void> {
+	if (typeof indexedDB === 'undefined') return;
+	await new Promise<void>((resolve) => {
+		const request = indexedDB.deleteDatabase(name);
+		request.onsuccess = () => resolve();
+		request.onerror = () => resolve();
+		request.onblocked = () => resolve();
+	});
+}
+
+function removeWalletConnection(config: WalletConfig, connectorUid: string): void {
+	config.setState((state) => {
+		const connections = new Map(state.connections);
+		connections.delete(connectorUid);
+		if (connections.size === 0) {
+			return {
+				...state,
+				connections,
+				current: null,
+				status: 'disconnected',
+			};
+		}
+		const nextConnection = connections.values().next().value as WalletConnectionLike;
+		return {
+			...state,
+			connections,
+			current: state.current === connectorUid ? rawConnector(nextConnection.connector).uid : state.current,
+			status: 'connected',
+		};
+	});
+}
+
 function parseHexQuantity(value: unknown): bigint | null {
 	if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/.test(value)) return null;
 	return BigInt(value);
+}
+
+function parseWalletChainId(value: unknown): number | null {
+	if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
+	const hex = parseHexQuantity(value);
+	if (hex !== null) {
+		const chainId = Number(hex);
+		return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : null;
+	}
+	if (typeof value !== 'string') return null;
+	const chainId = Number(value);
+	return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -119,23 +160,8 @@ function rawConnector(connector: Connector): Connector {
 	return toRaw(connector);
 }
 
-function parseWalletAccounts(accounts: unknown): Address[] {
-	if (!Array.isArray(accounts)) return [];
-	return accounts.flatMap((account) => {
-		if (typeof account !== 'string') return [];
-		try {
-			return [getAddress(account)];
-		} catch {
-			return [];
-		}
-	});
-}
-
-function parseWalletChainId(chainId: unknown): number | null {
-	if (typeof chainId === 'number' && Number.isSafeInteger(chainId) && chainId > 0) return chainId;
-	if (typeof chainId !== 'string') return null;
-	const parsed = Number(chainId);
-	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+function isSameWalletConnector(left: Connector, right: Connector): boolean {
+	return left.uid === right.uid || left.id === right.id;
 }
 
 function formatWalletConnectorName(connector: Connector): string {
@@ -179,107 +205,6 @@ function getWalletConnectionKey(connections: readonly ConnectedWalletConnection[
 		.join('|');
 }
 
-function updateWalletConnectionAccounts(config: WalletConfig, connectorUid: string, accountsPayload: unknown): void {
-	const accounts = parseWalletAccounts(accountsPayload);
-	config.setState((state) => {
-		const connection = state.connections.get(connectorUid);
-		if (!connection) return state;
-
-		const connections = new Map(state.connections);
-		if (accounts.length === 0) {
-			connections.delete(connectorUid);
-			if (connections.size === 0) {
-				return {
-					...state,
-					connections,
-					current: null,
-					status: 'disconnected',
-				};
-			}
-			const nextConnection = connections.values().next().value as WalletConnectionLike;
-			return {
-				...state,
-				connections,
-				current: state.current === connectorUid ? rawConnector(nextConnection.connector).uid : state.current,
-			};
-		}
-
-		connections.set(connectorUid, {
-			...connection,
-			accounts: accounts as unknown as readonly [Address, ...Address[]],
-		});
-		return {
-			...state,
-			connections,
-		};
-	});
-}
-
-function updateWalletConnectionChain(config: WalletConfig, connectorUid: string, chainIdPayload: unknown): void {
-	const chainId = parseWalletChainId(chainIdPayload);
-	if (chainId == null) return;
-	config.setState((state) => {
-		const connection = state.connections.get(connectorUid);
-		if (!connection) return state;
-		return {
-			...state,
-			connections: new Map(state.connections).set(connectorUid, {
-				...connection,
-				chainId,
-			}),
-		};
-	});
-}
-
-function removeWalletProviderSubscription(connectorUid: string): void {
-	const subscription = walletProviderSubscriptions.get(connectorUid);
-	if (!subscription) return;
-	subscription.provider.removeListener?.('accountsChanged', subscription.accountsChanged);
-	subscription.provider.removeListener?.('chainChanged', subscription.chainChanged);
-	subscription.provider.off?.('accountsChanged', subscription.accountsChanged);
-	subscription.provider.off?.('chainChanged', subscription.chainChanged);
-	walletProviderSubscriptions.delete(connectorUid);
-}
-
-function syncWalletProviderSubscriptions(config: WalletConfig): void {
-	const connections = Array.from(config.state.connections.entries());
-	const connectedConnectorUids = new Set(connections.map(([connectorUid]) => connectorUid));
-
-	for (const connectorUid of Array.from(walletProviderSubscriptions.keys())) {
-		if (!connectedConnectorUids.has(connectorUid)) removeWalletProviderSubscription(connectorUid);
-	}
-
-	for (const [connectorUid, connection] of connections) {
-		if (walletProviderSubscriptions.has(connectorUid) || pendingWalletProviderSubscriptionConnectorUids.has(connectorUid)) continue;
-		pendingWalletProviderSubscriptionConnectorUids.add(connectorUid);
-		void rawConnector(connection.connector).getProvider?.()
-			.then((provider) => {
-				pendingWalletProviderSubscriptionConnectorUids.delete(connectorUid);
-				const walletProvider = provider as WalletEventProvider | undefined;
-				if (walletProviderSubscriptionUsers <= 0 || !config.state.connections.has(connectorUid)) return;
-				if (!walletProvider?.on || walletProviderSubscriptions.has(connectorUid)) return;
-				const accountsChanged = (payload: unknown) => updateWalletConnectionAccounts(config, connectorUid, payload);
-				const chainChanged = (payload: unknown) => updateWalletConnectionChain(config, connectorUid, payload);
-				walletProvider.on('accountsChanged', accountsChanged);
-				walletProvider.on('chainChanged', chainChanged);
-				walletProviderSubscriptions.set(connectorUid, { provider: walletProvider, accountsChanged, chainChanged });
-			})
-			.catch(() => {
-				pendingWalletProviderSubscriptionConnectorUids.delete(connectorUid);
-			});
-	}
-}
-
-function releaseWalletProviderSubscriptions(): void {
-	walletProviderSubscriptionUsers -= 1;
-	if (walletProviderSubscriptionUsers > 0) return;
-	walletProviderSubscriptionUsers = 0;
-	pendingWalletProviderSubscriptionConnectorUids.clear();
-	for (const connectorUid of Array.from(walletProviderSubscriptions.keys())) {
-		removeWalletProviderSubscription(connectorUid);
-	}
-}
-
 export function useWallet() {
 	const config = useConfig();
 	const { address, chainId: accountChainId, connector: activeConnector } = useConnection();
@@ -289,27 +214,22 @@ export function useWallet() {
 	const { mutateAsync: signMessageMutationAsync } = useSignMessage();
 	const { mutateAsync: switchChainMutationAsync } = useSwitchChain();
 	const { mutateAsync: switchConnectionMutationAsync } = useSwitchConnection();
-	const { mutateAsync: disconnectMutationAsync } = useDisconnect();
 	const { mutateAsync: sendTransactionMutationAsync } = useSendTransaction();
 	const connectedWalletConnectionSnapshots = shallowRef<ConnectedWalletConnection[]>(
 		getWalletConnectionSnapshots(config.state.connections.values()),
 	);
-	walletProviderSubscriptionUsers += 1;
 
 	const unsubscribeConnections = config.subscribe(
 		state => getWalletConnectionSnapshots(state.connections.values()),
 		connections => {
 			connectedWalletConnectionSnapshots.value = connections;
-			syncWalletProviderSubscriptions(config);
 		},
 		{
 			equalityFn: (previous, next) => getWalletConnectionKey(previous) === getWalletConnectionKey(next),
 		},
 	);
-	syncWalletProviderSubscriptions(config);
 	onScopeDispose(() => {
 		unsubscribeConnections();
-		releaseWalletProviderSubscriptions();
 	});
 
 	const receiptHash = ref<Hex>();
@@ -360,12 +280,58 @@ export function useWallet() {
 		return provider;
 	}
 
+	async function getWalletProviderChainId(provider: WalletProvider): Promise<number | null> {
+		return parseWalletChainId(await provider.request({ method: 'eth_chainId' }));
+	}
+
+	async function waitForWalletProviderChain(provider: WalletProvider, chainId: number): Promise<void> {
+		const startedAt = Date.now();
+		const timeout = 10_000;
+		while (Date.now() - startedAt <= timeout) {
+			if (await getWalletProviderChainId(provider) === chainId) return;
+			await sleep(250);
+		}
+		throw new Error(`ウォレットのチェーン切替を検出できませんでした。ウォレット側で chain ${chainId} に切り替わっているか確認してください。`);
+	}
+
+	function handleWalletConnectStaleSession(error: unknown, connectorUid?: string | null): never {
+		if (!isWalletConnectStaleSessionError(error)) throw error;
+		if (connectorUid) {
+			const connector = findWalletConnector(connectorUid);
+			if (connector) removeWalletConnection(config, connector.uid);
+		}
+		throw new Error('WalletConnectの接続情報が古くなっています。WalletConnect解除を押してから、もう一度接続してください。');
+	}
+
+	async function requestWalletProviderChainSwitch(provider: WalletProvider, chainId: number, connectorUid?: string | null): Promise<void> {
+		try {
+			await provider.request({
+				method: 'wallet_switchEthereumChain',
+				params: [{ chainId: chainIdHex(chainId) }],
+			});
+			await waitForWalletProviderChain(provider, chainId);
+		} catch (error) {
+			handleWalletConnectStaleSession(error, connectorUid);
+		}
+	}
+
+	async function requestWalletPersonalSign(provider: WalletProvider, message: string, signer: Address, connectorUid?: string | null): Promise<Hex> {
+		try {
+			return await provider.request({
+				method: 'personal_sign',
+				params: [message, signer],
+			}) as Hex;
+		} catch (error) {
+			handleWalletConnectStaleSession(error, connectorUid);
+		}
+	}
+
 	async function connectWallet(connectorUid?: string | null): Promise<ConnectedWallet> {
 		const requestedConnector = connectorUid ? findWalletConnector(connectorUid) : null;
 		const activeConnectorRaw = activeConnector.value ? rawConnector(activeConnector.value) : null;
 		const isRequestedConnectorActive = requestedConnector
 			&& activeConnectorRaw
-			&& (activeConnectorRaw.uid === requestedConnector.uid || activeConnectorRaw.id === requestedConnector.id);
+			&& isSameWalletConnector(activeConnectorRaw, requestedConnector);
 		if (address.value && accountChainId.value && (!requestedConnector || isRequestedConnectorActive)) {
 			return { address: address.value, chainId: accountChainId.value };
 		}
@@ -400,33 +366,53 @@ export function useWallet() {
 
 	async function disconnectWalletConnection(connectorUid: string): Promise<void> {
 		const connector = rawConnector(getWalletConnector(connectorUid));
-		await disconnectMutationAsync({ connector });
+		try {
+			await connector.disconnect?.();
+		} catch (error) {
+			if (!isWalletConnectStaleSessionError(error)) throw error;
+		}
+		// Stale WalletConnect sessions can fail during disconnect before wagmi cleans up.
+		removeWalletConnection(config, connector.uid);
+	}
+
+	async function clearWalletConnectStorage(): Promise<void> {
+		// WalletConnect v2 keeps session data outside wagmi, mostly in this IndexedDB.
+		if (typeof localStorage !== 'undefined') {
+			for (const key of Object.keys(localStorage)) {
+				if (isWalletConnectStorageKey(key)) localStorage.removeItem(key);
+			}
+		}
+		await deleteBrowserDatabase('WALLET_CONNECT_V2_INDEXED_DB');
+		await config.storage?.removeItem('recentConnectorId');
 	}
 
 	async function switchOrAddWalletChain(chain: WalletChainConfig, connectorUid?: string | null): Promise<void> {
-		if (accountChainId.value === chain.chainId) return;
 		const requestedConnector = connectorUid ? findWalletConnector(connectorUid) : null;
 		const activeConnectorRaw = activeConnector.value ? rawConnector(activeConnector.value) : null;
 		const isRequestedConnectorActive = requestedConnector
 			&& activeConnectorRaw
-			&& (activeConnectorRaw.uid === requestedConnector.uid || activeConnectorRaw.id === requestedConnector.id);
+			&& isSameWalletConnector(activeConnectorRaw, requestedConnector);
+		const requestedConnection = requestedConnector ? config.state.connections.get(requestedConnector.uid) : null;
+		if (!requestedConnector || isRequestedConnectorActive) {
+			if (accountChainId.value === chain.chainId) return;
+		} else if (requestedConnection?.chainId === chain.chainId) {
+			return;
+		}
+
 		if (!requestedConnector || isRequestedConnectorActive) {
 			try {
 				await switchWalletChain(chain.chainId);
 				return;
 			} catch (error) {
+				if (isWalletConnectStaleSessionError(error)) handleWalletConnectStaleSession(error, requestedConnector?.uid);
 				if (!isChainNotConfiguredError(error)) throw error;
 			}
 		}
 
 		const provider = await getWalletProvider(connectorUid);
-		const chainId = chainIdHex(chain.chainId);
 
 		try {
-			await provider.request({
-				method: 'wallet_switchEthereumChain',
-				params: [{ chainId }],
-			});
+			await requestWalletProviderChainSwitch(provider, chain.chainId, connectorUid);
 			return;
 		} catch (error) {
 			if (getErrorCode(error) !== 4902) throw error;
@@ -435,7 +421,7 @@ export function useWallet() {
 		await provider.request({
 			method: 'wallet_addEthereumChain',
 			params: [{
-				chainId,
+				chainId: chainIdHex(chain.chainId),
 				chainName: chain.name,
 				nativeCurrency: {
 					name: chain.nativeCurrencyName,
@@ -446,6 +432,7 @@ export function useWallet() {
 				blockExplorerUrls: chain.blockExplorerUrl ? [chain.blockExplorerUrl] : undefined,
 			}],
 		});
+		await requestWalletProviderChainSwitch(provider, chain.chainId, connectorUid);
 	}
 
 	async function signWalletMessage(message: string, connectorUid?: string | null, account?: Address): Promise<Hex> {
@@ -453,10 +440,7 @@ export function useWallet() {
 			const signer = account ?? address.value;
 			if (!signer) throw new Error('ウォレット接続に失敗しました');
 			const provider = await getWalletProvider(connectorUid);
-			return await provider.request({
-				method: 'personal_sign',
-				params: [message, signer],
-			}) as Hex;
+			return await requestWalletPersonalSign(provider, message, signer, connectorUid);
 		}
 
 		try {
@@ -466,10 +450,7 @@ export function useWallet() {
 			if (!errorMessage.includes('ConnectorChainMismatchError')) throw error;
 			if (!address.value) throw error;
 			const provider = await getWalletProvider();
-			return await provider.request({
-				method: 'personal_sign',
-				params: [message, address.value],
-			}) as Hex;
+			return await requestWalletPersonalSign(provider, message, address.value);
 		}
 	}
 
@@ -575,6 +556,7 @@ export function useWallet() {
 		walletConnectors,
 		connectWallet,
 		disconnectWalletConnection,
+		clearWalletConnectStorage,
 		switchWalletConnection,
 		switchWalletChain,
 		switchOrAddWalletChain,

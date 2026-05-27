@@ -4,6 +4,7 @@ import { apiPost, type ApiSuccess } from '@/utils/api';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { useWallet } from '@/composables/useWallet';
 import { getChainMetadata } from '@/utils/chain-metadata';
+import { useWalletRuntimeReload } from '@/components/WalletRuntimeProvider';
 
 type LinkedWallet = ApiSuccess<'/api/account/wallets/list'>['data'][number];
 type WalletLinkChain = ApiSuccess<'/api/account/wallets/link/chains'>['data'][number];
@@ -24,9 +25,11 @@ const walletRequestTotal = ref(1);
 const walletRequestTitle = ref('');
 const walletRequestDescription = ref('');
 const walletRequestCancelRequested = ref(false);
+const disconnectingConnectorUid = ref<string | null>(null);
 const error = ref('');
 const success = ref('');
-const { walletAddress, walletChainId, activeWalletConnectorUid, connectedWalletConnections, walletConnectors, connectWallet, disconnectWalletConnection, switchWalletConnection, switchOrAddWalletChain, signWalletMessage } = useWallet();
+const { walletAddress, walletChainId, activeWalletConnectorUid, connectedWalletConnections, walletConnectors, connectWallet, disconnectWalletConnection, clearWalletConnectStorage, switchWalletConnection, switchOrAddWalletChain, signWalletMessage } = useWallet();
+const reloadWalletRuntime = useWalletRuntimeReload();
 defineProps<{
 	showBack?: boolean;
 }>();
@@ -68,6 +71,16 @@ const sortedWallets = computed(() => wallets.value
 		return a.index - b.index;
 	})
 	.map(item => item.wallet));
+const walletConnectConnectorOptions = computed(() => walletConnectors.value.filter(connector => connector.id === 'walletConnect' || connector.type === 'walletConnect'));
+const disconnectableWalletConnectors = computed(() => {
+	const optionsByUid = new Map(walletConnectors.value.map(connector => [connector.uid, connector]));
+	const connectedOptions = connectedWalletConnections.value.flatMap(connection => {
+		const option = optionsByUid.get(connection.connectorUid);
+		return option ? [option] : [];
+	});
+	const options = [...connectedOptions, ...walletConnectConnectorOptions.value];
+	return Array.from(new Map(options.map(option => [option.uid, option])).values());
+});
 
 function showWalletRequestProgress(step: number, total: number, title: string, description: string): void {
 	if (walletRequestCancelRequested.value) return;
@@ -89,6 +102,7 @@ function closeWalletRequestProgress(): void {
 function cancelWalletRequestProgress(): void {
 	walletRequestCancelRequested.value = true;
 	walletRequestDialogOpen.value = false;
+	walletLoading.value = false;
 	error.value = 'ウォレット連携を中止しました。ウォレットアプリに残っている要求は拒否してください。';
 }
 
@@ -128,6 +142,7 @@ async function linkWallet(): Promise<void> {
 	success.value = '';
 	walletLoading.value = true;
 	walletRequestCancelRequested.value = false;
+	let shouldReloadWalletRuntime = false;
 	try {
 		if (connectedLinkedWallet.value) throw new Error('選択中の接続方法で接続中のウォレットはすでに連携済みです。別のウォレットを追加するには、ウォレット側でアカウントを切り替えるか、別の接続方法を選んでください。');
 		const linkChain = selectedWalletLinkChain.value;
@@ -161,6 +176,7 @@ async function linkWallet(): Promise<void> {
 			success.value = '支払いウォレットを接続しました';
 			emit('ready');
 			emit('changed');
+			shouldReloadWalletRuntime = true;
 			return;
 		}
 		const beginResult = await apiPost('/api/account/wallets/link/begin', { address, chainId: linkChain.chainId });
@@ -194,11 +210,13 @@ async function linkWallet(): Promise<void> {
 		await loadWallets();
 		emit('ready');
 		emit('changed');
+		shouldReloadWalletRuntime = true;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
 		closeWalletRequestProgress();
 		walletLoading.value = false;
+		if (shouldReloadWalletRuntime) reloadWalletRuntime();
 	}
 }
 
@@ -207,6 +225,7 @@ async function unlinkWallet(wallet: LinkedWallet): Promise<void> {
 	success.value = '';
 	unlinkingWalletId.value = wallet.id;
 	const connections = connectedConnectionsForWallet(wallet);
+	let shouldReloadWalletRuntime = false;
 	try {
 		const result = await apiPost('/api/account/wallets/unlink', { walletId: wallet.id });
 		if (!result.ok) {
@@ -219,10 +238,12 @@ async function unlinkWallet(wallet: LinkedWallet): Promise<void> {
 			: 'ウォレット連携を解除しました';
 		await loadWallets();
 		emit('changed');
+		shouldReloadWalletRuntime = true;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
 		unlinkingWalletId.value = null;
+		if (shouldReloadWalletRuntime) reloadWalletRuntime();
 	}
 }
 
@@ -308,15 +329,35 @@ async function selectWalletConnection(connection: ConnectedWalletConnection): Pr
 	error.value = '';
 	success.value = '';
 	walletLoading.value = true;
+	let shouldReloadWalletRuntime = false;
 	try {
 		await switchWalletConnection(connection.connectorUid);
 		success.value = '支払いウォレットを選択しました';
 		emit('ready');
 		emit('changed');
+		shouldReloadWalletRuntime = true;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
 		walletLoading.value = false;
+		if (shouldReloadWalletRuntime) reloadWalletRuntime();
+	}
+}
+
+async function disconnectWalletConnectorByUid(connectorUid: string): Promise<void> {
+	error.value = '';
+	success.value = '';
+	disconnectingConnectorUid.value = connectorUid;
+	try {
+		await disconnectWalletConnection(connectorUid);
+		await clearWalletConnectStorage();
+		success.value = 'ウォレット接続を解除しました';
+		emit('changed');
+		reloadWalletRuntime();
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		disconnectingConnectorUid.value = null;
 	}
 }
 
@@ -408,6 +449,18 @@ watch(walletConnectors, connectors => {
         </button>
       </div>
     </section>
+    <div v-if="disconnectableWalletConnectors.length > 0" :class="$style.disconnectActions">
+      <button
+        v-for="connector in disconnectableWalletConnectors"
+        :key="connector.uid"
+        class="btn btn-secondary btn-sm"
+        type="button"
+        :disabled="walletLoading || disconnectingConnectorUid === connector.uid"
+        @click="disconnectWalletConnectorByUid(connector.uid)"
+      >
+        {{ disconnectingConnectorUid === connector.uid ? '解除中...' : `${connector.name}解除` }}
+      </button>
+    </div>
     <ConfirmDialog
       v-model:open="unlinkDialogOpen"
       title="ウォレット連携を解除"
@@ -578,6 +631,15 @@ watch(walletConnectors, connectors => {
   gap: 8px;
 }
 
+.disconnectActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .connectorStatus {
   display: inline-flex;
   align-items: center;
@@ -662,7 +724,8 @@ watch(walletConnectors, connectors => {
   }
 
   .walletTopActions,
-  .linkActions {
+  .linkActions,
+  .disconnectActions {
     justify-content: flex-start;
   }
 
