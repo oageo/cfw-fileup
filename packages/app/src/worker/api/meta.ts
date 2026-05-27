@@ -1,14 +1,24 @@
 import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { appSettings, paymentChains } from '../scheme/index';
 import { getDb } from '../utils/db';
-import { shortGetCache } from '../middleware/short-get-cache';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
 import { getPaymentChainRpcUrl } from '../utils/payment-rpc';
-import { getAppName } from '../utils/app-name';
 import { DEFAULT_APP_NAME } from '../../shared/app-settings';
+import { runBackgroundTask } from '../utils/background-task';
 
 const app = new Hono<{ Bindings: Env }>();
+const metaCacheName = 'api-meta-response';
+const metaCacheMaxAgeSeconds = 10;
+const metaSettingKeys = [
+	'app_name',
+	'registration_mode',
+	'google_required',
+	'terms_url',
+	'terms_updated_at',
+	'privacy_policy_url',
+	'plan_purchase_terms_url',
+] as const;
 
 type MetaResponse = {
 	appName: string;
@@ -32,53 +42,45 @@ function createMetaResponse(data: MetaResponse): Response {
 	return new Response(JSON.stringify(data), {
 		headers: {
 			'Content-Type': 'application/json; charset=UTF-8',
+			'Cache-Control': `public, max-age=${metaCacheMaxAgeSeconds}`,
+			'Expires': new Date(Date.now() + metaCacheMaxAgeSeconds * 1000).toUTCString(),
 		},
 	});
 }
 
-app.use('/meta', shortGetCache({ maxAgeSeconds: 10 }));
+function createMetaCacheRequest(request: Request): Request {
+	const url = new URL(request.url);
+	url.search = '';
+	return new Request(url.toString(), { method: 'GET' });
+}
 
 app.get('/meta', async (c) => {
+	const cacheRequest = createMetaCacheRequest(c.req.raw);
+	const cache = await caches.open(metaCacheName);
+	const cached = await cache.match(cacheRequest);
+	if (cached !== undefined) {
+		const headers = new Headers(cached.headers);
+		headers.set('X-Cache', 'HIT');
+		return new Response(cached.body, {
+			status: cached.status,
+			statusText: cached.statusText,
+			headers,
+		});
+	}
+
 	const db = getDb(c.env);
 
 	try {
-		const appName = await getAppName(c.env);
-		const registrationModeSetting = await db
-			.select()
+		const settingRows = await db
+			.select({ key: appSettings.key, value: appSettings.value })
 			.from(appSettings)
-			.where(eq(appSettings.key, 'registration_mode'))
-			.get();
+			.where(inArray(appSettings.key, metaSettingKeys));
+		const settings = new Map(settingRows.map(setting => [setting.key, setting.value]));
 
-		const mode = registrationModeSetting?.value ?? 'passphrase';
-
-		const googleRequiredSetting = await db
-			.select()
-			.from(appSettings)
-			.where(eq(appSettings.key, 'google_required'))
-			.get();
-
-		const googleRequired = googleRequiredSetting?.value === 'true';
+		const appName = settings.get('app_name')?.trim() || DEFAULT_APP_NAME;
+		const mode = settings.get('registration_mode') ?? 'passphrase';
+		const googleRequired = settings.get('google_required') === 'true';
 		const googleAuthEnabled = (c.env.GOOGLE_CLIENT_ID as string) !== '' && (c.env.GOOGLE_CLIENT_SECRET as string) !== '';
-		const termsUrlSetting = await db
-			.select()
-			.from(appSettings)
-			.where(eq(appSettings.key, 'terms_url'))
-			.get();
-		const termsUpdatedAtSetting = await db
-			.select()
-			.from(appSettings)
-			.where(eq(appSettings.key, 'terms_updated_at'))
-			.get();
-		const privacyPolicyUrlSetting = await db
-			.select()
-			.from(appSettings)
-			.where(eq(appSettings.key, 'privacy_policy_url'))
-			.get();
-		const planPurchaseTermsUrlSetting = await db
-			.select()
-			.from(appSettings)
-			.where(eq(appSettings.key, 'plan_purchase_terms_url'))
-			.get();
 		const cryptoPaymentsEnabled = await canAcceptCryptoPayments(c.env);
 		const walletConnectChains = cryptoPaymentsEnabled
 			? await db
@@ -87,14 +89,14 @@ app.get('/meta', async (c) => {
 				.where(eq(paymentChains.isEnabled, true))
 			: [];
 
-		return createMetaResponse({
+		const response = createMetaResponse({
 			appName,
 			registrationEnabled: mode !== 'closed',
 			passphraseRequired: mode === 'passphrase',
-			termsUrl: termsUrlSetting?.value ?? '',
-			termsUpdatedAt: termsUpdatedAtSetting?.value ?? '',
-			privacyPolicyUrl: privacyPolicyUrlSetting?.value ?? '',
-			planPurchaseTermsUrl: planPurchaseTermsUrlSetting?.value ?? '',
+			termsUrl: settings.get('terms_url') ?? '',
+			termsUpdatedAt: settings.get('terms_updated_at') ?? '',
+			privacyPolicyUrl: settings.get('privacy_policy_url') ?? '',
+			planPurchaseTermsUrl: settings.get('plan_purchase_terms_url') ?? '',
 			turnstileEnabled: (c.env.TURNSTILE_SECRET as string) !== '',
 			turnstileSiteKey: c.env.TURNSTILE_SITE_KEY,
 			googleAuthEnabled,
@@ -106,6 +108,19 @@ app.get('/meta', async (c) => {
 				.map(chain => chain.chainId)
 				.filter(chainId => getPaymentChainRpcUrl(c.env, chainId) !== null),
 		});
+		const headers = new Headers(response.headers);
+		headers.set('X-Cache', 'MISS');
+		const responseWithCacheHeader = new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+		runBackgroundTask(
+			promise => c.executionCtx.waitUntil(promise),
+			cache.put(cacheRequest, responseWithCacheHeader.clone()),
+			'Failed to put meta response into cache:',
+		);
+		return responseWithCacheHeader;
 	} catch {
 		return createMetaResponse({
 			appName: DEFAULT_APP_NAME,

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'eventemitter3';
+import { runBackgroundTask } from '../utils/background-task';
 
 export type FileReference = {
 	id: string;
@@ -30,14 +31,5 @@ type MutationEvents = {
 export const fileMutationEvents = new EventEmitter<MutationEvents>();
 
 export function runMutationTask(waitUntil: MutationContext['waitUntil'], promise: Promise<void>, errorMessage: string): void {
-	try {
-		waitUntil?.(promise);
-	} catch {
-		void promise.catch((error: unknown) => console.error(errorMessage, error));
-		return;
-	}
-
-	if (waitUntil === undefined) {
-		void promise.catch((error: unknown) => console.error(errorMessage, error));
-	}
+	runBackgroundTask(waitUntil, promise, errorMessage);
 }

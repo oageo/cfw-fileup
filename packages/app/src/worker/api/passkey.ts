@@ -21,6 +21,7 @@ import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 import { getAppName } from '../utils/app-name';
+import { runBackgroundTask } from '../utils/background-task';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -49,10 +50,13 @@ function getRpInfo(reqUrl: string): { rpID: string; origin: string } {
 	return { rpID: url.hostname, origin: url.origin };
 }
 
-/** Clean up expired challenges (best-effort, non-blocking) */
-function cleanupExpiredChallenges(db: ReturnType<typeof getDb>): void {
+function cleanupExpiredChallenges(db: ReturnType<typeof getDb>, waitUntil: (promise: Promise<void>) => void): void {
 	const now = Date.now();
-	db.delete(passkeysChallenges).where(lt(passkeysChallenges.expiresAt, now)).run().catch(() => {});
+	runBackgroundTask(
+		waitUntil,
+		db.delete(passkeysChallenges).where(lt(passkeysChallenges.expiresAt, now)).run().then(() => undefined),
+		'Failed to clean up expired passkey challenges:',
+	);
 }
 
 /** Generate a random alphanumeric backup code */
@@ -116,7 +120,7 @@ app.post(
 			expiresAt: Date.now() + CHALLENGE_TTL_MS,
 		});
 
-		cleanupExpiredChallenges(db);
+		cleanupExpiredChallenges(db, promise => c.executionCtx.waitUntil(promise));
 
 		return c.json({ challengeId, options }, 200);
 	}, getResponseDefWithAuth('/api/passkey/register/begin')),
@@ -216,7 +220,7 @@ app.post(
 			expiresAt: Date.now() + CHALLENGE_TTL_MS,
 		});
 
-		cleanupExpiredChallenges(db);
+		cleanupExpiredChallenges(db, promise => c.executionCtx.waitUntil(promise));
 
 		return c.json({ challengeId, options }, 200);
 	}, apiDef['/api/passkey/authenticate/begin'].res),
@@ -545,7 +549,7 @@ app.post(
 			expiresAt: Date.now() + CHALLENGE_TTL_MS,
 		});
 
-		cleanupExpiredChallenges(db);
+		cleanupExpiredChallenges(db, promise => c.executionCtx.waitUntil(promise));
 
 		return c.json({ challengeId, options }, 200);
 	}, apiDef['/api/passkey/signup/begin'].res),
