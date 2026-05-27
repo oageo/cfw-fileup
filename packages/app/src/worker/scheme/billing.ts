@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { plans } from './rate-limits';
 import { userWallets } from './user-wallets';
@@ -64,6 +65,9 @@ export const paymentAssetPlanPrices = sqliteTable('payment_asset_plan_prices', {
 	index('payment_asset_plan_prices_plan_id_idx').on(table.planId),
 	index('payment_asset_plan_prices_expires_at_idx').on(table.expiresAt),
 	index('payment_asset_plan_prices_asset_plan_expires_idx').on(table.assetId, table.planId, table.expiresAt),
+	uniqueIndex('payment_asset_plan_prices_active_duration_unique_idx')
+		.on(table.assetId, table.planId, table.durationDays, table.durationUnit)
+		.where(sql`${table.expiresAt} IS NULL`),
 ]);
 
 export const paymentAssetPlanPricePeriods = sqliteTable('payment_asset_plan_price_periods', {

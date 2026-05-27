@@ -290,13 +290,6 @@ async function assertPaymentPriceRules(env: Env, input: PaymentPriceRuleInput): 
 			isNull(paymentAssetPlanPrices.expiresAt),
 		));
 
-	if (existingPrices.some(price => (
-		price.durationDays === input.durationDays
-		&& price.durationUnit === input.durationUnit
-	))) {
-		throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
-	}
-
 	const inputDuration = durationSortValue(input.durationDays, input.durationUnit);
 	const inputAmount = BigInt(input.amountBaseUnits);
 	for (const price of existingPrices) {
@@ -658,7 +651,12 @@ app.post(
 		await assertPaymentPriceRules(c.env, body);
 		const now = Date.now();
 		const price = { id: genEaidx(now), assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, createdAt: now, updatedAt: now };
-		await db.insert(paymentAssetPlanPrices).values(price);
+		try {
+			await db.insert(paymentAssetPlanPrices).values(price);
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
+			throw e;
+		}
 		await createPriceHistoryPeriod(c.env, price, now);
 		const response = await getPriceResponse(c.env, price.id);
 		if (!response) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
@@ -685,7 +683,12 @@ app.post(
 		await assertPaymentPriceRules(c.env, { id: body.priceId, ...body });
 		const now = Date.now();
 		const updated = { ...existing, assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, updatedAt: now };
-		await db.update(paymentAssetPlanPrices).set(updated).where(eq(paymentAssetPlanPrices.id, body.priceId));
+		try {
+			await db.update(paymentAssetPlanPrices).set(updated).where(eq(paymentAssetPlanPrices.id, body.priceId));
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
+			throw e;
+		}
 		if (didPricePeriodChange(existing, updated)) {
 			await closeOpenPriceHistoryPeriods(c.env, body.priceId, now);
 			await createPriceHistoryPeriod(c.env, updated, now);
