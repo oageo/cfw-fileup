@@ -42,6 +42,7 @@ const PaymentAssetResponse = v.pipe(
 		id: IdString,
 		symbol: v.string(),
 		name: v.string(),
+		currencyCode: v.string(),
 		isEnabled: v.boolean(),
 		createdAt: v.number(),
 		updatedAt: v.number(),
@@ -304,9 +305,43 @@ const CryptoPaymentOrderResponse = v.pipe(
 		expiresAt: v.number(),
 		paidAt: v.nullable(v.number()),
 		cfRegionSnapshot: v.union([v.string(), CfRegionSnapshotResponse]),
+		taxName: v.string(),
+		taxRate: v.string(),
+		taxCurrency: v.string(),
+		taxIncludedAmountBaseUnits: BigIntString,
+		taxExcludedAmountBaseUnits: BigIntString,
+		taxAmountBaseUnits: BigIntString,
+		taxStatementId: v.nullable(IdString),
 	}),
 	v.metadata({ ref: 'CryptoPaymentOrder' }),
 );
+
+const BillingReceiptResponse = v.object({
+	order: CryptoPaymentOrderResponse,
+	seller: v.object({
+		name: v.string(),
+		address: v.string(),
+		invoiceRegistrationNumber: v.string(),
+	}),
+});
+
+const BillingTaxSummaryResponse = v.object({
+	from: v.number(),
+	to: v.number(),
+	count: v.number(),
+	taxIncludedAmountBaseUnits: BigIntString,
+	taxExcludedAmountBaseUnits: BigIntString,
+	taxAmountBaseUnits: BigIntString,
+	byRate: v.array(v.object({
+		taxName: v.string(),
+		taxRate: v.string(),
+		taxCurrency: v.string(),
+		count: v.number(),
+		taxIncludedAmountBaseUnits: BigIntString,
+		taxExcludedAmountBaseUnits: BigIntString,
+		taxAmountBaseUnits: BigIntString,
+	})),
+});
 
 const ChainInput = {
 	chainId: v.pipe(v.number(), v.integer(), v.minValue(1)),
@@ -322,6 +357,7 @@ const ChainInput = {
 const AssetInput = {
 	symbol: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(20)),
 	name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100)),
+	currencyCode: v.optional(v.pipe(v.string(), v.trim(), v.regex(/^[A-Z]{3}$/)), 'USD'),
 	isEnabled: v.optional(v.boolean(), true),
 } as const;
 
@@ -410,6 +446,12 @@ export const billingApiDef = {
 		tags: ['billing'],
 		req: v.object(PageRequestFields),
 		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(CryptoPaymentOrderResponse) } } } },
+	},
+	'/api/billing/get-payment-receipt': {
+		summary: 'Get a paid payment receipt',
+		tags: ['billing'],
+		req: v.object({ orderId: IdString }),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: BillingReceiptResponse } } }, 404: errorResponse('Payment order not found', ['PAYMENT_ORDER_NOT_FOUND']) },
 	},
 	'/api/admin/list-payment-chains': {
 		summary: 'List payment chains',
@@ -529,5 +571,14 @@ export const billingApiDef = {
 		tags: ['admin', 'billing'],
 		req: v.object(PageRequestFields),
 		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(CryptoPaymentOrderResponse) } } } },
+	},
+	'/api/admin/get-billing-tax-summary': {
+		summary: 'Get billing tax summary',
+		tags: ['admin', 'billing'],
+		req: v.object({
+			from: v.pipe(v.number(), v.integer(), v.minValue(0)),
+			to: v.pipe(v.number(), v.integer(), v.minValue(0)),
+		}),
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: BillingTaxSummaryResponse } } } },
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

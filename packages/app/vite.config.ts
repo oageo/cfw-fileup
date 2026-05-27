@@ -35,6 +35,14 @@ export default defineConfig({
 			ignored: ['**/.wrangler/**'],
 		},
 	},
+	optimizeDeps: {
+		include: [
+			'@pdfme/common',
+			'@pdfme/generator',
+			'@pdfme/schemas',
+			'pako',
+		],
+	},
 	resolve: {
 		alias: {
 			'@': resolve(__dirname, 'src/client'),

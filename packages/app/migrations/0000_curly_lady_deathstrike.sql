@@ -1,3 +1,14 @@
+CREATE TABLE `billing_residency_statements` (
+	`id` text PRIMARY KEY NOT NULL,
+	`country` text NOT NULL,
+	`statement` text NOT NULL,
+	`is_enabled` integer DEFAULT true NOT NULL,
+	`created_at` integer NOT NULL,
+	`updated_at` integer NOT NULL,
+	`retired_at` integer
+);
+--> statement-breakpoint
+CREATE INDEX `billing_residency_statements_country_enabled_idx` ON `billing_residency_statements` (`country`,`is_enabled`);--> statement-breakpoint
 CREATE TABLE `crypto_payment_orders` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -37,12 +48,21 @@ CREATE TABLE `crypto_payment_orders` (
 	`updated_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
 	`paid_at` integer,
+	`cf_region_snapshot` text DEFAULT '{}' NOT NULL,
+	`tax_name` text DEFAULT '消費税' NOT NULL,
+	`tax_rate` text DEFAULT '0.1' NOT NULL,
+	`tax_currency` text DEFAULT 'USD' NOT NULL,
+	`tax_included_amount_base_units` text DEFAULT '0' NOT NULL,
+	`tax_excluded_amount_base_units` text DEFAULT '0' NOT NULL,
+	`tax_amount_base_units` text DEFAULT '0' NOT NULL,
+	`tax_statement_id` text,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`payer_wallet_id`) REFERENCES `user_wallets`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`price_id`) REFERENCES `payment_asset_plan_prices`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`deployment_id`) REFERENCES `payment_asset_deployments`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`asset_id`) REFERENCES `payment_assets`(`id`) ON UPDATE no action ON DELETE set null
+	FOREIGN KEY (`asset_id`) REFERENCES `payment_assets`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`tax_statement_id`) REFERENCES `billing_residency_statements`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE INDEX `crypto_payment_orders_user_id_id_idx` ON `crypto_payment_orders` (`user_id`,`id`);--> statement-breakpoint
@@ -89,6 +109,7 @@ CREATE TABLE `payment_assets` (
 	`id` text PRIMARY KEY NOT NULL,
 	`symbol` text NOT NULL,
 	`name` text NOT NULL,
+	`currency_code` text DEFAULT 'USD' NOT NULL,
 	`is_enabled` integer DEFAULT true NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL

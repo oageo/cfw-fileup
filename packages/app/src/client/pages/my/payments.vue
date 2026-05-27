@@ -14,6 +14,7 @@ const payments = ref<Payment[]>([]);
 const loadingPayments = ref(true);
 const cancelingPaymentId = ref<string | null>(null);
 const checkingPaymentId = ref<string | null>(null);
+const loadingReceiptId = ref<string | null>(null);
 const offersReloadKey = ref(0);
 const error = ref('');
 
@@ -149,6 +150,24 @@ function paymentStatusText(payment: Payment): string {
 	return paymentStatusLabel(payment.status);
 }
 
+async function openReceipt(payment: Payment): Promise<void> {
+	loadingReceiptId.value = payment.id;
+	error.value = '';
+	try {
+		const result = await apiPost('/api/billing/get-payment-receipt', { orderId: payment.id });
+		if (!result.ok) {
+			error.value = result.data.message || '領収書の取得に失敗しました';
+			return;
+		}
+		const { downloadReceiptPdf } = await import('@/utils/receipt-pdf');
+		await downloadReceiptPdf(result.data);
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		loadingReceiptId.value = null;
+	}
+}
+
 onMounted(loadPayments);
 </script>
 
@@ -234,6 +253,9 @@ onMounted(loadPayments);
                     <button v-show="canCheckPayment(payment)" class="btn btn-secondary btn-sm" :class="$style.actionButton" type="button" :disabled="checkingPaymentId !== null" @click="checkPayment(payment)">
                       <span v-if="checkingPaymentId === payment.id" class="btn-spinner" aria-hidden="true" />
                       {{ checkPaymentButtonLabel(payment) }}
+                    </button>
+                    <button v-show="payment.status === 'paid'" class="btn btn-secondary btn-sm" :class="$style.actionButton" type="button" :disabled="loadingReceiptId !== null" @click="openReceipt(payment)">
+                      {{ loadingReceiptId === payment.id ? '作成中...' : '領収書' }}
                     </button>
                   </td>
                 </tr>

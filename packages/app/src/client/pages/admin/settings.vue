@@ -67,6 +67,24 @@ async function fetchSettings(): Promise<void> {
 				case 'crypto_payments_enabled':
 					map.crypto_payments_enabled = s.value;
 					break;
+				case 'billing_region_rules':
+					map.billing_region_rules = s.value;
+					break;
+				case 'billing_tax_name':
+					map.billing_tax_name = s.value;
+					break;
+				case 'billing_tax_rate':
+					map.billing_tax_rate = s.value;
+					break;
+				case 'billing_seller_name':
+					map.billing_seller_name = s.value;
+					break;
+				case 'billing_seller_address':
+					map.billing_seller_address = s.value;
+					break;
+				case 'billing_invoice_registration_number':
+					map.billing_invoice_registration_number = s.value;
+					break;
 				case 'forbidden_usernames':
 					map.forbidden_usernames = s.value;
 					break;
@@ -238,6 +256,68 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
         >
           有効にすると、チェーン・RPC・デプロイメント・価格設定が揃っている場合に暗号資産決済を受け付けます。
         </SettingItem>
+
+        <SettingItem
+          v-model="values['billing_region_rules']"
+          :schema="KNOWN_SETTINGS['billing_region_rules']"
+          title="課金販売地域ルール"
+          :saving="saving['billing_region_rules']"
+          multiline
+          :show-save-button="true"
+          @save="saveSetting('billing_region_rules', $event)"
+        >
+          JSONで販売可否を指定します。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['billing_tax_name']"
+          :schema="KNOWN_SETTINGS['billing_tax_name']"
+          title="税名"
+          :saving="saving['billing_tax_name']"
+          :show-save-button="true"
+          @save="saveSetting('billing_tax_name', $event)"
+        >
+          領収書と税額集計に保存される税名です。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['billing_tax_rate']"
+          :schema="KNOWN_SETTINGS['billing_tax_rate']"
+          title="税率"
+          :saving="saving['billing_tax_rate']"
+          :show-save-button="true"
+          @save="saveSetting('billing_tax_rate', $event)"
+        >
+          例: 0.1
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['billing_seller_name']"
+          :schema="KNOWN_SETTINGS['billing_seller_name']"
+          title="領収書 事業者名"
+          :saving="saving['billing_seller_name']"
+          :show-save-button="true"
+          @save="saveSetting('billing_seller_name', $event)"
+        />
+
+        <SettingItem
+          v-model="values['billing_seller_address']"
+          :schema="KNOWN_SETTINGS['billing_seller_address']"
+          title="領収書 事業者住所"
+          :saving="saving['billing_seller_address']"
+          multiline
+          :show-save-button="true"
+          @save="saveSetting('billing_seller_address', $event)"
+        />
+
+        <SettingItem
+          v-model="values['billing_invoice_registration_number']"
+          :schema="KNOWN_SETTINGS['billing_invoice_registration_number']"
+          title="登録番号"
+          :saving="saving['billing_invoice_registration_number']"
+          :show-save-button="true"
+          @save="saveSetting('billing_invoice_registration_number', $event)"
+        />
 
         <SettingItem
           v-model="values['forbidden_usernames']"

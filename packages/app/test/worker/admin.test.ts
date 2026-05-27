@@ -53,6 +53,7 @@ describe('Admin access control', () => {
 			{ path: '/api/admin/list-payment-asset-deployments', body: {} },
 			{ path: '/api/admin/list-payment-asset-plan-prices', body: {} },
 			{ path: '/api/admin/list-crypto-payment-orders', body: {} },
+			{ path: '/api/admin/get-billing-tax-summary', body: { from: 0, to: Date.now() + 1_000 } },
 		];
 
 		for (const { path, body } of endpoints) {
@@ -1240,7 +1241,7 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
 		}, env);
 		expect(orderRes.status).toBe(200);
-		const order = await orderRes.json() as { amountBaseUnits: string; chainId: number; contractAddress: string; recipientAddress: string; payerAddress: string; status: string };
+		const order = await orderRes.json() as { id: string; amountBaseUnits: string; chainId: number; contractAddress: string; recipientAddress: string; payerAddress: string; status: string; taxName: string; taxRate: string; taxCurrency: string; taxIncludedAmountBaseUnits: string; taxExcludedAmountBaseUnits: string; taxAmountBaseUnits: string; taxStatementId: string | null };
 		expect(order).toMatchObject({
 			amountBaseUnits: '30000000',
 			chainId: 8453,
@@ -1248,14 +1249,41 @@ describe('Crypto payment administration', () => {
 			payerAddress: wallet.address,
 			recipientAddress,
 			status: 'pending',
+			taxName: '消費税',
+			taxRate: '0.1',
+			taxCurrency: 'USD',
+			taxIncludedAmountBaseUnits: '30000000',
+			taxExcludedAmountBaseUnits: '27272727',
+			taxAmountBaseUnits: '2727273',
 		});
-		const stored = await env.DB.prepare('SELECT cf_region_snapshot FROM crypto_payment_orders WHERE id = ?').bind((order as { id: string }).id).first<{ cf_region_snapshot: string }>();
+		expect(order.taxStatementId).toBeTruthy();
+		const stored = await env.DB.prepare('SELECT cf_region_snapshot FROM crypto_payment_orders WHERE id = ?').bind(order.id).first<{ cf_region_snapshot: string }>();
 		expect(JSON.parse(stored?.cf_region_snapshot ?? '{}')).toMatchObject({
 			country: 'JP',
 			continent: 'AS',
 			regionCode: '13',
 			timezone: 'Asia/Tokyo',
 		});
+		const paidAt = Date.now();
+		await env.DB.prepare('UPDATE crypto_payment_orders SET status = \'paid\', paid_at = ? WHERE id = ?').bind(paidAt, order.id).run();
+		const receiptRes = await app.request('/api/billing/get-payment-receipt', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ orderId: order.id }),
+		}, env);
+		expect(receiptRes.status).toBe(200);
+		const receipt = await receiptRes.json() as { order: { id: string; taxAmountBaseUnits: string; taxCurrency: string }; seller: { name: string } };
+		expect(receipt.order).toMatchObject({ id: order.id, taxAmountBaseUnits: '2727273', taxCurrency: 'USD' });
+		expect(receipt.seller.name).toBeTruthy();
+		const summaryRes = await app.request('/api/admin/get-billing-tax-summary', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ from: paidAt - 1_000, to: paidAt + 1_000 }),
+		}, env);
+		expect(summaryRes.status).toBe(200);
+		const summary = await summaryRes.json() as { count: number; taxIncludedAmountBaseUnits: string; taxExcludedAmountBaseUnits: string; taxAmountBaseUnits: string; byRate: Array<{ taxRate: string; taxCurrency: string; taxAmountBaseUnits: string }> };
+		expect(summary).toMatchObject({ count: 1, taxIncludedAmountBaseUnits: '30000000', taxExcludedAmountBaseUnits: '27272727', taxAmountBaseUnits: '2727273' });
+		expect(summary.byRate).toContainEqual(expect.objectContaining({ taxRate: '0.1', taxCurrency: 'USD', taxAmountBaseUnits: '2727273' }));
 	});
 
 	test('crypto order creation rejects regions outside billing rules', async () => {

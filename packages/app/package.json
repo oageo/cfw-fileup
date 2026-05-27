@@ -33,6 +33,9 @@
   "dependencies": {
     "@hono/standard-validator": "^0.2.2",
     "@lucide/vue": "^1.16.0",
+    "@pdfme/common": "^6.1.2",
+    "@pdfme/generator": "^6.1.2",
+    "@pdfme/schemas": "^6.1.2",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.0",
     "@tanstack/vue-query": "^5.100.14",

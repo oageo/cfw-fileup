@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers';
 import workerApp from '../../src/worker/index';
-import migration0000 from '../../migrations/0000_sturdy_peter_parker.sql?raw';
-import migration0001 from '../../migrations/0001_closed_stranger.sql?raw';
+import migration0000 from '../../migrations/0000_curly_lady_deathstrike.sql?raw';
 
 const defaultCf = {
 	country: 'JP',
@@ -39,7 +38,6 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 
 const migrations = [
 	migration0000,
-	migration0001,
 ] as const;
 
 const tables = [
@@ -49,6 +47,7 @@ const tables = [
 	'file_access_tokens',
 	'file_reports',
 	'crypto_payment_orders',
+	'billing_residency_statements',
 	'wallet_link_challenges',
 	'user_wallets',
 	'payment_asset_plan_prices',

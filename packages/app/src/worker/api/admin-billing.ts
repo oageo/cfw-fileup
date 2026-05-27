@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, asc, desc, eq, lt, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, lt, ne, sql } from 'drizzle-orm';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -293,6 +293,7 @@ function assetAuditData(asset: typeof paymentAssets.$inferSelect): Record<string
 		assetId: asset.id,
 		assetSymbol: asset.symbol,
 		assetName: asset.name,
+		currencyCode: asset.currencyCode,
 		isEnabled: asset.isEnabled,
 	};
 }
@@ -430,7 +431,7 @@ app.post(
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
 		const now = Date.now();
-		const asset = { id: genEaidx(now), symbol: body.symbol, name: body.name, isEnabled: body.isEnabled, createdAt: now, updatedAt: now };
+		const asset = { id: genEaidx(now), symbol: body.symbol, name: body.name, currencyCode: body.currencyCode, isEnabled: body.isEnabled, createdAt: now, updatedAt: now };
 		await db.insert(paymentAssets).values(asset);
 		await recordModerationAuditLog(c, 'admin_payment_asset_created', { data: assetAuditData(asset) });
 		return c.json(asset, 200);
@@ -446,7 +447,7 @@ app.post(
 		const body = c.req.valid('json');
 		const existing = await db.select().from(paymentAssets).where(eq(paymentAssets.id, body.assetId)).get();
 		if (!existing) throw apiError(404, 'PAYMENT_ASSET_NOT_FOUND');
-		const updated = { ...existing, symbol: body.symbol, name: body.name, isEnabled: body.isEnabled, updatedAt: Date.now() };
+		const updated = { ...existing, symbol: body.symbol, name: body.name, currencyCode: body.currencyCode, isEnabled: body.isEnabled, updatedAt: Date.now() };
 		await db.update(paymentAssets).set(updated).where(eq(paymentAssets.id, body.assetId));
 		await recordModerationAuditLog(c, 'admin_payment_asset_updated', { data: assetAuditData(updated) });
 		return c.json(updated, 200);
@@ -686,6 +687,59 @@ app.post(
 			.limit(limit + 1);
 		return c.json(idPage(rows, limit, row => row), 200);
 	}, getResponseDefWithAuth('/api/admin/list-crypto-payment-orders')),
+);
+
+app.post(
+	'/get-billing-tax-summary',
+	describeRoute(omitResAndReq(apiDef['/api/admin/get-billing-tax-summary'])),
+	validator('json', apiDef['/api/admin/get-billing-tax-summary'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/get-billing-tax-summary', Env>) => {
+		const body = c.req.valid('json');
+		const db = getDb(c.env);
+		const where = and(
+			eq(cryptoPaymentOrders.status, 'paid'),
+			sql`${cryptoPaymentOrders.paidAt} >= ${body.from}`,
+			sql`${cryptoPaymentOrders.paidAt} < ${body.to}`,
+		);
+		const total = await db
+			.select({
+				count: sql<number>`count(*)`,
+				taxIncludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				taxExcludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
+			})
+			.from(cryptoPaymentOrders)
+			.where(where)
+			.get();
+		const byRate = await db
+			.select({
+				taxName: cryptoPaymentOrders.taxName,
+				taxRate: cryptoPaymentOrders.taxRate,
+				taxCurrency: cryptoPaymentOrders.taxCurrency,
+				count: sql<number>`count(*)`,
+				taxIncludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				taxExcludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
+			})
+			.from(cryptoPaymentOrders)
+			.where(where)
+			.groupBy(cryptoPaymentOrders.taxName, cryptoPaymentOrders.taxRate, cryptoPaymentOrders.taxCurrency)
+			.orderBy(asc(cryptoPaymentOrders.taxName), asc(cryptoPaymentOrders.taxRate), asc(cryptoPaymentOrders.taxCurrency));
+		return c.json({
+			from: body.from,
+			to: body.to,
+			count: total?.count ?? 0,
+			taxIncludedAmountBaseUnits: String(total?.taxIncludedAmountBaseUnits ?? '0'),
+			taxExcludedAmountBaseUnits: String(total?.taxExcludedAmountBaseUnits ?? '0'),
+			taxAmountBaseUnits: String(total?.taxAmountBaseUnits ?? '0'),
+			byRate: byRate.map(row => ({
+				...row,
+				taxIncludedAmountBaseUnits: String(row.taxIncludedAmountBaseUnits),
+				taxExcludedAmountBaseUnits: String(row.taxExcludedAmountBaseUnits),
+				taxAmountBaseUnits: String(row.taxAmountBaseUnits),
+			})),
+		}, 200);
+	}, getResponseDefWithAuth('/api/admin/get-billing-tax-summary')),
 );
 
 export const adminBillingRoutes = app;

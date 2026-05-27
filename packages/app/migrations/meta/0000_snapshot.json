@@ -1,9 +1,78 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "058b18c9-705e-41d7-891e-6ff33a88a528",
+  "id": "eea22de0-8737-4fef-8a99-c5c5e8d302e9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "billing_residency_statements": {
+      "name": "billing_residency_statements",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "country": {
+          "name": "country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "statement": {
+          "name": "statement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "is_enabled": {
+          "name": "is_enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "billing_residency_statements_country_enabled_idx": {
+          "name": "billing_residency_statements_country_enabled_idx",
+          "columns": [
+            "country",
+            "is_enabled"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "crypto_payment_orders": {
       "name": "crypto_payment_orders",
       "columns": {
@@ -275,6 +344,69 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "cf_region_snapshot": {
+          "name": "cf_region_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "tax_name": {
+          "name": "tax_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'消費税'"
+        },
+        "tax_rate": {
+          "name": "tax_rate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0.1'"
+        },
+        "tax_currency": {
+          "name": "tax_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'USD'"
+        },
+        "tax_included_amount_base_units": {
+          "name": "tax_included_amount_base_units",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "tax_excluded_amount_base_units": {
+          "name": "tax_excluded_amount_base_units",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "tax_amount_base_units": {
+          "name": "tax_amount_base_units",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'0'"
+        },
+        "tax_statement_id": {
+          "name": "tax_statement_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -375,6 +507,19 @@
           "tableTo": "payment_assets",
           "columnsFrom": [
             "asset_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "crypto_payment_orders_tax_statement_id_billing_residency_statements_id_fk": {
+          "name": "crypto_payment_orders_tax_statement_id_billing_residency_statements_id_fk",
+          "tableFrom": "crypto_payment_orders",
+          "tableTo": "billing_residency_statements",
+          "columnsFrom": [
+            "tax_statement_id"
           ],
           "columnsTo": [
             "id"
@@ -683,6 +828,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "currency_code": {
+          "name": "currency_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'USD'"
         },
         "is_enabled": {
           "name": "is_enabled",

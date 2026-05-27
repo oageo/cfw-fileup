@@ -22,6 +22,7 @@ export const paymentAssets = sqliteTable('payment_assets', {
 	id: text('id').primaryKey(),
 	symbol: text('symbol').notNull(),
 	name: text('name').notNull(),
+	currencyCode: text('currency_code').notNull().default('USD'),
 	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
@@ -66,6 +67,18 @@ export const paymentAssetPlanPrices = sqliteTable('payment_asset_plan_prices', {
 	index('payment_asset_plan_prices_asset_plan_period_idx').on(table.assetId, table.planId, table.durationDays, table.durationUnit, table.startsAt, table.expiresAt),
 ]);
 
+export const billingResidencyStatements = sqliteTable('billing_residency_statements', {
+	id: text('id').primaryKey(),
+	country: text('country').notNull(),
+	statement: text('statement').notNull(),
+	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+	createdAt: integer('created_at').notNull(),
+	updatedAt: integer('updated_at').notNull(),
+	retiredAt: integer('retired_at'),
+}, (table) => [
+	index('billing_residency_statements_country_enabled_idx').on(table.country, table.isEnabled),
+]);
+
 export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	id: text('id').primaryKey(),
 	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -106,6 +119,13 @@ export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	expiresAt: integer('expires_at').notNull(),
 	paidAt: integer('paid_at'),
 	cfRegionSnapshot: text('cf_region_snapshot').notNull().default('{}'),
+	taxName: text('tax_name').notNull().default('消費税'),
+	taxRate: text('tax_rate').notNull().default('0.1'),
+	taxCurrency: text('tax_currency').notNull().default('USD'),
+	taxIncludedAmountBaseUnits: text('tax_included_amount_base_units').notNull().default('0'),
+	taxExcludedAmountBaseUnits: text('tax_excluded_amount_base_units').notNull().default('0'),
+	taxAmountBaseUnits: text('tax_amount_base_units').notNull().default('0'),
+	taxStatementId: text('tax_statement_id').references(() => billingResidencyStatements.id, { onDelete: 'set null' }),
 }, (table) => [
 	index('crypto_payment_orders_user_id_id_idx').on(table.userId, table.id),
 	index('crypto_payment_orders_status_expires_at_idx').on(table.status, table.expiresAt),

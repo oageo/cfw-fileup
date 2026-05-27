@@ -52,7 +52,7 @@ const defaultChainForm = {
 	isEnabled: true,
 };
 const chainForm = ref({ ...defaultChainForm });
-const assetForm = ref({ symbol: 'USD', name: 'US Dollar', isEnabled: true });
+const assetForm = ref({ symbol: 'USD', name: 'US Dollar', currencyCode: 'USD', isEnabled: true });
 const defaultDeploymentForm = {
 	assetId: '',
 	chainId: 8453,
@@ -98,7 +98,11 @@ const canSaveChain = computed(() => (
 		|| optionalHttpUrlPattern.test(chainForm.value.blockExplorerUrl.trim())
 	)
 ));
-const canSaveAsset = computed(() => assetForm.value.symbol.trim() !== '' && assetForm.value.name.trim() !== '');
+const canSaveAsset = computed(() => (
+	assetForm.value.symbol.trim() !== ''
+	&& assetForm.value.name.trim() !== ''
+	&& /^[A-Z]{3}$/.test(assetForm.value.currencyCode.trim())
+));
 const canSaveDeployment = computed(() => (
 	deploymentForm.value.assetId !== ''
 	&& Number.isInteger(deploymentForm.value.chainId)
@@ -248,6 +252,7 @@ async function toggleAssetEnabled(asset: Asset): Promise<void> {
 		assetId: asset.id,
 		symbol: asset.symbol,
 		name: asset.name,
+		currencyCode: asset.currencyCode,
 		isEnabled: !asset.isEnabled,
 	}), asset.isEnabled ? '通貨を無効化しました' : '通貨を有効化しました');
 }
@@ -618,17 +623,22 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
               <label class="form-label" for="asset-name">Name</label>
               <input id="asset-name" v-model="assetForm.name" class="form-input" type="text">
             </div>
+            <div :class="['form-group', $style.currencyCodeGroup]">
+              <label class="form-label" for="asset-currency-code">Tax currency (internal)</label>
+              <input id="asset-currency-code" v-model="assetForm.currencyCode" class="form-input" type="text" placeholder="ISO 4217">
+            </div>
             <label :class="$style.checkbox"><input v-model="assetForm.isEnabled" type="checkbox">有効</label>
             <button class="btn btn-primary" type="submit" :disabled="saving || !canSaveAsset">作成</button>
           </form>
           <div :class="['card', $style.tableCard]">
             <div class="table-responsive">
               <table class="data-table">
-                <thead><tr><th>Symbol</th><th>Name</th><th>状態</th><th class="col-actions">操作</th></tr></thead>
+                <thead><tr><th>Symbol</th><th>Name</th><th>Internal tax currency</th><th>状態</th><th class="col-actions">操作</th></tr></thead>
                 <tbody>
                   <tr v-for="asset in assets" :key="asset.id">
                     <td>{{ asset.symbol }}</td>
                     <td>{{ asset.name }}</td>
+                    <td>{{ asset.currencyCode }}</td>
                     <td><span :class="['badge', asset.isEnabled ? 'badge-success' : 'badge-muted']">{{ asset.isEnabled ? '有効' : '無効' }}</span></td>
                     <td :class="$style.actionButtons">
                       <button class="btn btn-secondary btn-sm" type="button" :disabled="saving" @click="toggleAssetEnabled(asset)">
@@ -914,6 +924,10 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
   :global(.form-group) {
     flex-basis: 180px;
   }
+}
+
+.currencyCodeGroup {
+  max-width: 240px;
 }
 
 .deploymentForm {

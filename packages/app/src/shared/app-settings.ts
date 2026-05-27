@@ -23,6 +23,7 @@ export const optionalDateSettingSchema = v.union([
 	v.literal(''),
 	v.pipe(v.string(), v.isoDate()),
 ]);
+export const decimalStringSchema = v.pipe(v.string(), v.regex(/^(0|[1-9]\d*)(\.\d+)?$/));
 export const regionRuleSchema = v.pipe(
 	v.object({
 		country: v.optional(v.pipe(v.string(), v.regex(/^[A-Z]{2}$/))),
@@ -70,6 +71,11 @@ export const KNOWN_SETTINGS = {
 	reject_mismatched_file_type: v.optional(v.picklist(['true', 'false']), 'false'),
 	crypto_payments_enabled: v.optional(v.picklist(['true', 'false']), 'false'),
 	billing_region_rules: v.optional(billingRegionRulesSettingSchema, DEFAULT_BILLING_REGION_RULES),
+	billing_tax_name: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(40)), '消費税'),
+	billing_tax_rate: v.optional(decimalStringSchema, '0.1'),
+	billing_seller_name: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
+	billing_seller_address: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
+	billing_invoice_registration_number: v.optional(v.pipe(v.string(), v.maxLength(40)), ''),
 	forbidden_usernames: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_USERNAMES),
 	forbidden_bucket_names: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_BUCKET_NAMES),
 } as const;

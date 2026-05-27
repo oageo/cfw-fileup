@@ -15,6 +15,7 @@ import { idPage, pageParams } from '../utils/pagination';
 import { isPaymentChainRpcConfigured } from '../utils/payment-rpc';
 import { genEaidx } from '../../shared/eaid-x';
 import { assertBillingRegionAllowed, stringifyCfRegionSnapshot } from '../utils/billing-region';
+import { createBillingTaxSnapshot, getBillingReceiptSeller } from '../utils/billing-tax';
 
 const app = new Hono<{ Bindings: Env }>();
 const QUOTE_TTL_MS = 15 * 60 * 1000;
@@ -520,6 +521,7 @@ app.post(
 				deploymentId: paymentAssetDeployments.id,
 				planId: plans.id,
 				assetId: paymentAssets.id,
+				assetCurrencyCode: paymentAssets.currencyCode,
 				chainId: paymentChains.chainId,
 				chainName: paymentChains.name,
 				tokenSymbol: paymentAssetDeployments.tokenSymbol,
@@ -574,6 +576,12 @@ app.post(
 		if (BigInt(quote.payableAmountBaseUnits) < 0n) {
 			throw apiError(400, 'PAYMENT_QUOTE_INVALID');
 		}
+		const taxSnapshot = await createBillingTaxSnapshot(c.env, {
+			country: cfRegionSnapshot.country,
+			amountBaseUnits: quote.payableAmountBaseUnits,
+			decimals: price.decimals,
+			currencyCode: price.assetCurrencyCode,
+		});
 		const order = {
 			id: genEaidx(now),
 			userId: user.id,
@@ -614,6 +622,7 @@ app.post(
 			expiresAt: getCryptoPaymentOrderExpiresAt(now),
 			paidAt: null,
 			cfRegionSnapshot: stringifyCfRegionSnapshot(cfRegionSnapshot),
+			...taxSnapshot,
 		};
 		await db.insert(cryptoPaymentOrders).values(order);
 		if (BigInt(order.amountBaseUnits) === 0n) {
@@ -703,6 +712,24 @@ app.post(
 			.limit(limit + 1);
 		return c.json(idPage(rows, limit, row => row), 200);
 	}, getResponseDefWithAuth('/api/billing/list-my-payments')),
+);
+
+app.post(
+	'/get-payment-receipt',
+	describeRoute(omitResAndReq(apiDef['/api/billing/get-payment-receipt'])),
+	validator('json', apiDef['/api/billing/get-payment-receipt'].req),
+	describeResponse(async (c: JsonCtx<'/api/billing/get-payment-receipt', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const body = c.req.valid('json');
+		const order = await db
+			.select()
+			.from(cryptoPaymentOrders)
+			.where(and(eq(cryptoPaymentOrders.id, body.orderId), eq(cryptoPaymentOrders.userId, user.id), eq(cryptoPaymentOrders.status, 'paid')))
+			.get();
+		if (!order) throw apiError(404, 'PAYMENT_ORDER_NOT_FOUND');
+		return c.json({ order, seller: await getBillingReceiptSeller(c.env) }, 200);
+	}, getResponseDefWithAuth('/api/billing/get-payment-receipt')),
 );
 
 export const billingRoutes = app;
