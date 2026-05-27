@@ -70,6 +70,9 @@ async function fetchSettings(): Promise<void> {
 				case 'billing_region_rules':
 					map.billing_region_rules = s.value;
 					break;
+				case 'billing_residency_statement':
+					map.billing_residency_statement = s.value;
+					break;
 				case 'billing_tax_name':
 					map.billing_tax_name = s.value;
 					break;
@@ -267,6 +270,18 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           @save="saveSetting('billing_region_rules', $event)"
         >
           JSONで販売可否を指定します。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['billing_residency_statement']"
+          :schema="KNOWN_SETTINGS['billing_residency_statement']"
+          title="購入時の居住地申告文"
+          :saving="saving['billing_residency_statement']"
+          multiline
+          :show-save-button="true"
+          @save="saveSetting('billing_residency_statement', $event)"
+        >
+          購入前チェックボックスに表示し、注文時点の申告文として保存します。
         </SettingItem>
 
         <SettingItem

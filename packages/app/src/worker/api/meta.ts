@@ -4,7 +4,7 @@ import { appSettings, paymentChains } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
 import { getPaymentChainRpcUrl } from '../utils/payment-rpc';
-import { DEFAULT_APP_NAME } from '../../shared/app-settings';
+import { DEFAULT_APP_NAME, DEFAULT_BILLING_RESIDENCY_STATEMENT } from '../../shared/app-settings';
 import { runBackgroundTask } from '../utils/background-task';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -18,6 +18,7 @@ const metaSettingKeys = [
 	'terms_updated_at',
 	'privacy_policy_url',
 	'plan_purchase_terms_url',
+	'billing_residency_statement',
 ] as const;
 
 type MetaResponse = {
@@ -34,6 +35,7 @@ type MetaResponse = {
 	googleRequired: boolean;
 	indieAuthEnabled: boolean;
 	cryptoPaymentsEnabled: boolean;
+	billingResidencyStatement: string;
 	reownProjectId: string;
 	walletConnectChainIds: number[];
 };
@@ -103,6 +105,7 @@ app.get('/meta', async (c) => {
 			googleRequired,
 			indieAuthEnabled: true,
 			cryptoPaymentsEnabled,
+			billingResidencyStatement: settings.get('billing_residency_statement')?.trim() || DEFAULT_BILLING_RESIDENCY_STATEMENT,
 			reownProjectId: c.env.REOWN_PROJECT_ID ?? '',
 			walletConnectChainIds: walletConnectChains
 				.map(chain => chain.chainId)
@@ -136,6 +139,7 @@ app.get('/meta', async (c) => {
 			googleRequired: false,
 			indieAuthEnabled: true,
 			cryptoPaymentsEnabled: false,
+			billingResidencyStatement: DEFAULT_BILLING_RESIDENCY_STATEMENT,
 			reownProjectId: '',
 			walletConnectChainIds: [],
 		});

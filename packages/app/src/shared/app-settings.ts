@@ -12,6 +12,7 @@ export const DEFAULT_FORBIDDEN_BUCKET_NAMES =
 	'admin,administrator,root,system,maintainer,host,mod,moderator,owner,superuser,staff,auth,i,me,everyone,all,example,user,users,account,accounts,official,help,helps,support,supports,info,information,informations,announce,announces,announcement,announcements,notice,notification,notifications,dev,developer,developers,tech,cloudflare,cf';
 
 export const DEFAULT_BILLING_REGION_RULES = '{"mode":"allow","rules":[{"country":"JP"}]}';
+export const DEFAULT_BILLING_RESIDENCY_STATEMENT = '私は日本国内に住所または居所を有しており、日本在住者としてこの有料プランを購入します。';
 
 export const registrationModeSchema = v.picklist(['closed', 'passphrase', 'open']);
 export type RegistrationMode = v.InferOutput<typeof registrationModeSchema>;
@@ -71,6 +72,7 @@ export const KNOWN_SETTINGS = {
 	reject_mismatched_file_type: v.optional(v.picklist(['true', 'false']), 'false'),
 	crypto_payments_enabled: v.optional(v.picklist(['true', 'false']), 'false'),
 	billing_region_rules: v.optional(billingRegionRulesSettingSchema, DEFAULT_BILLING_REGION_RULES),
+	billing_residency_statement: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_BILLING_RESIDENCY_STATEMENT),
 	billing_tax_name: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(40)), '消費税'),
 	billing_tax_rate: v.optional(decimalStringSchema, '0.1'),
 	billing_seller_name: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),

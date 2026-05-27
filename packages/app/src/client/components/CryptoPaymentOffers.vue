@@ -57,6 +57,7 @@ const offers = ref<Offer[]>([]);
 const wallets = ref<LinkedWallet[]>([]);
 const currentPlan = ref<CurrentPlan>(null);
 const cryptoPaymentsEnabled = ref(false);
+const billingResidencyStatement = ref('');
 const loading = ref(true);
 const buyingOfferId = ref<string | null>(null);
 const addingTokenOfferId = ref<string | null>(null);
@@ -68,6 +69,7 @@ const error = ref('');
 const success = ref('');
 const purchaseProgress = ref('');
 const purchaseRulesAgreed = ref(false);
+const purchaseResidencyAgreed = ref(false);
 const walletSetupMode = ref(false);
 const selectingAnotherWallet = ref(false);
 const {
@@ -251,8 +253,9 @@ async function load(): Promise<void> {
 			error.value = currentPlanResult.data.message || 'プランの取得に失敗しました';
 			return;
 		}
-		const meta = await metaResult.json() as { cryptoPaymentsEnabled?: boolean };
+		const meta = await metaResult.json() as { cryptoPaymentsEnabled?: boolean; billingResidencyStatement?: string };
 		cryptoPaymentsEnabled.value = meta.cryptoPaymentsEnabled ?? false;
+		billingResidencyStatement.value = meta.billingResidencyStatement ?? '';
 		wallets.value = walletsResult.data;
 		currentPlan.value = currentPlanResult.data;
 		reconcileWalletSetupMode();
@@ -315,6 +318,7 @@ function selectPaymentAsset(assetId: string): void {
 function openPurchaseDialog(price: PurchasePrice): void {
 	selectedPurchasePriceId.value = price.id;
 	purchaseRulesAgreed.value = false;
+	purchaseResidencyAgreed.value = false;
 	if (
 		selectedDialogDeploymentId.value == null
 		|| !price.offers.some(offer => offer.deploymentId === selectedDialogDeploymentId.value)
@@ -330,6 +334,7 @@ function closePurchaseDialog(): void {
 	selectedPurchasePriceId.value = null;
 	selectedDialogDeploymentId.value = null;
 	purchaseRulesAgreed.value = false;
+	purchaseResidencyAgreed.value = false;
 }
 
 function onPurchaseDialogOpenChange(value: boolean): void {
@@ -566,7 +571,10 @@ function canRegisterFilterToken(): boolean {
 }
 
 function canBuySelectedOffer(): boolean {
-	return buyingOfferId.value === null && selectedDialogCanBuy.value && purchaseRulesAgreed.value;
+	return buyingOfferId.value === null
+		&& selectedDialogCanBuy.value
+		&& purchaseResidencyAgreed.value
+		&& purchaseRulesAgreed.value;
 }
 
 function formatDateOrDash(value: number | null): string {
@@ -964,6 +972,10 @@ onMounted(load);
 		                <p :class="$style.paymentCheckHint">
 		                  送信後すぐに確認できない場合があります。この画面を閉じた後は、決済履歴の「チェーン確認」ボタンで反映を再確認できます。
 		                </p>
+		                <label :class="[$style.purchaseRulesAgreement, $style.residencyAgreement]">
+		                  <input v-model="purchaseResidencyAgreed" type="checkbox">
+		                  <span>{{ billingResidencyStatement }}</span>
+		                </label>
 		                <label :class="$style.purchaseRulesAgreement">
 		                  <input v-model="purchaseRulesAgreed" type="checkbox">
 		                  <span>

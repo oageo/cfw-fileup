@@ -1,10 +1,9 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { DEFAULT_APP_NAME } from '../../shared/app-settings';
+import { DEFAULT_APP_NAME, DEFAULT_BILLING_RESIDENCY_STATEMENT } from '../../shared/app-settings';
 import { appSettings, billingResidencyStatements } from '../scheme/index';
 import { genEaidx } from '../../shared/eaid-x';
 import { getDb } from './db';
 
-const DEFAULT_JP_RESIDENCY_STATEMENT = '私は日本国内に住所または居所を有しており、日本在住者としてこの有料プランを購入します。';
 const DEFAULT_TAX_CURRENCY = 'USD';
 
 export type BillingTaxSnapshot = {
@@ -54,7 +53,7 @@ function normalizeTaxCurrency(currencyCode: string): string {
 	return /^[A-Z]{3}$/.test(normalized) ? normalized : DEFAULT_TAX_CURRENCY;
 }
 
-export async function getOrCreateActiveResidencyStatement(env: Env, country: string): Promise<typeof billingResidencyStatements.$inferSelect> {
+export async function getOrCreateActiveResidencyStatement(env: Env, country: string, statementText: string): Promise<typeof billingResidencyStatements.$inferSelect> {
 	const db = getDb(env);
 	const existing = await db
 		.select()
@@ -66,12 +65,18 @@ export async function getOrCreateActiveResidencyStatement(env: Env, country: str
 		))
 		.orderBy(desc(billingResidencyStatements.id))
 		.get();
-	if (existing) return existing;
+	if (existing?.statement === statementText) return existing;
 	const now = Date.now();
+	if (existing) {
+		await db
+			.update(billingResidencyStatements)
+			.set({ isEnabled: false, updatedAt: now, retiredAt: now })
+			.where(eq(billingResidencyStatements.id, existing.id));
+	}
 	const statement = {
 		id: genEaidx(now),
 		country,
-		statement: country === 'JP' ? DEFAULT_JP_RESIDENCY_STATEMENT : `I confirm that I am purchasing this paid plan as a resident of ${country}.`,
+		statement: statementText,
 		isEnabled: true,
 		createdAt: now,
 		updatedAt: now,
@@ -90,7 +95,8 @@ export async function createBillingTaxSnapshot(env: Env, input: {
 	const settings = await getSettingMap(env);
 	const taxName = settings.get('billing_tax_name') || '消費税';
 	const taxRate = settings.get('billing_tax_rate') || '0.1';
-	const statement = await getOrCreateActiveResidencyStatement(env, input.country);
+	const statementText = settings.get('billing_residency_statement')?.trim() || DEFAULT_BILLING_RESIDENCY_STATEMENT;
+	const statement = await getOrCreateActiveResidencyStatement(env, input.country, statementText);
 	const tax = calculateIncludedTaxBaseUnits(input.amountBaseUnits, taxRate);
 	return {
 		taxName,
