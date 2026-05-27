@@ -108,6 +108,10 @@ function canCheckPayment(payment: Payment): boolean {
 	return payment.status === 'pending' && payment.txHash != null;
 }
 
+function checkPaymentButtonLabel(payment: Payment): string {
+	return checkingPaymentId.value === payment.id ? '確認中...' : 'チェーン確認';
+}
+
 function paymentPlanName(payment: Payment): string {
 	return payment.planName ?? 'プラン';
 }
@@ -228,7 +232,8 @@ onMounted(loadPayments);
                       {{ cancelingPaymentId === payment.id ? 'キャンセル中...' : 'キャンセル' }}
                     </button>
                     <button v-show="canCheckPayment(payment)" class="btn btn-secondary btn-sm" :class="$style.actionButton" type="button" :disabled="checkingPaymentId !== null" @click="checkPayment(payment)">
-                      {{ checkingPaymentId === payment.id ? '確認中...' : '再確認' }}
+                      <span v-if="checkingPaymentId === payment.id" class="btn-spinner" aria-hidden="true" />
+                      {{ checkPaymentButtonLabel(payment) }}
                     </button>
                   </td>
                 </tr>

@@ -65,6 +65,24 @@ export const paymentAssetPlanPrices = sqliteTable('payment_asset_plan_prices', {
 	index('payment_asset_plan_prices_expires_at_idx').on(table.expiresAt),
 ]);
 
+export const paymentAssetPlanPricePeriods = sqliteTable('payment_asset_plan_price_periods', {
+	id: text('id').primaryKey(),
+	priceId: text('price_id').notNull().references(() => paymentAssetPlanPrices.id, { onDelete: 'cascade' }),
+	assetId: text('asset_id').notNull().references(() => paymentAssets.id, { onDelete: 'cascade' }),
+	planId: text('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
+	amountBaseUnits: text('amount_base_units').notNull(),
+	durationDays: integer('duration_days').notNull(),
+	durationUnit: text('duration_unit', { enum: ['days', 'months', 'years'] }).notNull().default('days'),
+	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+	startsAt: integer('starts_at').notNull(),
+	expiresAt: integer('expires_at'),
+	createdAt: integer('created_at').notNull(),
+}, (table) => [
+	index('payment_asset_plan_price_periods_price_id_idx').on(table.priceId),
+	index('payment_asset_plan_price_periods_lookup_idx').on(table.assetId, table.planId, table.durationDays, table.durationUnit, table.startsAt),
+	index('payment_asset_plan_price_periods_expires_at_idx').on(table.expiresAt),
+]);
+
 export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	id: text('id').primaryKey(),
 	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

@@ -976,39 +976,7 @@ app.post(
 	describeRoute(omitResAndReq(apiDef['/api/admin/assign-user-plan'])),
 	validator('json', apiDef['/api/admin/assign-user-plan'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/assign-user-plan', Env>) => {
-		const db = getDb(c.env);
-		const body = c.req.valid('json');
-		const [user, plan] = await Promise.all([
-			db.select({ id: users.id }).from(users).where(eq(users.id, body.userId)).get(),
-			db.select({ id: plans.id }).from(plans).where(eq(plans.id, body.planId)).get(),
-		]);
-		if (!user) {
-			throw apiError(404, 'USER_NOT_FOUND');
-		}
-		if (!plan) {
-			throw apiError(404, 'PLAN_NOT_FOUND');
-		}
-
-		const now = Date.now();
-		await db.delete(userPlanAssignments).where(eq(userPlanAssignments.userId, body.userId));
-		await db
-			.insert(userPlanAssignments)
-			.values({
-				id: genEaidx(now),
-				userId: body.userId,
-				planId: body.planId,
-				startsAt: now,
-				expiresAt: body.expiresAt,
-				createdAt: now,
-				updatedAt: now,
-			});
-		await refreshEffectiveQuotaForUser(c.env, body.userId, now);
-		await recordModerationAuditLog(c, 'admin_user_plan_assigned', {
-			targetUserId: body.userId,
-			data: { planId: body.planId, expiresAt: body.expiresAt },
-		});
-
-		return c.json({ ok: true }, 200);
+		throw apiError(400, 'MANUAL_PLAN_ASSIGNMENT_NOT_SUPPORTED');
 	}, getResponseDefWithAuth('/api/admin/assign-user-plan')),
 );
 

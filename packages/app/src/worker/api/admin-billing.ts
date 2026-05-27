@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, desc, eq, isNull, lt, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, lt, ne, or } from 'drizzle-orm';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
-import { type PaymentDurationUnit } from '../../shared/billing-quote';
+import { evaluateDealDisplayEligibility, getPriceDisplayWindow, type PaymentDurationUnit, type PriceHistoryPeriod } from '../../shared/billing-quote';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
-import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
+import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPricePeriods, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
 import { ApiError, apiError } from '../utils/api-error';
 import { getDb } from '../utils/db';
 import { recordModerationAuditLog } from '../utils/moderation';
@@ -78,6 +78,7 @@ async function getDeploymentResponse(env: Env, deploymentId: string) {
 
 async function listPrices(env: Env, priceId?: string) {
 	const db = getDb(env);
+	const now = Date.now();
 	const rows = await db
 		.select({
 			id: paymentAssetPlanPrices.id,
@@ -105,54 +106,156 @@ async function listPrices(env: Env, priceId?: string) {
 		.innerJoin(plans, eq(paymentAssetPlanPrices.planId, plans.id))
 		.where(priceId ? eq(paymentAssetPlanPrices.id, priceId) : undefined)
 		.orderBy(desc(paymentAssetPlanPrices.id));
+	const periods = await listPriceHistoryPeriods(env);
 
-	return rows.map(row => ({
-		id: row.id,
-		deploymentId: null,
-		assetId: row.assetId,
-		assetSymbol: row.assetSymbol,
-		assetName: row.assetName,
-		tokenSymbol: null,
-		tokenName: null,
-		chainId: null,
-		chainName: null,
-		confirmationsRequired: null,
-		contractAddress: null,
-		recipientAddress: null,
-		decimals: null,
-		plan: {
-			id: row.planId,
-			name: row.planName,
-			maxBuckets: row.planMaxBuckets,
-			maxBucketSizeBytes: row.planMaxBucketSizeBytes,
-			maxFilesPerBucket: row.planMaxFilesPerBucket,
-			maxDailyUploads: row.planMaxDailyUploads,
-			canUseDownloadCount: row.planCanUseDownloadCount,
-			sortOrder: row.planSortOrder,
-		},
-		amountBaseUnits: row.amountBaseUnits,
-		durationDays: row.durationDays,
-		durationUnit: row.durationUnit,
-		isEnabled: row.isEnabled,
-		expiresAt: row.expiresAt,
-		isRpcConfigured: false,
-		quote: {
-			quoteCreatedAt: row.updatedAt,
-			quoteExpiresAt: row.updatedAt,
-			baseAmountBaseUnits: row.amountBaseUnits,
-			discountBaseUnits: '0',
-			payableAmountBaseUnits: row.amountBaseUnits,
-			effectiveStartsAt: row.updatedAt,
-			effectiveExpiresAt: row.updatedAt,
-			currentPlan: null,
-		},
-		createdAt: row.createdAt,
-		updatedAt: row.updatedAt,
-	}));
+	return rows.map(row => {
+		const pricePeriods = periods.filter(period => (
+			period.assetId === row.assetId
+			&& period.planId === row.planId
+			&& period.durationDays === row.durationDays
+			&& period.durationUnit === row.durationUnit
+		));
+		const fallbackPeriod = toPriceHistoryPeriod({
+			id: row.id,
+			priceId: row.id,
+			assetId: row.assetId,
+			planId: row.planId,
+			amountBaseUnits: row.amountBaseUnits,
+			durationDays: row.durationDays,
+			durationUnit: row.durationUnit,
+			isEnabled: row.isEnabled,
+			startsAt: row.createdAt,
+			expiresAt: row.expiresAt,
+			createdAt: row.createdAt,
+		});
+		const history = pricePeriods.length > 0 ? pricePeriods : [fallbackPeriod];
+		const dealDisplay = evaluateDealDisplayEligibility(history, {
+			assetId: row.assetId,
+			planId: row.planId,
+			amountBaseUnits: row.amountBaseUnits,
+			durationDays: row.durationDays,
+			durationUnit: row.durationUnit,
+		}, now);
+		return {
+			id: row.id,
+			deploymentId: null,
+			assetId: row.assetId,
+			assetSymbol: row.assetSymbol,
+			assetName: row.assetName,
+			tokenSymbol: null,
+			tokenName: null,
+			chainId: null,
+			chainName: null,
+			confirmationsRequired: null,
+			contractAddress: null,
+			recipientAddress: null,
+			decimals: null,
+			plan: {
+				id: row.planId,
+				name: row.planName,
+				maxBuckets: row.planMaxBuckets,
+				maxBucketSizeBytes: row.planMaxBucketSizeBytes,
+				maxFilesPerBucket: row.planMaxFilesPerBucket,
+				maxDailyUploads: row.planMaxDailyUploads,
+				canUseDownloadCount: row.planCanUseDownloadCount,
+				sortOrder: row.planSortOrder,
+			},
+			amountBaseUnits: row.amountBaseUnits,
+			durationDays: row.durationDays,
+			durationUnit: row.durationUnit,
+			isEnabled: row.isEnabled,
+			expiresAt: row.expiresAt,
+			isRpcConfigured: false,
+			quote: {
+				quoteCreatedAt: row.updatedAt,
+				quoteExpiresAt: row.updatedAt,
+				baseAmountBaseUnits: row.amountBaseUnits,
+				discountBaseUnits: '0',
+				payableAmountBaseUnits: row.amountBaseUnits,
+				effectiveStartsAt: row.updatedAt,
+				effectiveExpiresAt: row.updatedAt,
+				currentPlan: null,
+			},
+			dealDisplay,
+			priceHistory: history,
+			priceDisplayWindow: getPriceDisplayWindow(history, row.id, now),
+			createdAt: row.createdAt,
+			updatedAt: row.updatedAt,
+		};
+	});
 }
 
 async function getPriceResponse(env: Env, priceId: string) {
 	return (await listPrices(env, priceId))[0] ?? null;
+}
+
+async function listPriceHistoryPeriods(env: Env): Promise<PriceHistoryPeriod[]> {
+	return (await getDb(env)
+		.select()
+		.from(paymentAssetPlanPricePeriods)
+		.orderBy(
+			asc(paymentAssetPlanPricePeriods.assetId),
+			asc(paymentAssetPlanPricePeriods.planId),
+			asc(paymentAssetPlanPricePeriods.durationDays),
+			asc(paymentAssetPlanPricePeriods.durationUnit),
+			asc(paymentAssetPlanPricePeriods.startsAt),
+			asc(paymentAssetPlanPricePeriods.id),
+		)).map(toPriceHistoryPeriod);
+}
+
+function toPriceHistoryPeriod(period: typeof paymentAssetPlanPricePeriods.$inferSelect): PriceHistoryPeriod {
+	return {
+		id: period.id,
+		priceId: period.priceId,
+		assetId: period.assetId,
+		planId: period.planId,
+		amountBaseUnits: period.amountBaseUnits,
+		durationDays: period.durationDays,
+		durationUnit: period.durationUnit,
+		isEnabled: period.isEnabled,
+		startsAt: period.startsAt,
+		expiresAt: period.expiresAt,
+		createdAt: period.createdAt,
+	};
+}
+
+async function createPriceHistoryPeriod(env: Env, price: typeof paymentAssetPlanPrices.$inferSelect, now: number): Promise<void> {
+	await getDb(env).insert(paymentAssetPlanPricePeriods).values({
+		id: genEaidx(now),
+		priceId: price.id,
+		assetId: price.assetId,
+		planId: price.planId,
+		amountBaseUnits: price.amountBaseUnits,
+		durationDays: price.durationDays,
+		durationUnit: price.durationUnit,
+		isEnabled: price.isEnabled,
+		startsAt: now,
+		expiresAt: price.expiresAt,
+		createdAt: now,
+	});
+}
+
+async function closeOpenPriceHistoryPeriods(env: Env, priceId: string, now: number): Promise<void> {
+	await getDb(env)
+		.update(paymentAssetPlanPricePeriods)
+		.set({ expiresAt: now })
+		.where(and(
+			eq(paymentAssetPlanPricePeriods.priceId, priceId),
+			or(isNull(paymentAssetPlanPricePeriods.expiresAt), gt(paymentAssetPlanPricePeriods.expiresAt, now)),
+		));
+}
+
+function didPricePeriodChange(
+	existing: typeof paymentAssetPlanPrices.$inferSelect,
+	updated: typeof paymentAssetPlanPrices.$inferSelect,
+): boolean {
+	return existing.assetId !== updated.assetId
+		|| existing.planId !== updated.planId
+		|| existing.amountBaseUnits !== updated.amountBaseUnits
+		|| existing.durationDays !== updated.durationDays
+		|| existing.durationUnit !== updated.durationUnit
+		|| existing.isEnabled !== updated.isEnabled
+		|| existing.expiresAt !== updated.expiresAt;
 }
 
 function durationSortValue(value: number, unit: PaymentDurationUnit): number {
@@ -552,6 +655,7 @@ app.post(
 		const now = Date.now();
 		const price = { id: genEaidx(now), assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, createdAt: now, updatedAt: now };
 		await db.insert(paymentAssetPlanPrices).values(price);
+		await createPriceHistoryPeriod(c.env, price, now);
 		const response = await getPriceResponse(c.env, price.id);
 		if (!response) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
 		await recordModerationAuditLog(c, 'admin_payment_price_created', { data: priceAuditData(response) });
@@ -575,8 +679,13 @@ app.post(
 		if (!asset) throw apiError(404, 'PAYMENT_ASSET_NOT_FOUND');
 		if (!plan) throw apiError(404, 'PLAN_NOT_FOUND');
 		await assertPaymentPriceRules(c.env, { id: body.priceId, ...body });
-		const updated = { ...existing, assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, updatedAt: Date.now() };
+		const now = Date.now();
+		const updated = { ...existing, assetId: body.assetId, planId: body.planId, amountBaseUnits: body.amountBaseUnits, durationDays: body.durationDays, durationUnit: body.durationUnit, isEnabled: body.isEnabled, expiresAt: body.expiresAt, updatedAt: now };
 		await db.update(paymentAssetPlanPrices).set(updated).where(eq(paymentAssetPlanPrices.id, body.priceId));
+		if (didPricePeriodChange(existing, updated)) {
+			await closeOpenPriceHistoryPeriods(c.env, body.priceId, now);
+			await createPriceHistoryPeriod(c.env, updated, now);
+		}
 		const response = await getPriceResponse(c.env, body.priceId);
 		if (!response) throw apiError(404, 'PAYMENT_PRICE_NOT_FOUND');
 		await recordModerationAuditLog(c, 'admin_payment_price_updated', { data: priceAuditData(response) });

@@ -547,6 +547,7 @@ async function signupWithPasskey(): Promise<void> {
             />
 
             <button type="submit" :class="['btn', 'btn-primary', 'w-full', $style.fullButton]" :disabled="!canPasswordSignin || signinLoading">
+              <span v-if="signinLoading" class="btn-spinner" aria-hidden="true" />
               {{ signinLoading ? '処理中...' : turnstileEnabled && !signinTurnstileToken ? '確認中...' : 'サインイン' }}
             </button>
           </Form>
@@ -628,6 +629,7 @@ async function signupWithPasskey(): Promise<void> {
                   :disabled="passkeySignupLoading || !canPasskeySignup"
                   @click="signupWithPasskey"
                 >
+                  <span v-if="passkeySignupLoading" class="btn-spinner" aria-hidden="true" />
                   {{ passkeySignupLoading ? '処理中...' : 'パスキーで登録' }}
                 </button>
 
@@ -661,6 +663,7 @@ async function signupWithPasskey(): Promise<void> {
                 </div>
 
                 <button type="submit" :class="['btn', 'btn-primary', 'w-full', $style.fullButton]" :disabled="!canPasswordSignup || signupLoading">
+                  <span v-if="signupLoading" class="btn-spinner" aria-hidden="true" />
                   {{ signupLoading ? '処理中...' : '登録' }}
                 </button>
 
@@ -687,6 +690,7 @@ async function signupWithPasskey(): Promise<void> {
             :disabled="googleLoading || !canUseExternalAuth"
             @click="signinWithGoogle"
           >
+            <span v-if="googleLoading" class="btn-spinner" aria-hidden="true" />
             {{ googleLoading ? '処理中...' : activeMode === 'signup' ? 'Googleで登録' : 'Googleでログイン' }}
           </button>
 
@@ -705,6 +709,7 @@ async function signupWithPasskey(): Promise<void> {
               :disabled="indieauthLoading || !canUseExternalAuth"
               @click="signinWithIndieAuth"
             >
+              <span v-if="indieauthLoading" class="btn-spinner" aria-hidden="true" />
               {{ indieauthLoading ? '処理中...' : activeMode === 'signup' ? 'Misskeyで登録' : 'Misskeyでログイン' }}
             </button>
           </div>

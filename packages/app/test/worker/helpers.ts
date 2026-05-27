@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers';
 import app from '../../src/worker/index';
-import migration0000 from '../../migrations/0000_noisy_power_man.sql?raw';
-import migration0001 from '../../migrations/0001_loving_gertrude_yorkes.sql?raw';
+import migration0000 from '../../migrations/0000_groovy_blue_blade.sql?raw';
 
 export { env, app };
 
@@ -18,7 +17,6 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 
 const migrations = [
 	migration0000,
-	migration0001,
 ] as const;
 
 const tables = [
@@ -30,6 +28,7 @@ const tables = [
 	'crypto_payment_orders',
 	'wallet_link_challenges',
 	'user_wallets',
+	'payment_asset_plan_price_periods',
 	'payment_asset_plan_prices',
 	'payment_asset_deployments',
 	'payment_assets',
@@ -94,6 +93,7 @@ export async function clearDb(): Promise<void> {
 		env.DB.prepare('DELETE FROM crypto_payment_orders'),
 		env.DB.prepare('DELETE FROM wallet_link_challenges'),
 		env.DB.prepare('DELETE FROM user_wallets'),
+		env.DB.prepare('DELETE FROM payment_asset_plan_price_periods'),
 		env.DB.prepare('DELETE FROM payment_asset_plan_prices'),
 		env.DB.prepare('DELETE FROM payment_asset_deployments'),
 		env.DB.prepare('DELETE FROM payment_assets'),

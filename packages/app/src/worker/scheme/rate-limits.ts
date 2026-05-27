@@ -23,6 +23,10 @@ export const userPlanAssignments = sqliteTable('user_plan_assignments', {
 	planId: text('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
 	startsAt: integer('starts_at').notNull(),
 	expiresAt: integer('expires_at').notNull(),
+	priceAssetId: text('price_asset_id').notNull(),
+	priceAmountBaseUnits: text('price_amount_base_units').notNull(),
+	priceDurationDays: integer('price_duration_days').notNull(),
+	priceDurationUnit: text('price_duration_unit', { enum: ['days', 'months', 'years'] }).notNull(),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull(),
 }, (table) => [

@@ -36,6 +36,7 @@ const cryptoPaymentsEnabled = ref<'true' | 'false'>('false');
 const editingChainId = ref<number | null>(null);
 const editingDeploymentId = ref<string | null>(null);
 const editingPrice = ref<Price | null>(null);
+const historyPrice = ref<Price | null>(null);
 const priceExpiresAtDraft = ref('');
 const rpcTestingChainId = ref<number | null>(null);
 const rpcTestResults = ref<Record<number, { ok: boolean; message: string }>>({});
@@ -345,6 +346,14 @@ function closePriceExpiresAtDialog(): void {
 	priceExpiresAtDraft.value = '';
 }
 
+function openPriceHistoryDialog(price: Price): void {
+	historyPrice.value = price;
+}
+
+function closePriceHistoryDialog(): void {
+	historyPrice.value = null;
+}
+
 async function updatePriceExpiresAt(price: Price, expiresAt: number | null): Promise<void> {
 	await save(async () => apiPost('/api/admin/update-payment-asset-plan-price', {
 		priceId: price.id,
@@ -466,6 +475,28 @@ function priceStatusBadgeClass(price: Price): string {
 	if (!price.isEnabled) return 'badge-muted';
 	if (price.expiresAt != null && price.expiresAt <= Date.now()) return 'badge-danger';
 	return 'badge-success';
+}
+
+function formatDealStatus(price: Price): string {
+	return price.dealDisplay.canShowDeal ? '可' : '不可';
+}
+
+function dealStatusBadgeClass(price: Price): string {
+	return price.dealDisplay.canShowDeal ? 'badge-success' : 'badge-muted';
+}
+
+function formatDealReason(reason: Price['dealDisplay']['reason']): string {
+	if (reason === 'eligible') return '直近相当期間の比較価格として利用できます';
+	if (reason === 'no_reference_price') return '比較対象価格がありません';
+	if (reason === 'reference_not_higher') return '現在価格より高い比較対象価格がありません';
+	if (reason === 'sold_less_than_half_recent_period') return '直近期間の過半を満たしていません';
+	if (reason === 'sold_less_than_two_weeks') return '通算2週間以上の販売期間を満たしていません';
+	if (reason === 'reference_too_old') return '最後の販売日から2週間を超えています';
+	return reason;
+}
+
+function formatDurationDays(ms: number): string {
+	return `${Math.floor(ms / 86_400_000)}日`;
 }
 
 function parseDateTimeLocal(value: string): number | null | undefined {
@@ -734,7 +765,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
           <div :class="['card', $style.tableCard]">
             <div class="table-responsive">
               <table class="data-table">
-                <thead><tr><th>Offer</th><th>価格</th><th>期間</th><th>失効日時</th><th>状態</th><th></th></tr></thead>
+                <thead><tr><th>Offer</th><th>価格</th><th>期間</th><th>失効日時</th><th>状態</th><th>お得表示</th><th></th></tr></thead>
                 <tbody>
                   <tr v-for="price in prices" :key="price.id">
                     <td>{{ price.plan.name }} / {{ price.assetSymbol }}</td>
@@ -742,11 +773,18 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
                     <td>{{ formatDuration(price.durationDays, price.durationUnit) }}</td>
                     <td>{{ formatDate(price.expiresAt) }}</td>
                     <td><span :class="['badge', priceStatusBadgeClass(price)]">{{ formatPriceStatus(price) }}</span></td>
+                    <td>
+                      <span :class="['badge', dealStatusBadgeClass(price)]">{{ formatDealStatus(price) }}</span>
+                      <div :class="$style.reasonText">{{ formatDealReason(price.dealDisplay.reason) }}</div>
+                    </td>
                     <td :class="$style.rowActions">
-                      <button class="btn btn-secondary btn-sm" type="button" :disabled="saving" @click="openPriceExpiresAtDialog(price)">失効設定</button>
+                      <div :class="$style.actionButtons">
+                        <button class="btn btn-secondary btn-sm" type="button" :disabled="saving" @click="openPriceExpiresAtDialog(price)">失効設定</button>
+                        <button class="btn btn-secondary btn-sm" type="button" @click="openPriceHistoryDialog(price)">履歴</button>
+                      </div>
                     </td>
                   </tr>
-                  <tr v-if="prices.length === 0"><td colspan="6" :class="$style.empty">プラン価格はありません。</td></tr>
+                  <tr v-if="prices.length === 0"><td colspan="7" :class="$style.empty">プラン価格はありません。</td></tr>
                 </tbody>
               </table>
             </div>
@@ -797,6 +835,36 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
               <button class="btn btn-secondary" type="button" :disabled="saving || editingPrice.expiresAt == null" @click="clearPriceExpiresAt">失効取り消し</button>
             </div>
           </form>
+        </Dialog.Content>
+      </Dialog.Root>
+
+      <Dialog.Root :model-value="historyPrice != null" @update:model-value="(value) => { if (!value) closePriceHistoryDialog(); }">
+        <Dialog.Content :class="[$style.dialog, $style.historyDialog]">
+          <div v-if="historyPrice" :class="$style.dialogInner">
+            <div :class="$style.dialogHeader">
+              <Dialog.Title :class="$style.dialogTitle">価格の遷移</Dialog.Title>
+              <button class="btn btn-ghost btn-sm" type="button" @click="closePriceHistoryDialog">閉じる</button>
+            </div>
+            <div :class="$style.dialogSummary">
+              <div>{{ historyPrice.plan.name }} / {{ historyPrice.assetSymbol }} / {{ formatDuration(historyPrice.durationDays, historyPrice.durationUnit) }}</div>
+              <div>お得表示: {{ formatDealStatus(historyPrice) }} - {{ formatDealReason(historyPrice.dealDisplay.reason) }}</div>
+              <div v-if="historyPrice.dealDisplay.referenceAmountBaseUnits">
+                比較対象: {{ formatAmount(historyPrice.dealDisplay.referenceAmountBaseUnits, historyPrice.decimals ?? getAssetDecimals(historyPrice.assetId), historyPrice.assetSymbol) }}
+              </div>
+              <div>判定期間: {{ formatDate(historyPrice.dealDisplay.checkedFrom) }} - {{ formatDate(historyPrice.dealDisplay.checkedTo) }}</div>
+              <div>比較価格販売期間: {{ formatDurationDays(historyPrice.dealDisplay.referenceSoldMs) }} / 全販売期間: {{ formatDurationDays(historyPrice.dealDisplay.totalSoldMs) }}</div>
+            </div>
+            <div :class="$style.historyList">
+              <div v-for="period in historyPrice.priceHistory" :key="period.id" :class="$style.historyRow">
+                <div>
+                  <strong>{{ formatAmount(period.amountBaseUnits, historyPrice.decimals ?? getAssetDecimals(historyPrice.assetId), historyPrice.assetSymbol) }}</strong>
+                  <span :class="['badge', period.isEnabled ? 'badge-success' : 'badge-muted']">{{ period.isEnabled ? '有効' : '無効' }}</span>
+                </div>
+                <div :class="$style.reasonText">{{ formatDate(period.startsAt) }} - {{ formatDate(period.expiresAt) }}</div>
+              </div>
+              <div v-if="historyPrice.priceHistory.length === 0" :class="$style.empty">履歴はありません。</div>
+            </div>
+          </div>
         </Dialog.Content>
       </Dialog.Root>
 
@@ -903,10 +971,22 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
 }
 
 .rowActions {
+  min-width: 170px;
+  vertical-align: middle;
+}
+
+.actionButtons {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  min-width: 96px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.reasonText {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  margin-top: 4px;
 }
 
 .empty {
@@ -927,6 +1007,10 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
     background: rgba(0, 0, 0, 0.45);
     backdrop-filter: blur(2px);
   }
+}
+
+.historyDialog {
+  width: min(720px, calc(100vw - 32px));
 }
 
 .dialogInner {
@@ -962,6 +1046,24 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.historyList {
+  display: grid;
+  gap: 8px;
+}
+
+.historyRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+
+  strong {
+    margin-right: 8px;
+  }
 }
 
 @media (max-width: 720px) {

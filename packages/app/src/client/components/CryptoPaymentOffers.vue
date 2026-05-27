@@ -411,19 +411,49 @@ function formatOfferBaseAmountValue(offer: Offer): string {
 	return formatApproxAmountValue(offer.quote.baseAmountBaseUnits, offer.decimals);
 }
 
-function hasOfferDiscount(offer: Offer): boolean {
-	return BigInt(offer.quote.discountBaseUnits) > 0n
-		&& offer.quote.baseAmountBaseUnits !== offer.quote.payableAmountBaseUnits;
+function hasOfferDealDisplay(offer: Offer): boolean {
+	return offer.dealDisplay.canShowDeal && offer.dealDisplay.referenceAmountBaseUnits != null;
+}
+
+function hasLimitedPrice(offer: Offer): boolean {
+	return offer.expiresAt != null;
+}
+
+function formatOfferReferenceAmountValue(offer: Offer): string {
+	return offer.dealDisplay.referenceAmountBaseUnits == null
+		? formatOfferBaseAmountValue(offer)
+		: formatApproxAmountValue(offer.dealDisplay.referenceAmountBaseUnits, offer.decimals);
 }
 
 function formatOfferAmount(offer: Offer, amountBaseUnits: string): string {
 	return formatAmount(amountBaseUnits, offer.decimals, offer.tokenSymbol ?? offer.assetSymbol);
 }
 
-function dialogDiscountFormula(): string {
+function dialogBaseAmount(): string {
 	const offer = selectedDialogOffer.value;
-	if (!offer) return '-';
-	return `${formatOfferAmount(offer, offer.quote.baseAmountBaseUnits)} - ${formatOfferAmount(offer, offer.quote.discountBaseUnits)} = ${formatOfferAmount(offer, offer.quote.payableAmountBaseUnits)}`;
+	return offer ? formatOfferAmount(offer, offer.quote.baseAmountBaseUnits) : '-';
+}
+
+function dialogDiscountAmount(): string {
+	const offer = selectedDialogOffer.value;
+	return offer ? formatOfferAmount(offer, offer.quote.discountBaseUnits) : '-';
+}
+
+function dialogReferencePrice(): string | null {
+	const offer = selectedDialogOffer.value;
+	if (!offer?.dealDisplay.canShowDeal || offer.dealDisplay.referenceAmountBaseUnits == null) return null;
+	return formatOfferAmount(offer, offer.dealDisplay.referenceAmountBaseUnits);
+}
+
+function dialogLimitedPrice(): string | null {
+	const offer = selectedDialogOffer.value;
+	if (!offer || !hasLimitedPrice(offer)) return null;
+	return formatOfferAmount(offer, offer.quote.baseAmountBaseUnits);
+}
+
+function dialogLimitedPriceExpiresLabel(): string {
+	const expiresAt = dialogPriceExpiresAt();
+	return expiresAt == null ? '' : `(${formatDate(expiresAt)}まで)`;
 }
 
 function dialogPayableAmount(): string {
@@ -481,6 +511,14 @@ function dialogEffectiveStartDate(): number | null {
 
 function dialogExpiryAfter(): number | null {
 	return selectedDialogOffer.value?.quote.effectiveExpiresAt ?? null;
+}
+
+function dialogPriceExpiresAt(): number | null {
+	return selectedDialogOffer.value?.expiresAt ?? null;
+}
+
+function dialogHasLimitedPrice(): boolean {
+	return selectedDialogOffer.value != null && hasLimitedPrice(selectedDialogOffer.value);
 }
 
 function tokenStatusText(): string {
@@ -664,7 +702,7 @@ async function buyOffer(offer: Offer): Promise<void> {
 		});
 		if (!orderResult.ok) throw new Error(orderResult.data.message);
 		const txHash = await sendTokenTransfer(from, orderResult.data.contractAddress, orderResult.data.recipientAddress, orderResult.data.amountBaseUnits, offer.chainId);
-		purchaseProgress.value = '支払いを送信しました。ブロックチェーン上で確認中です。';
+		purchaseProgress.value = '支払いを送信しました。ブロックチェーン上で確認中です。この画面を閉じても、決済履歴の「チェーン確認」ボタンで反映を再確認できます。';
 		const confirmResult = await apiPost('/api/billing/confirm-crypto-order', { orderId: orderResult.data.id, txHash });
 		if (!confirmResult.ok) throw new Error(confirmResult.data.message);
 		const confirmedOrder = confirmResult.data.status === 'paid'
@@ -803,6 +841,7 @@ onMounted(load);
 		                </div>
 		              </div>
 		              <button class="btn btn-secondary" type="button" :disabled="!canRegisterFilterToken()" @click="addFilterTokenToWallet">
+		                <span v-if="selectedFilterTokenOffer && addingTokenOfferId === selectedFilterTokenOffer.id" class="btn-spinner" aria-hidden="true" />
 		                {{ filterRegisterButtonLabel() }}
 		              </button>
 		            </div>
@@ -828,14 +867,19 @@ onMounted(load);
 		              </div>
 		              <div :class="$style.priceRows">
 		                <div v-for="price in planGroup.prices" :key="priceRowKey(price)" :class="$style.priceRow">
-		                  <span :class="$style.priceDuration">{{ formatDuration(selectedFilterOfferForPrice(price).durationDays, selectedFilterOfferForPrice(price).durationUnit) }}</span>
-		                  <span :class="$style.originalPriceCell">
-		                    <del v-if="hasOfferDiscount(selectedFilterOfferForPrice(price))" :class="$style.originalPrice">{{ formatOfferBaseAmountValue(selectedFilterOfferForPrice(price)) }}</del>
+		                  <span :class="$style.priceInfo">
+		                    <span v-if="hasLimitedPrice(selectedFilterOfferForPrice(price))" :class="$style.limitedBadge">期間限定</span>
+		                    <span :class="$style.priceDuration">{{ formatDuration(selectedFilterOfferForPrice(price).durationDays, selectedFilterOfferForPrice(price).durationUnit) }}</span>
+		                    <span :class="$style.priceValueCell">
+		                      <del v-if="hasOfferDealDisplay(selectedFilterOfferForPrice(price))" :class="$style.originalPrice">{{ formatOfferReferenceAmountValue(selectedFilterOfferForPrice(price)) }}</del>
+		                      <span :class="$style.payablePrice">
+		                        <span :class="[$style.priceAmount, hasLimitedPrice(selectedFilterOfferForPrice(price)) ? $style.limitedPrice : null]">
+		                          {{ formatOfferAmountValue(selectedFilterOfferForPrice(price)) }}
+		                        </span>
+		                        <span :class="[$style.priceCurrency, hasLimitedPrice(selectedFilterOfferForPrice(price)) ? $style.limitedPriceCurrency : null]">{{ selectedFilterOfferForPrice(price).tokenSymbol ?? selectedFilterOfferForPrice(price).assetSymbol }}</span>
+		                      </span>
+		                    </span>
 		                  </span>
-		                  <span :class="$style.priceAmount">
-		                    {{ formatOfferAmountValue(selectedFilterOfferForPrice(price)) }}
-		                  </span>
-		                  <span :class="$style.priceCurrency">{{ selectedFilterOfferForPrice(price).tokenSymbol ?? selectedFilterOfferForPrice(price).assetSymbol }}</span>
 		                  <button class="btn btn-primary btn-sm" type="button" :disabled="priceButtonDisabled(price)" @click="openPriceDialog(price)">
 		                    購入
 		                  </button>
@@ -858,22 +902,34 @@ onMounted(load);
 		                    <div :class="$style.tokenStatusLine">支払い元: {{ payerStatusText() }}</div>
 		                  </div>
 		                  <button class="btn btn-secondary" type="button" :disabled="!canRegisterSelectedToken()" @click="addSelectedTokenToWallet">
+		                    <span v-if="selectedDialogOffer && addingTokenOfferId === selectedDialogOffer.id" class="btn-spinner" aria-hidden="true" />
 		                    {{ dialogRegisterButtonLabel() }}
 		                  </button>
-		                </div>
-		                <div :class="$style.dialogSummary">
-		                  <div>{{ dialogEffectiveStartLabel() }}: {{ formatDateOrDash(dialogEffectiveStartDate()) }}</div>
-		                  <div>購入後期限: {{ formatDateOrDash(dialogExpiryAfter()) }}</div>
-		                </div>
+			                </div>
+			                <div :class="$style.dialogSummary">
+			                  <div>{{ dialogEffectiveStartLabel() }}: {{ formatDateOrDash(dialogEffectiveStartDate()) }}</div>
+			                  <div>購入後期限: {{ formatDateOrDash(dialogExpiryAfter()) }}</div>
+			                </div>
 		                <dl :class="$style.dialogPaymentSummary">
-		                  <div>
-		                    <dt>割引計算式</dt>
-		                    <dd>{{ dialogDiscountFormula() }}</dd>
+		                  <div v-if="dialogReferencePrice() != null">
+		                    <dt>比較価格</dt>
+		                    <dd><del>{{ dialogReferencePrice() }}</del></dd>
 		                  </div>
-		                  <div>
-		                    <dt>割引後価格</dt>
-		                    <dd>{{ dialogPayableAmount() }}</dd>
-		                  </div>
+		                  <div v-if="dialogLimitedPrice() != null">
+		                    <dt>期間限定価格</dt>
+		                    <dd :class="$style.limitedDate">{{ dialogLimitedPrice() }} <span :class="$style.limitedDateSuffix">{{ dialogLimitedPriceExpiresLabel() }}</span></dd>
+			                  </div>
+			                  <div>
+			                    <dt>精算計算式</dt>
+			                    <dd>
+			                      <span :class="{ [$style.limitedDate]: dialogHasLimitedPrice() }">{{ dialogBaseAmount() }}</span>
+			                      <span> - {{ dialogDiscountAmount() }} = {{ dialogPayableAmount() }}</span>
+			                    </dd>
+			                  </div>
+			                  <div>
+			                    <dt>支払額</dt>
+			                    <dd>{{ dialogPayableAmount() }}</dd>
+			                  </div>
 		                  <div>
 		                    <dt>トークン</dt>
 		                    <dd>{{ dialogTokenName() }}</dd>
@@ -883,7 +939,11 @@ onMounted(load);
 		                    <dd>{{ dialogChainName() }}</dd>
 		                  </div>
 		                </dl>
+		                <p :class="$style.paymentCheckHint">
+		                  送信後すぐに確認できない場合があります。この画面を閉じた後は、決済履歴の「チェーン確認」ボタンで反映を再確認できます。
+		                </p>
 		                <button class="btn btn-primary" type="button" :disabled="!canBuySelectedOffer()" @click="buySelectedOffer">
+		                  <span v-if="selectedDialogOffer && buyingOfferId === selectedDialogOffer.id" class="btn-spinner" aria-hidden="true" />
 		                  {{ dialogPurchaseButtonLabel() }}
 		                </button>
 		              </div>
@@ -1016,36 +1076,58 @@ onMounted(load);
 .priceRows {
   display: grid;
   gap: 8px;
-  justify-items: end;
+  justify-items: stretch;
   margin-top: auto;
   padding-top: 8px;
 }
 
 .priceRow {
   display: grid;
-  grid-template-columns: max-content minmax(28px, max-content) minmax(56px, max-content) max-content auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
-.priceDuration,
-.priceAmount {
+.priceInfo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.priceDuration {
   font-size: 1.125rem;
   font-weight: 700;
 }
 
-.priceAmount {
-  min-width: 56px;
-  justify-self: end;
-  text-align: right;
+.priceValueCell {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
 }
 
-.originalPriceCell {
-  min-width: 28px;
-  text-align: right;
+.payablePrice {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+}
+
+.limitedPrice {
+  color: #fbbf24;
+}
+
+.limitedPriceCurrency {
+  color: #fcd34d;
+}
+
+.priceAmount {
+  font-size: 1.125rem;
+  font-weight: 700;
 }
 
 .originalPrice {
@@ -1056,9 +1138,43 @@ onMounted(load);
 }
 
 .priceCurrency {
-  justify-self: start;
   color: var(--color-text-muted);
   font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.limitedBadge {
+  border: 1px solid color-mix(in srgb, #f59e0b 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: #fbbf24;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.limitedDate {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.dialogPaymentSummary dd.limitedDate,
+.dialogPaymentSummary dd.limitedDate del {
+  color: #fbbf24;
+}
+
+.paymentCheckHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.limitedDateSuffix {
+  color: #fcd34d;
+  font-size: 0.86em;
   font-weight: 600;
 }
 
@@ -1141,6 +1257,25 @@ onMounted(load);
 
   .tokenAddress {
     grid-template-columns: 1fr;
+  }
+
+  .priceRows {
+    justify-items: stretch;
+  }
+
+  .priceRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .priceInfo {
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  .priceValueCell {
+    justify-content: flex-end;
   }
 
   .dialogPaymentSummary > div {

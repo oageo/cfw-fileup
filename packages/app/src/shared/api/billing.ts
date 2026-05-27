@@ -104,6 +104,55 @@ const PaymentOfferQuoteResponse = v.object({
 	})),
 });
 
+const DealDisplayReason = v.picklist([
+	'eligible',
+	'no_reference_price',
+	'reference_not_higher',
+	'sold_less_than_half_recent_period',
+	'sold_less_than_two_weeks',
+	'reference_too_old',
+]);
+
+const DealDisplayResponse = v.pipe(
+	v.object({
+		canShowDeal: v.boolean(),
+		referenceAmountBaseUnits: v.nullable(BigIntString),
+		reason: DealDisplayReason,
+		checkedFrom: v.number(),
+		checkedTo: v.number(),
+		referenceSoldMs: v.number(),
+		totalSoldMs: v.number(),
+		referenceLastSoldAt: v.nullable(v.number()),
+	}),
+	v.metadata({ ref: 'PaymentPriceDealDisplay' }),
+);
+
+const PriceHistoryPeriodResponse = v.pipe(
+	v.object({
+		id: IdString,
+		priceId: IdString,
+		assetId: IdString,
+		planId: IdString,
+		amountBaseUnits: BigIntString,
+		durationDays: v.number(),
+		durationUnit: PaymentDurationUnit,
+		isEnabled: v.boolean(),
+		startsAt: v.number(),
+		expiresAt: v.nullable(v.number()),
+		createdAt: v.number(),
+	}),
+	v.metadata({ ref: 'PaymentPriceHistoryPeriod' }),
+);
+
+const PriceDisplayWindowResponse = v.pipe(
+	v.object({
+		previousPeriod: v.nullable(PriceHistoryPeriodResponse),
+		currentPeriod: v.nullable(PriceHistoryPeriodResponse),
+		nextPeriod: v.nullable(PriceHistoryPeriodResponse),
+	}),
+	v.metadata({ ref: 'PaymentPriceDisplayWindow' }),
+);
+
 const PaymentAssetPlanPriceResponse = v.pipe(
 	v.object({
 		id: IdString,
@@ -127,10 +176,43 @@ const PaymentAssetPlanPriceResponse = v.pipe(
 		expiresAt: v.nullable(v.number()),
 		isRpcConfigured: v.boolean(),
 		quote: PaymentOfferQuoteResponse,
+		dealDisplay: DealDisplayResponse,
 		createdAt: v.number(),
 		updatedAt: v.number(),
 	}),
 	v.metadata({ ref: 'PaymentAssetPlanPrice' }),
+);
+
+const AdminPaymentAssetPlanPriceResponse = v.pipe(
+	v.object({
+		id: IdString,
+		deploymentId: v.nullable(IdString),
+		assetId: IdString,
+		assetSymbol: v.string(),
+		assetName: v.string(),
+		tokenSymbol: v.nullable(v.string()),
+		tokenName: v.nullable(v.string()),
+		chainId: v.nullable(v.number()),
+		chainName: v.nullable(v.string()),
+		confirmationsRequired: v.nullable(v.number()),
+		contractAddress: v.nullable(EthereumAddress),
+		recipientAddress: v.nullable(EthereumAddress),
+		decimals: v.nullable(v.number()),
+		plan: PlanSummaryResponse,
+		amountBaseUnits: BigIntString,
+		durationDays: v.number(),
+		durationUnit: PaymentDurationUnit,
+		isEnabled: v.boolean(),
+		expiresAt: v.nullable(v.number()),
+		isRpcConfigured: v.boolean(),
+		quote: PaymentOfferQuoteResponse,
+		dealDisplay: DealDisplayResponse,
+		priceHistory: v.array(PriceHistoryPeriodResponse),
+		priceDisplayWindow: PriceDisplayWindowResponse,
+		createdAt: v.number(),
+		updatedAt: v.number(),
+	}),
+	v.metadata({ ref: 'AdminPaymentAssetPlanPrice' }),
 );
 
 const CryptoPaymentOrderStatus = v.picklist(['pending', 'paid', 'expired', 'failed']);
@@ -365,19 +447,19 @@ export const billingApiDef = {
 		summary: 'List payment asset plan prices',
 		tags: ['admin', 'billing'],
 		req: v.object({}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(PaymentAssetPlanPriceResponse) } } } },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: v.array(AdminPaymentAssetPlanPriceResponse) } } } },
 	},
 	'/api/admin/create-payment-asset-plan-price': {
 		summary: 'Create payment asset plan price',
 		tags: ['admin', 'billing'],
 		req: v.object(PriceInput),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ALREADY_EXISTS', 'PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment asset or plan not found', ['PAYMENT_ASSET_NOT_FOUND', 'PLAN_NOT_FOUND']) },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: AdminPaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ALREADY_EXISTS', 'PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment asset or plan not found', ['PAYMENT_ASSET_NOT_FOUND', 'PLAN_NOT_FOUND']) },
 	},
 	'/api/admin/update-payment-asset-plan-price': {
 		summary: 'Update payment asset plan price',
 		tags: ['admin', 'billing'],
 		req: v.object({ priceId: IdString, ...PriceInput }),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: PaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ALREADY_EXISTS', 'PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment price, asset, or plan not found', ['PAYMENT_PRICE_NOT_FOUND', 'PAYMENT_ASSET_NOT_FOUND', 'PLAN_NOT_FOUND']) },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: AdminPaymentAssetPlanPriceResponse } } }, 400: errorResponse('Invalid payment price', ['PAYMENT_PRICE_ALREADY_EXISTS', 'PAYMENT_PRICE_ORDER_INVALID']), 404: errorResponse('Payment price, asset, or plan not found', ['PAYMENT_PRICE_NOT_FOUND', 'PAYMENT_ASSET_NOT_FOUND', 'PLAN_NOT_FOUND']) },
 	},
 	'/api/admin/delete-payment-asset-plan-price': {
 		summary: 'Delete payment asset plan price',

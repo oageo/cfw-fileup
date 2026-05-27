@@ -403,6 +403,7 @@ watch(walletConnectors, connectors => {
           :disabled="walletLoading || selectedWalletLinkChain == null"
           @click="connectWithConnector(connector.uid)"
         >
+          <span v-if="walletLoading && selectedWalletConnectorUid === connector.uid" class="btn-spinner" aria-hidden="true" />
           {{ walletLoading && selectedWalletConnectorUid === connector.uid ? '処理中...' : `${connector.name}で連携` }}
         </button>
       </div>

@@ -990,19 +990,59 @@ describe('Crypto payment administration', () => {
 		const { adminToken } = await setupAdminAndUser();
 		const { price } = await createCryptoOffer(adminToken);
 
+		const period = await env.DB.prepare('SELECT price_id, amount_base_units, expires_at FROM payment_asset_plan_price_periods WHERE price_id = ?').bind(price.id).first<{ price_id: string; amount_base_units: string; expires_at: number | null }>();
+		expect(period).toMatchObject({
+			price_id: price.id,
+			amount_base_units: '30000000',
+			expires_at: null,
+		});
+
 		const listRes = await app.request('/api/admin/list-payment-asset-plan-prices', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({}),
 		}, env);
 		expect(listRes.status).toBe(200);
-		const prices = await listRes.json() as Array<{ id: string; assetSymbol: string; chainId: number | null; amountBaseUnits: string }>;
+		const prices = await listRes.json() as Array<{ id: string; assetSymbol: string; chainId: number | null; amountBaseUnits: string; priceHistory: unknown[]; dealDisplay: { canShowDeal: boolean; reason: string } }>;
 		expect(prices).toContainEqual(expect.objectContaining({
 			id: price.id,
 			assetSymbol: 'USD',
 			chainId: null,
 			amountBaseUnits: '30000000',
+			dealDisplay: expect.objectContaining({ canShowDeal: false, reason: 'reference_not_higher' }),
 		}));
+		expect(prices.find(item => item.id === price.id)?.priceHistory).toHaveLength(1);
+	});
+
+	test('updating a plan price closes the previous history period and creates a new one', async () => {
+		const { adminToken } = await setupAdminAndUser();
+		const { plan, asset, price } = await createCryptoOffer(adminToken);
+
+		const updateRes = await app.request('/api/admin/update-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				priceId: price.id,
+				assetId: asset.id,
+				planId: plan.id,
+				amountBaseUnits: '25000000',
+				durationDays: 90,
+				durationUnit: 'days',
+				isEnabled: true,
+				expiresAt: null,
+			}),
+		}, env);
+		expect(updateRes.status).toBe(200);
+		const updated = await updateRes.json() as {
+			priceHistory: Array<{ priceId: string; amountBaseUnits: string; startsAt: number; expiresAt: number | null }>;
+			dealDisplay: { canShowDeal: boolean; referenceAmountBaseUnits: string | null };
+			priceDisplayWindow: { previousPeriod: { amountBaseUnits: string } | null; currentPeriod: { amountBaseUnits: string } | null };
+		};
+		expect(updated.priceHistory).toHaveLength(2);
+		expect(updated.priceHistory.map(period => period.amountBaseUnits)).toEqual(['30000000', '25000000']);
+		expect(updated.priceHistory[0]?.expiresAt).not.toBeNull();
+		expect(updated.priceDisplayWindow.previousPeriod).toEqual(expect.objectContaining({ amountBaseUnits: '30000000' }));
+		expect(updated.priceDisplayWindow.currentPeriod).toEqual(expect.objectContaining({ amountBaseUnits: '25000000' }));
 	});
 
 	test('indefinite plan prices cannot duplicate the same asset plan and duration', async () => {
@@ -1241,6 +1281,37 @@ describe('Crypto payment administration', () => {
 		expect(restoredOffers).toContainEqual(expect.objectContaining({ id: price.id }));
 	});
 
+	test('active limited-time plan prices hide matching indefinite prices from user offers', async () => {
+		const { adminToken, userToken } = await setupAdminAndUser();
+		const { plan, asset, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+
+		const limitedRes = await app.request('/api/admin/create-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: asset.id,
+				planId: plan.id,
+				amountBaseUnits: '25000000',
+				durationDays: 90,
+				durationUnit: 'days',
+				expiresAt: Date.now() + 86_400_000,
+			}),
+		}, env);
+		expect(limitedRes.status).toBe(200);
+		const limited = await limitedRes.json() as { id: string };
+
+		const offersRes = await app.request('/api/billing/list-crypto-offers', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({}),
+		}, env);
+		expect(offersRes.status).toBe(200);
+		const offers = await offersRes.json() as Array<{ id: string; amountBaseUnits: string }>;
+		expect(offers).toContainEqual(expect.objectContaining({ id: limited.id, amountBaseUnits: '25000000' }));
+		expect(offers).not.toContainEqual(expect.objectContaining({ id: price.id, amountBaseUnits: '30000000' }));
+	});
+
 	test('user can list offers and create an order with a price snapshot', async () => {
 		const { adminToken, userToken, userId } = await setupAdminAndUser();
 		const { deployment, price } = await createCryptoOffer(adminToken);
@@ -1458,6 +1529,128 @@ describe('Crypto payment administration', () => {
 		expect(order.quoteCurrentPlanId).toBe(plan.id);
 	});
 
+	test('payment offers prorate upgrades from assignment acquisition price', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { plan, asset, deployment } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const assignmentExpiresAt = Date.now() + 30 * 86_400_000;
+
+		const assignRes = await app.request('/api/admin/assign-user-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, planId: plan.id, expiresAt: assignmentExpiresAt }),
+		}, env);
+		expect(assignRes.status).toBe(200);
+		await env.DB.prepare(
+			'UPDATE user_plan_assignments SET price_asset_id = ?, price_amount_base_units = ?, price_duration_days = ?, price_duration_unit = ? WHERE user_id = ? AND plan_id = ?',
+		).bind(asset.id, '15000000', 90, 'days', userId, plan.id).run();
+
+		const upgradePlanRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Crypto Max', maxBuckets: 20 }),
+		}, env);
+		expect(upgradePlanRes.status).toBe(200);
+		const upgradePlan = await upgradePlanRes.json() as { id: string };
+		const upgradePriceRes = await app.request('/api/admin/create-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: asset.id,
+				planId: upgradePlan.id,
+				amountBaseUnits: '90000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			}),
+		}, env);
+		expect(upgradePriceRes.status).toBe(200);
+		const upgradePrice = await upgradePriceRes.json() as { id: string };
+
+		const quote = await getOfferQuote(userToken, upgradePrice.id, deployment.id);
+		expect(BigInt(quote.discountBaseUnits)).toBeGreaterThanOrEqual(4_999_000n);
+		expect(BigInt(quote.discountBaseUnits)).toBeLessThanOrEqual(5_000_000n);
+		expect(BigInt(quote.payableAmountBaseUnits)).toBeGreaterThanOrEqual(85_000_000n);
+		expect(BigInt(quote.payableAmountBaseUnits)).toBeLessThanOrEqual(85_001_000n);
+		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: plan.id }));
+	});
+
+	test('payment offers do not prorate upgrades from an acquisition price for another asset', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { plan, asset } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const assignmentExpiresAt = Date.now() + 30 * 86_400_000;
+
+		const assignRes = await app.request('/api/admin/assign-user-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, planId: plan.id, expiresAt: assignmentExpiresAt }),
+		}, env);
+		expect(assignRes.status).toBe(200);
+		await env.DB.prepare(
+			'UPDATE user_plan_assignments SET price_asset_id = ?, price_amount_base_units = ?, price_duration_days = ?, price_duration_unit = ? WHERE user_id = ? AND plan_id = ?',
+		).bind(asset.id, '15000000', 90, 'days', userId, plan.id).run();
+
+		const otherAssetRes = await app.request('/api/admin/create-payment-asset', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ symbol: 'POINT', name: 'Point' }),
+		}, env);
+		expect(otherAssetRes.status).toBe(200);
+		const otherAsset = await otherAssetRes.json() as { id: string };
+		const otherDeploymentRes = await app.request('/api/admin/create-payment-asset-deployment', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: otherAsset.id,
+				chainId: 8453,
+				tokenSymbol: 'POINT',
+				tokenName: 'Point Token',
+				contractAddress: usdtContractAddress,
+				decimals: 6,
+				recipientAddress,
+			}),
+		}, env);
+		expect(otherDeploymentRes.status).toBe(200);
+		const otherDeployment = await otherDeploymentRes.json() as { id: string };
+		const otherCurrentPriceRes = await app.request('/api/admin/create-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: otherAsset.id,
+				planId: plan.id,
+				amountBaseUnits: '60000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			}),
+		}, env);
+		expect(otherCurrentPriceRes.status).toBe(200);
+		const upgradePlanRes = await app.request('/api/admin/create-plan', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ name: 'Crypto Max', maxBuckets: 20 }),
+		}, env);
+		expect(upgradePlanRes.status).toBe(200);
+		const upgradePlan = await upgradePlanRes.json() as { id: string };
+		const otherUpgradePriceRes = await app.request('/api/admin/create-payment-asset-plan-price', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({
+				assetId: otherAsset.id,
+				planId: upgradePlan.id,
+				amountBaseUnits: '90000000',
+				durationDays: 90,
+				durationUnit: 'days',
+			}),
+		}, env);
+		expect(otherUpgradePriceRes.status).toBe(200);
+		const otherUpgradePrice = await otherUpgradePriceRes.json() as { id: string };
+
+		const quote = await getOfferQuote(userToken, otherUpgradePrice.id, otherDeployment.id);
+		expect(BigInt(quote.discountBaseUnits)).toBeGreaterThanOrEqual(19_999_000n);
+		expect(BigInt(quote.discountBaseUnits)).toBeLessThanOrEqual(20_000_000n);
+		expect(quote.currentPlan).toEqual(expect.objectContaining({ id: plan.id }));
+	});
+
 	test('payment offers schedule lower sortOrder plan after current higher plan expires', async () => {
 		const { adminToken, userToken, userId } = await setupAdminAndUser();
 		const { plan, asset, deployment, price } = await createCryptoOffer(adminToken);
@@ -1660,11 +1853,16 @@ describe('Crypto payment administration', () => {
 		const firstOffers = await firstOffersRes.json() as Array<{
 			id: string;
 			quote: { discountBaseUnits: string; payableAmountBaseUnits: string; currentPlan: { id: string } | null };
+			dealDisplay: { canShowDeal: boolean; reason: string };
 		}>;
 		expect(firstOffers.find(offer => offer.id === price.id)?.quote).toMatchObject({
 			discountBaseUnits: '0',
 			payableAmountBaseUnits: '30000000',
 			currentPlan: null,
+		});
+		expect(firstOffers.find(offer => offer.id === price.id)?.dealDisplay).toMatchObject({
+			canShowDeal: false,
+			reason: 'reference_not_higher',
 		});
 
 		const assignRes = await app.request('/api/admin/assign-user-plan', {

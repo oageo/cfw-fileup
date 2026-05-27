@@ -21,11 +21,6 @@ interface QuotaForm {
 	canUseDownloadCount: boolean;
 }
 
-interface Plan {
-	id: string;
-	name: string;
-}
-
 interface UserPlanAssignment {
 	userId: string;
 	planId: string;
@@ -59,25 +54,19 @@ const canUseDownloadCountSetting = computed<'true' | 'false'>({
 		quota.value.canUseDownloadCount = value === 'true';
 	},
 });
-const plans = ref<Plan[]>([]);
 const userPlan = ref<UserPlanAssignment | null>(null);
 const effectiveQuota = ref<EffectiveQuota | null>(null);
-const selectedPlanId = ref('');
-const planExpiresAt = ref('');
 const username = ref('');
 const activeTab = ref<ActiveTab>('effective');
 const loading = ref(true);
 const saving = ref(false);
-const assigningPlan = ref(false);
 const recalculating = ref(false);
 const deleting = ref(false);
-const deletingPlan = ref(false);
 const error = ref('');
 const success = ref('');
 const hasUserQuota = ref(false);
 const editingCustomQuota = ref(false);
 const resetDialog = ref(false);
-const removePlanDialog = ref(false);
 const activeUserPlan = computed(() => userPlan.value != null && userPlan.value.expiresAt > Date.now());
 
 onMounted(async () => {
@@ -140,16 +129,9 @@ async function fetchUser(): Promise<void> {
 
 async function fetchPlansAndAssignment(): Promise<void> {
 	try {
-		const [plansResult, assignmentResult] = await Promise.all([
-			apiPost('/api/admin/list-plans'),
-			apiPost('/api/admin/get-user-plan', { userId: props.userId }),
-		]);
-		if (!plansResult.ok) throw new Error('プラン一覧の取得に失敗しました');
+		const assignmentResult = await apiPost('/api/admin/get-user-plan', { userId: props.userId });
 		if (!assignmentResult.ok) throw new Error('プラン割当の取得に失敗しました');
-		plans.value = plansResult.data;
 		userPlan.value = assignmentResult.data;
-		selectedPlanId.value = assignmentResult.data?.planId ?? plansResult.data[0]?.id ?? '';
-		planExpiresAt.value = assignmentResult.data ? toDatetimeLocal(assignmentResult.data.expiresAt) : '';
 	} catch (e) {
 		error.value = String(e);
 	}
@@ -173,18 +155,6 @@ async function saveQuota(): Promise<void> {
 	}
 }
 
-function toDatetimeLocal(timestamp: number): string {
-	const date = new Date(timestamp);
-	const offsetMs = date.getTimezoneOffset() * 60 * 1000;
-	return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
-}
-
-function getExpiresAtTimestamp(): number | null {
-	if (!planExpiresAt.value) return null;
-	const timestamp = new Date(planExpiresAt.value).getTime();
-	return Number.isFinite(timestamp) ? timestamp : null;
-}
-
 function formatDateTime(timestamp: number): string {
 	return new Intl.DateTimeFormat(undefined, {
 		dateStyle: 'medium',
@@ -202,47 +172,6 @@ function startCustomQuota(): void {
 		canUseDownloadCount: sourceQuota.canUseDownloadCount,
 	};
 	editingCustomQuota.value = true;
-}
-
-async function assignPlan(): Promise<void> {
-	const expiresAt = getExpiresAtTimestamp();
-	if (!selectedPlanId.value || expiresAt == null) {
-		error.value = 'プランと失効日時を入力してください';
-		return;
-	}
-
-	assigningPlan.value = true;
-	error.value = '';
-	success.value = '';
-	try {
-		const result = await apiPost('/api/admin/assign-user-plan', { userId: props.userId, planId: selectedPlanId.value, expiresAt });
-		if (!result.ok) throw new Error('プラン割当に失敗しました');
-		success.value = 'プランを割り当てました';
-		await Promise.all([fetchQuota(), fetchEffectiveQuota(), fetchPlansAndAssignment()]);
-	} catch (e) {
-		error.value = String(e);
-	} finally {
-		assigningPlan.value = false;
-	}
-}
-
-async function executeRemovePlan(): Promise<void> {
-	removePlanDialog.value = false;
-	deletingPlan.value = true;
-	error.value = '';
-	success.value = '';
-	try {
-		const result = await apiPost('/api/admin/delete-user-plan', { userId: props.userId });
-		if (!result.ok) throw new Error('プラン解除に失敗しました');
-		userPlan.value = null;
-		planExpiresAt.value = '';
-		success.value = 'プラン割当を解除しました';
-		await Promise.all([fetchQuota(), fetchEffectiveQuota()]);
-	} catch (e) {
-		error.value = String(e);
-	} finally {
-		deletingPlan.value = false;
-	}
 }
 
 async function executeReset(): Promise<void> {
@@ -324,33 +253,13 @@ async function recalculateEffectiveQuota(): Promise<void> {
         </div>
 
         <div v-if="activeTab === 'billing'" :class="[$style.panel, 'card']">
-          <h3 :class="$style.panelTitle">課金プラン割当</h3>
+          <h3 :class="$style.panelTitle">課金プラン</h3>
           <div v-if="userPlan" :class="$style.currentPlan">
             <span :class="['badge', activeUserPlan ? 'badge-admin' : 'badge-warning']">{{ userPlan.planName }}</span>
             <span :class="['text-muted', $style.smallText]">失効: {{ formatDateTime(userPlan.expiresAt) }}</span>
           </div>
           <div v-else class="text-muted">現在のプラン割当はありません。</div>
-          <div :class="$style.planControls">
-            <label :class="$style.field">
-              <span>プラン</span>
-              <select v-model="selectedPlanId" class="form-input" :disabled="assigningPlan || plans.length === 0">
-                <option v-for="plan in plans" :key="plan.id" :value="plan.id">{{ plan.name }}</option>
-              </select>
-            </label>
-            <label :class="$style.field">
-              <span>失効日時</span>
-              <input v-model="planExpiresAt" class="form-input" type="datetime-local" :disabled="assigningPlan">
-            </label>
-            <Button.Root type="button" class="btn btn-primary" :disabled="plans.length === 0 || !selectedPlanId || !planExpiresAt" :loading="assigningPlan" @click="assignPlan">
-              <Button.Loading>保存中...</Button.Loading>
-              <Button.Content>割り当てる</Button.Content>
-            </Button.Root>
-            <Button.Root v-if="userPlan" type="button" class="btn btn-ghost-danger" :loading="deletingPlan" @click="removePlanDialog = true">
-              <Button.Loading>解除中...</Button.Loading>
-              <Button.Content>解除</Button.Content>
-            </Button.Root>
-          </div>
-          <p v-if="plans.length === 0" :class="['text-muted', $style.formHint]">先に課金プラン管理でプランを作成してください。</p>
+          <p :class="['text-muted', $style.formHint]">課金プランは支払い処理によってのみ付与されます。管理者がユーザーの容量や上限を変更する場合はカスタムクォータを使用してください。</p>
         </div>
 
         <div v-else-if="activeTab === 'custom'" :class="$style.tabPanel">
@@ -453,15 +362,6 @@ async function recalculateEffectiveQuota(): Promise<void> {
       @confirm="executeReset"
       @cancel="resetDialog = false"
     />
-    <ConfirmDialog
-      v-model:open="removePlanDialog"
-      title="プラン割当を解除"
-      message="このユーザーの課金プラン割当を解除しますか？"
-      confirm-label="解除する"
-      :danger="true"
-      @confirm="executeRemovePlan"
-      @cancel="removePlanDialog = false"
-    />
   </div>
 </template>
 
@@ -543,21 +443,6 @@ async function recalculateEffectiveQuota(): Promise<void> {
   flex-wrap: wrap;
 }
 
-.planControls {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto auto;
-  gap: 10px;
-  align-items: end;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
 .formHint {
   font-size: 0.875rem;
   margin: 0;
@@ -567,9 +452,4 @@ async function recalculateEffectiveQuota(): Promise<void> {
   flex-wrap: wrap;
 }
 
-@media (max-width: 760px) {
-  .planControls {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

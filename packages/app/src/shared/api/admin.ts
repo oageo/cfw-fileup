@@ -381,7 +381,7 @@ export const adminApiDef = {
 			planId: IdString,
 			expiresAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
 		}),
-		res: { ...OkResponse, ...AdminErrors, 404: errorResponse('User or plan not found', ['USER_NOT_FOUND', 'PLAN_NOT_FOUND']) },
+		res: { ...OkResponse, ...AdminErrors, 400: errorResponse('Manual plan assignment is not supported', ['MANUAL_PLAN_ASSIGNMENT_NOT_SUPPORTED']), 404: errorResponse('User or plan not found', ['USER_NOT_FOUND', 'PLAN_NOT_FOUND']) },
 	},
 	'/api/admin/get-user-plan': {
 		summary: 'Get user plan assignment',

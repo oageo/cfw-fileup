@@ -1,4 +1,4 @@
--- https://github.com/tamaina/cfw-fileup/issues/112
+-- https://github.com/tamaina/cfw-fileup/issues/110
 CREATE TABLE `crypto_payment_orders` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -66,6 +66,26 @@ CREATE TABLE `payment_asset_deployments` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_asset_deployments_chain_contract_idx` ON `payment_asset_deployments` (`chain_id`,`contract_address`);--> statement-breakpoint
 CREATE INDEX `payment_asset_deployments_asset_id_idx` ON `payment_asset_deployments` (`asset_id`);--> statement-breakpoint
+CREATE TABLE `payment_asset_plan_price_periods` (
+	`id` text PRIMARY KEY NOT NULL,
+	`price_id` text NOT NULL,
+	`asset_id` text NOT NULL,
+	`plan_id` text NOT NULL,
+	`amount_base_units` text NOT NULL,
+	`duration_days` integer NOT NULL,
+	`duration_unit` text DEFAULT 'days' NOT NULL,
+	`is_enabled` integer DEFAULT true NOT NULL,
+	`starts_at` integer NOT NULL,
+	`expires_at` integer,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`price_id`) REFERENCES `payment_asset_plan_prices`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`asset_id`) REFERENCES `payment_assets`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `payment_asset_plan_price_periods_price_id_idx` ON `payment_asset_plan_price_periods` (`price_id`);--> statement-breakpoint
+CREATE INDEX `payment_asset_plan_price_periods_lookup_idx` ON `payment_asset_plan_price_periods` (`asset_id`,`plan_id`,`duration_days`,`duration_unit`,`starts_at`);--> statement-breakpoint
+CREATE INDEX `payment_asset_plan_price_periods_expires_at_idx` ON `payment_asset_plan_price_periods` (`expires_at`);--> statement-breakpoint
 CREATE TABLE `payment_asset_plan_prices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`asset_id` text NOT NULL,
@@ -289,12 +309,17 @@ CREATE TABLE `plans` (
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `plans_sort_order_idx` ON `plans` (`sort_order`);--> statement-breakpoint
 CREATE TABLE `user_plan_assignments` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
 	`plan_id` text NOT NULL,
 	`starts_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
+	`price_asset_id` text NOT NULL,
+	`price_amount_base_units` text NOT NULL,
+	`price_duration_days` integer NOT NULL,
+	`price_duration_unit` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,

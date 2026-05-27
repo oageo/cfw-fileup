@@ -1,5 +1,6 @@
 import { and, desc, eq, ne } from 'drizzle-orm';
 import { createPublicClient, decodeEventLog, http, isAddress, parseAbiItem, TransactionReceiptNotFoundError, type Hex, type TransactionReceipt } from 'viem';
+import { addPaymentDuration } from '../../shared/billing-quote';
 import { genEaidx } from '../../shared/eaid-x';
 import { cryptoPaymentOrders, paymentChains, userPlanAssignments } from '../scheme/index';
 import { ApiError, apiError } from './api-error';
@@ -106,6 +107,7 @@ export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId:
 
 async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation, normalizedTxHash: Hex, now: number): Promise<OrderForConfirmation> {
 	const db = getDb(env);
+	const effectivePeriod = getPaidOrderEffectivePeriod(order, now);
 	let claimedOrders: OrderForConfirmation[];
 	try {
 		claimedOrders = await db
@@ -114,6 +116,8 @@ async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation,
 				status: 'paid',
 				txHash: normalizedTxHash,
 				paidAt: now,
+				quoteEffectiveStartsAt: effectivePeriod.startsAt,
+				quoteEffectiveExpiresAt: effectivePeriod.expiresAt,
 				updatedAt: now,
 			})
 			.where(and(eq(cryptoPaymentOrders.id, order.id), eq(cryptoPaymentOrders.status, 'pending')))
@@ -128,6 +132,19 @@ async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation,
 	await refreshEffectiveQuotaForUser(env, order.userId, now);
 
 	return claimedOrder;
+}
+
+function getPaidOrderEffectivePeriod(order: OrderForConfirmation, paidAt: number): { startsAt: number; expiresAt: number } {
+	if (order.quoteCurrentPlanId !== null) {
+		return {
+			startsAt: order.quoteEffectiveStartsAt,
+			expiresAt: order.quoteEffectiveExpiresAt,
+		};
+	}
+	return {
+		startsAt: paidAt,
+		expiresAt: addPaymentDuration(paidAt, order.durationDays, order.durationUnit),
+	};
 }
 
 async function verifyCryptoPaymentTransaction(env: Env, order: OrderForConfirmation, txHash: Hex): Promise<PaymentVerificationResult> {
@@ -202,6 +219,7 @@ async function getConfirmationsRequired(env: Env, chainId: number): Promise<numb
 
 async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: number): Promise<void> {
 	const db = getDb(env);
+	if (order.assetId == null) throw apiError(400, 'PAYMENT_ORDER_NOT_FOUND');
 
 	await expireDiscountedFuturePlanAssignment(env, {
 		userId: order.userId,
@@ -220,6 +238,10 @@ async function applyPaidOrderPlan(env: Env, order: OrderForConfirmation, now: nu
 			planId: order.planId,
 			startsAt: order.quoteEffectiveStartsAt,
 			expiresAt: order.quoteEffectiveExpiresAt,
+			priceAssetId: order.assetId,
+			priceAmountBaseUnits: order.quoteBaseAmountBaseUnits,
+			priceDurationDays: order.durationDays,
+			priceDurationUnit: order.durationUnit,
 			createdAt: now,
 			updatedAt: now,
 		});
