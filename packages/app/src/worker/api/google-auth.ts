@@ -235,24 +235,29 @@ app.get('/callback', async (c) => {
 		const now = Date.now();
 		const userId = genEaidx(now);
 		const initialQuota = await getInitialEffectiveQuotaForUser(c.env, now);
-		await db.insert(users).values({
-			id: userId,
-			username,
-			passwordHash: null,
-			googleId,
-			isAdmin: isFirstUser,
-			isSuspended: false,
-			effectiveMaxBuckets: initialQuota.maxBuckets,
-			effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
-			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
-			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
-			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
-			effectiveShowAds: initialQuota.showAds,
-			effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
-			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
-			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
-			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
-		});
+		try {
+			await db.insert(users).values({
+				id: userId,
+				username,
+				passwordHash: null,
+				googleId,
+				isAdmin: isFirstUser,
+				isSuspended: false,
+				effectiveMaxBuckets: initialQuota.maxBuckets,
+				effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
+				effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
+				effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
+				effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+				effectiveShowAds: initialQuota.showAds,
+				effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
+				effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
+				effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
+				effectiveQuotaSource: initialQuota.effectiveQuotaSource,
+			});
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) return c.redirect(googleErrorLocation('username_taken', '/signup'), 302);
+			throw e;
+		}
 
 		user = await db.select().from(users).where(eq(users.id, userId)).get();
 		if (!user) {

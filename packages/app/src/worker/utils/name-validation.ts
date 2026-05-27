@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { appSettings, users, usedBucketNames } from '../scheme/index';
 import { DEFAULT_FORBIDDEN_USERNAMES, DEFAULT_FORBIDDEN_BUCKET_NAMES } from '../../shared/app-settings';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
@@ -29,6 +29,7 @@ export async function validateUsername(
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	db: DrizzleD1Database<any>,
 	username: string,
+	excludeUserId?: string,
 ): Promise<string | null> {
 	const usernameLower = username.toLowerCase();
 
@@ -40,7 +41,10 @@ export async function validateUsername(
 	const usedEntry = await db
 		.select({ id: users.id })
 		.from(users)
-		.where(sql`lower(${users.username}) = ${usernameLower}`)
+		.where(and(
+			sql`lower(${users.username}) = ${usernameLower}`,
+			excludeUserId ? ne(users.id, excludeUserId) : undefined,
+		))
 		.get();
 	if (usedEntry) {
 		return 'Username already exists';

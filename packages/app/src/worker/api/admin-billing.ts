@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, asc, desc, eq, gt, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -271,9 +271,8 @@ function durationSortValue(value: number, unit: PaymentDurationUnit): number {
 }
 
 async function assertPaymentPriceRules(env: Env, input: PaymentPriceRuleInput): Promise<void> {
-	if (input.expiresAt !== null) return;
-
 	const db = getDb(env);
+	const now = Date.now();
 	const existingPrices = await db
 		.select({
 			id: paymentAssetPlanPrices.id,
@@ -287,12 +286,17 @@ async function assertPaymentPriceRules(env: Env, input: PaymentPriceRuleInput): 
 			eq(paymentAssetPlanPrices.assetId, input.assetId),
 			eq(paymentAssetPlanPrices.planId, input.planId),
 			input.id ? ne(paymentAssetPlanPrices.id, input.id) : undefined,
-			isNull(paymentAssetPlanPrices.expiresAt),
+			input.expiresAt === null
+				? isNull(paymentAssetPlanPrices.expiresAt)
+				: and(isNotNull(paymentAssetPlanPrices.expiresAt), gt(paymentAssetPlanPrices.expiresAt, now)),
 		));
 
 	const inputDuration = durationSortValue(input.durationDays, input.durationUnit);
 	const inputAmount = BigInt(input.amountBaseUnits);
 	for (const price of existingPrices) {
+		if (input.durationDays === price.durationDays && input.durationUnit === price.durationUnit) {
+			throw apiError(400, 'PAYMENT_PRICE_ALREADY_EXISTS');
+		}
 		const existingDuration = durationSortValue(price.durationDays, price.durationUnit);
 		const existingAmount = BigInt(price.amountBaseUnits);
 		if (inputDuration > existingDuration && inputAmount < existingAmount) {

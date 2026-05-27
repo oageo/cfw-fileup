@@ -9,13 +9,15 @@ export async function ensureAncestorDirectories(db: Db, bucketId: string, filePa
 	const ancestorCount = segments.length - 1;
 	if (ancestorCount === 0) return;
 
+	const inserts = [];
 	for (let i = 1; i <= ancestorCount; i++) {
 		const dirPath = segments.slice(0, i).join('/') + '/';
-		await db.insert(directories).values({
+		inserts.push(db.insert(directories).values({
 			id: genEaidx(Date.now()),
 			bucketId,
 			path: dirPath,
 			isListed: true,
-		}).onConflictDoNothing();
+		}).onConflictDoNothing());
 	}
+	await db.batch(inserts as [typeof inserts[number], ...Array<typeof inserts[number]>]);
 }

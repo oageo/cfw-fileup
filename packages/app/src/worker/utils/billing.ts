@@ -263,7 +263,8 @@ async function verifyCryptoPaymentTransaction(env: Env, order: OrderForConfirmat
 		return 'confirmed';
 	} catch (e) {
 		if (e instanceof ApiError) throw e;
-		throw apiError(400, 'PAYMENT_TRANSACTION_INVALID');
+		console.warn('Failed to verify crypto payment transaction:', e);
+		return 'pending';
 	}
 }
 

@@ -532,25 +532,30 @@ app.get('/callback', async (c) => {
 		const now = Date.now();
 		const userId = genEaidx(now);
 		const initialQuota = await getInitialEffectiveQuotaForUser(c.env, now);
-		await db.insert(users).values({
-			id: userId,
-			username,
-			passwordHash: null,
-			googleId: null,
-			misskeyId: null,
-			isAdmin: isFirstUser,
-			isSuspended: false,
-			effectiveMaxBuckets: initialQuota.maxBuckets,
-			effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
-			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
-			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
-			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
-			effectiveShowAds: initialQuota.showAds,
-			effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
-			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
-			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
-			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
-		});
+		try {
+			await db.insert(users).values({
+				id: userId,
+				username,
+				passwordHash: null,
+				googleId: null,
+				misskeyId: null,
+				isAdmin: isFirstUser,
+				isSuspended: false,
+				effectiveMaxBuckets: initialQuota.maxBuckets,
+				effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
+				effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
+				effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
+				effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+				effectiveShowAds: initialQuota.showAds,
+				effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
+				effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
+				effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
+				effectiveQuotaSource: initialQuota.effectiveQuotaSource,
+			});
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) return c.redirect('/signin?indieauth_error=username_taken', 302);
+			throw e;
+		}
 		await db.insert(misskeyAccounts).values({
 			id: genEaidx(Date.now()),
 			userId,

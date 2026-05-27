@@ -378,15 +378,20 @@ app.post(
 				throw apiError(400, 'INVALID_USERNAME_FORMAT', 'username must be 1-32 characters');
 			}
 
-			if (newUsername.toLowerCase() !== userRecord.username.toLowerCase()) {
+			if (newUsername !== userRecord.username) {
 				// 文字種・禁止ワード・重複（大文字小文字を区別しない）チェック
-				const usernameError = await validateUsername(db, newUsername);
+				const usernameError = await validateUsername(db, newUsername, userRecord.id);
 				if (usernameError) {
 					const status = usernameError === 'Username already exists' ? 409 : 400;
 					throw apiError(status, usernameError === 'Username already exists' ? 'USERNAME_ALREADY_EXISTS' : 'INVALID_USERNAME_FORMAT', usernameError);
 				}
 
-				await db.update(users).set({ username: newUsername }).where(eq(users.id, user.id));
+				try {
+					await db.update(users).set({ username: newUsername }).where(eq(users.id, user.id));
+				} catch (e) {
+					if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(409, 'USERNAME_ALREADY_EXISTS');
+					throw e;
+				}
 			}
 		}
 

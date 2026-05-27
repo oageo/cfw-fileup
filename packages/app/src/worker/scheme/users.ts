@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { binaryBlob } from './binary-blob';
 
 export const users = sqliteTable('users', {
@@ -20,7 +21,9 @@ export const users = sqliteTable('users', {
 	effectiveQuotaExpiresAt: integer('effective_quota_expires_at'),
 	effectiveQuotaUpdatedAt: integer('effective_quota_updated_at'),
 	effectiveQuotaSource: text('effective_quota_source'),
-});
+}, (table) => [
+	uniqueIndex('users_username_lower_unique_idx').on(sql`lower(${table.username})`),
+]);
 
 export const tokens = sqliteTable('tokens', {
 	id: text('id').primaryKey(),

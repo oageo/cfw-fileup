@@ -86,23 +86,28 @@ app.post(
 		const passwordHash = await hashPassword(password);
 		const initialQuota = await getInitialEffectiveQuotaForUser(c.env, now);
 
-		await db.insert(users).values({
-			id: userId,
-			username,
-			passwordHash,
-			isAdmin: isFirstUser,
-			isSuspended: false,
-			effectiveMaxBuckets: initialQuota.maxBuckets,
-			effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
-			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
-			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
-			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
-			effectiveShowAds: initialQuota.showAds,
-			effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
-			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
-			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
-			effectiveQuotaSource: initialQuota.effectiveQuotaSource,
-		});
+		try {
+			await db.insert(users).values({
+				id: userId,
+				username,
+				passwordHash,
+				isAdmin: isFirstUser,
+				isSuspended: false,
+				effectiveMaxBuckets: initialQuota.maxBuckets,
+				effectiveMaxBucketSizeBytes: initialQuota.maxBucketSizeBytes,
+				effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
+				effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
+				effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+				effectiveShowAds: initialQuota.showAds,
+				effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
+				effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
+				effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
+				effectiveQuotaSource: initialQuota.effectiveQuotaSource,
+			});
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(409, 'USERNAME_ALREADY_EXISTS');
+			throw e;
+		}
 
 		const tokenId = genEaidx(Date.now());
 		const tokenValue = generateToken();

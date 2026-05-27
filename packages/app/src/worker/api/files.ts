@@ -499,7 +499,6 @@ app.post(
 			uploadExpiresAt: uploadExpiry,
 			partSize,
 		});
-		await ensureAncestorDirectories(db, bucket.id, body.path);
 
 		return c.json({ fileId, uploadExpiry, partSize }, 200);
 	}, getResponseDefWithAuth('/api/files/create/open')),
@@ -722,18 +721,13 @@ app.post(
 			throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');
 		}
 
-		const updatedBuckets = await db.update(buckets)
+		const updateBucket = db.update(buckets)
 			.set({ usedBytes: sql`${buckets.usedBytes} + ${fileSize}` })
 			.where(quota.maxBucketSizeBytes !== null
 				? and(eq(buckets.id, bucket.id), lte(sql`${buckets.usedBytes} + ${fileSize}`, quota.maxBucketSizeBytes))
 				: eq(buckets.id, bucket.id))
 			.returning({ id: buckets.id });
-		if (quota.maxBucketSizeBytes !== null && updatedBuckets.length === 0) {
-			throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
-		}
-
-		await db
-			.update(files)
+		const updateFile = db.update(files)
 			.set({
 				isClosed: true,
 				visibility: body.visibility,
@@ -744,7 +738,18 @@ app.post(
 				size: fileSize,
 				mimeType,
 			})
-			.where(eq(files.id, file.id));
+			.where(and(eq(files.id, file.id), eq(files.isClosed, false)))
+			.returning({ id: files.id });
+		const [updatedBuckets, updatedFiles] = await db.batch([updateBucket, updateFile]);
+		if (updatedBuckets.length === 0) {
+			throw quota.maxBucketSizeBytes !== null
+				? apiError(429, 'BUCKET_LIMIT_EXCEEDED')
+				: apiError(404, 'BUCKET_NOT_FOUND');
+		}
+		if (updatedFiles.length === 0) {
+			throw apiError(409, 'FILE_ALREADY_EXISTS');
+		}
+		await ensureAncestorDirectories(db, bucket.id, file.path);
 		await recordModerationEvent(c, 'file_uploaded', {
 			fileId: file.id,
 			bucketId: bucket.id,
@@ -934,7 +939,7 @@ app.post(
 				}
 			}
 			if (countForTarget === 0) continue;
-			matchedCount += directoryCountForTarget > 0 ? directoryCountForTarget : 1;
+			matchedCount += 1;
 			for (const file of childFiles) filesToPurge.set(file.id, file);
 			await db.update(files)
 				.set({ isListed: body.isListed })
