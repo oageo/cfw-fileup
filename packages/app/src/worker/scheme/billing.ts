@@ -105,6 +105,7 @@ export const cryptoPaymentOrders = sqliteTable('crypto_payment_orders', {
 	updatedAt: integer('updated_at').notNull(),
 	expiresAt: integer('expires_at').notNull(),
 	paidAt: integer('paid_at'),
+	cfRegionSnapshot: text('cf_region_snapshot').notNull().default('{}'),
 }, (table) => [
 	index('crypto_payment_orders_user_id_id_idx').on(table.userId, table.id),
 	index('crypto_payment_orders_status_expires_at_idx').on(table.status, table.expiresAt),

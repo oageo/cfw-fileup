@@ -6,6 +6,19 @@ const EthereumAddress = v.pipe(v.string(), v.regex(/^0x[a-fA-F0-9]{40}$/));
 const TransactionHash = v.pipe(v.string(), v.regex(/^0x[a-fA-F0-9]{64}$/));
 const BigIntString = v.pipe(v.string(), v.regex(/^(0|[1-9]\d*)$/));
 const PaymentDurationUnit = v.picklist(['days', 'months', 'years']);
+const CfRegionSnapshotResponse = v.object({
+	country: v.nullable(v.string()),
+	isEUCountry: v.nullable(v.boolean()),
+	city: v.nullable(v.string()),
+	continent: v.nullable(v.string()),
+	latitude: v.nullable(v.string()),
+	longitude: v.nullable(v.string()),
+	postalCode: v.nullable(v.string()),
+	metroCode: v.nullable(v.string()),
+	region: v.nullable(v.string()),
+	regionCode: v.nullable(v.string()),
+	timezone: v.nullable(v.string()),
+});
 
 const PaymentChainResponse = v.pipe(
 	v.object({
@@ -290,6 +303,7 @@ const CryptoPaymentOrderResponse = v.pipe(
 		updatedAt: v.number(),
 		expiresAt: v.number(),
 		paidAt: v.nullable(v.number()),
+		cfRegionSnapshot: v.union([v.string(), CfRegionSnapshotResponse]),
 	}),
 	v.metadata({ ref: 'CryptoPaymentOrder' }),
 );
@@ -361,6 +375,7 @@ export const billingApiDef = {
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: CryptoPaymentOrderResponse } } },
 			400: errorResponse('Invalid payment quote, wallet, or RPC configuration', ['PAYMENT_CHAIN_RPC_NOT_CONFIGURED', 'PAYMENT_QUOTE_EXPIRED', 'PAYMENT_QUOTE_INVALID', 'WALLET_NOT_FOUND']),
+			403: errorResponse('Payment region not allowed', ['PAYMENT_REGION_NOT_ALLOWED']),
 			404: errorResponse('Payment price not found', ['PAYMENT_PRICE_NOT_FOUND']),
 		},
 	},

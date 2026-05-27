@@ -1,8 +1,30 @@
 import { env } from 'cloudflare:workers';
-import app from '../../src/worker/index';
+import workerApp from '../../src/worker/index';
 import migration0000 from '../../migrations/0000_sturdy_peter_parker.sql?raw';
+import migration0001 from '../../migrations/0001_closed_stranger.sql?raw';
 
-export { env, app };
+const defaultCf = {
+	country: 'JP',
+	isEUCountry: false,
+	city: 'Tokyo',
+	continent: 'AS',
+	latitude: '35.68950',
+	longitude: '139.69171',
+	postalCode: '100-0001',
+	metroCode: null,
+	region: 'Tokyo',
+	regionCode: '13',
+	timezone: 'Asia/Tokyo',
+};
+
+export const rawApp = workerApp;
+export const app = {
+	request: ((input: Parameters<typeof workerApp.request>[0], init?: Parameters<typeof workerApp.request>[1], envArg?: Parameters<typeof workerApp.request>[2]) => {
+		if (input instanceof Request) return workerApp.request(input, init, envArg);
+		return workerApp.request(input, { ...init, cf: (init as { cf?: unknown } | undefined)?.cf ?? defaultCf } as Parameters<typeof workerApp.request>[1], envArg);
+	}) as typeof workerApp.request,
+};
+export { env };
 
 export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 	const normalized = value.replaceAll('-', '+').replaceAll('_', '/');
@@ -17,6 +39,7 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 
 const migrations = [
 	migration0000,
+	migration0001,
 ] as const;
 
 const tables = [

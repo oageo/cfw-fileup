@@ -14,6 +14,7 @@ import { omitResAndReq } from '../utils/omit';
 import { idPage, pageParams } from '../utils/pagination';
 import { isPaymentChainRpcConfigured } from '../utils/payment-rpc';
 import { genEaidx } from '../../shared/eaid-x';
+import { assertBillingRegionAllowed, stringifyCfRegionSnapshot } from '../utils/billing-region';
 
 const app = new Hono<{ Bindings: Env }>();
 const QUOTE_TTL_MS = 15 * 60 * 1000;
@@ -502,6 +503,7 @@ app.post(
 	validator('json', apiDef['/api/billing/create-crypto-order'].req),
 	describeResponse(async (c: JsonCtx<'/api/billing/create-crypto-order', Env>) => {
 		if (!await canAcceptCryptoPayments(c.env)) throw apiError(403, 'FORBIDDEN');
+		const cfRegionSnapshot = await assertBillingRegionAllowed(c.env, c.req.raw);
 		const db = getDb(c.env);
 		const user = c.get('user');
 		const body = c.req.valid('json');
@@ -611,6 +613,7 @@ app.post(
 			updatedAt: now,
 			expiresAt: getCryptoPaymentOrderExpiresAt(now),
 			paidAt: null,
+			cfRegionSnapshot: stringifyCfRegionSnapshot(cfRegionSnapshot),
 		};
 		await db.insert(cryptoPaymentOrders).values(order);
 		if (BigInt(order.amountBaseUnits) === 0n) {

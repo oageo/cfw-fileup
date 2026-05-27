@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
 import { getWorkerCacheName, workerCacheBaseNames } from '../../src/worker/utils/cache-names';
 import { expireDiscountedFuturePlanAssignment } from '../../src/worker/utils/billing';
-import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
+import { env, app, rawApp, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
 
 beforeAll(async () => {
 	await setupDb();
@@ -1249,6 +1249,94 @@ describe('Crypto payment administration', () => {
 			recipientAddress,
 			status: 'pending',
 		});
+		const stored = await env.DB.prepare('SELECT cf_region_snapshot FROM crypto_payment_orders WHERE id = ?').bind((order as { id: string }).id).first<{ cf_region_snapshot: string }>();
+		expect(JSON.parse(stored?.cf_region_snapshot ?? '{}')).toMatchObject({
+			country: 'JP',
+			continent: 'AS',
+			regionCode: '13',
+			timezone: 'Asia/Tokyo',
+		});
+	});
+
+	test('crypto order creation rejects regions outside billing rules', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const wallet = await createLinkedWallet(userId);
+
+		const orderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			cf: { country: 'US', continent: 'NA', regionCode: 'CA', isEUCountry: false },
+			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
+		} as RequestInit & { cf: Record<string, unknown> }, env);
+		expect(orderRes.status).toBe(403);
+		const body = await orderRes.json() as { error: string };
+		expect(body.error).toBe('PAYMENT_REGION_NOT_ALLOWED');
+	});
+
+	test('crypto order creation supports regional allow rules', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		await env.DB.prepare(
+			'INSERT INTO app_settings (key, value) VALUES (\'billing_region_rules\', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+		).bind('{"mode":"allow","rules":[{"country":"US","regionCode":"CA"}]}').run();
+		const wallet = await createLinkedWallet(userId);
+
+		const orderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			cf: { country: 'US', continent: 'NA', regionCode: 'CA', region: 'California', isEUCountry: false },
+			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
+		} as RequestInit & { cf: Record<string, unknown> }, env);
+		expect(orderRes.status).toBe(200);
+	});
+
+	test('crypto order creation supports EU deny rules', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		await env.DB.prepare(
+			'INSERT INTO app_settings (key, value) VALUES (\'billing_region_rules\', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+		).bind('{"mode":"deny","rules":[{"isEUCountry":true}]}').run();
+		const wallet = await createLinkedWallet(userId);
+
+		const orderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			cf: { country: 'DE', continent: 'EU', regionCode: 'BE', isEUCountry: '1' },
+			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
+		} as RequestInit & { cf: Record<string, unknown> }, env);
+		expect(orderRes.status).toBe(403);
+		const body = await orderRes.json() as { error: string };
+		expect(body.error).toBe('PAYMENT_REGION_NOT_ALLOWED');
+	});
+
+	test('crypto order creation rejects missing or invalid region rule data', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const wallet = await createLinkedWallet(userId);
+
+		const missingCfRes = await rawApp.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
+		}, env);
+		expect(missingCfRes.status).toBe(403);
+
+		await env.DB.prepare(
+			'INSERT INTO app_settings (key, value) VALUES (\'billing_region_rules\', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+		).bind('{"mode":"allow","rules":[{}]}').run();
+		const invalidRulesRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
+		}, env);
+		expect(invalidRulesRes.status).toBe(403);
+		const body = await invalidRulesRes.json() as { error: string };
+		expect(body.error).toBe('PAYMENT_REGION_NOT_ALLOWED');
 	});
 
 	test('one USD price can be paid through multiple token deployments', async () => {

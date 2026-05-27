@@ -11,6 +11,8 @@ export const DEFAULT_FORBIDDEN_USERNAMES =
 export const DEFAULT_FORBIDDEN_BUCKET_NAMES =
 	'admin,administrator,root,system,maintainer,host,mod,moderator,owner,superuser,staff,auth,i,me,everyone,all,example,user,users,account,accounts,official,help,helps,support,supports,info,information,informations,announce,announces,announcement,announcements,notice,notification,notifications,dev,developer,developers,tech,cloudflare,cf';
 
+export const DEFAULT_BILLING_REGION_RULES = '{"mode":"allow","rules":[{"country":"JP"}]}';
+
 export const registrationModeSchema = v.picklist(['closed', 'passphrase', 'open']);
 export type RegistrationMode = v.InferOutput<typeof registrationModeSchema>;
 export const optionalUrlSettingSchema = v.union([
@@ -21,6 +23,36 @@ export const optionalDateSettingSchema = v.union([
 	v.literal(''),
 	v.pipe(v.string(), v.isoDate()),
 ]);
+export const regionRuleSchema = v.pipe(
+	v.object({
+		country: v.optional(v.pipe(v.string(), v.regex(/^[A-Z]{2}$/))),
+		regionCode: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(20))),
+		continent: v.optional(v.pipe(v.string(), v.regex(/^[A-Z]{2}$/))),
+		isEUCountry: v.optional(v.boolean()),
+	}),
+	v.check(rule => (
+		rule.country != null
+		|| rule.regionCode != null
+		|| rule.continent != null
+		|| rule.isEUCountry != null
+	), 'At least one region condition is required'),
+);
+export const billingRegionRulesSchema = v.object({
+	mode: v.picklist(['allow', 'deny']),
+	rules: v.pipe(v.array(regionRuleSchema), v.minLength(1)),
+});
+export type BillingRegionRules = v.InferOutput<typeof billingRegionRulesSchema>;
+export const billingRegionRulesSettingSchema = v.pipe(
+	v.string(),
+	v.check((value) => {
+		try {
+			v.parse(billingRegionRulesSchema, JSON.parse(value));
+			return true;
+		} catch {
+			return false;
+		}
+	}, 'Invalid billing region rules JSON'),
+);
 
 /**
  * app_settings テーブルで管理する設定項目。
@@ -37,6 +69,7 @@ export const KNOWN_SETTINGS = {
 	indieauth_blocked_servers: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
 	reject_mismatched_file_type: v.optional(v.picklist(['true', 'false']), 'false'),
 	crypto_payments_enabled: v.optional(v.picklist(['true', 'false']), 'false'),
+	billing_region_rules: v.optional(billingRegionRulesSettingSchema, DEFAULT_BILLING_REGION_RULES),
 	forbidden_usernames: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_USERNAMES),
 	forbidden_bucket_names: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), DEFAULT_FORBIDDEN_BUCKET_NAMES),
 } as const;
