@@ -48,6 +48,12 @@ async function fetchSettings(): Promise<void> {
 				case 'terms_updated_at':
 					map.terms_updated_at = s.value;
 					break;
+				case 'privacy_policy_url':
+					map.privacy_policy_url = s.value;
+					break;
+				case 'plan_purchase_terms_url':
+					map.plan_purchase_terms_url = s.value;
+					break;
 				case 'indieauth_blocked_servers':
 					map.indieauth_blocked_servers = s.value;
 					break;
@@ -157,6 +163,28 @@ async function saveSetting<TKey extends KnownSettingKey>(key: TKey, value: v.Inf
           @save="saveSetting('terms_updated_at', $event)"
         >
           YYYY-MM-DD 形式で指定します。この日付より古い同意は再確認されます。空欄の場合はURL設定時点の同意だけを確認します。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['privacy_policy_url']"
+          :schema="KNOWN_SETTINGS['privacy_policy_url']"
+          title="プライバシーポリシーURL"
+          :saving="saving['privacy_policy_url']"
+          :show-save-button="true"
+          @save="saveSetting('privacy_policy_url', $event)"
+        >
+          サインアップ時に利用規約と並べて表示するプライバシーポリシーのURLです。空欄の場合は確認チェックを表示しません。
+        </SettingItem>
+
+        <SettingItem
+          v-model="values['plan_purchase_terms_url']"
+          :schema="KNOWN_SETTINGS['plan_purchase_terms_url']"
+          title="プラン購入契約条項URL"
+          :saving="saving['plan_purchase_terms_url']"
+          :show-save-button="true"
+          @save="saveSetting('plan_purchase_terms_url', $event)"
+        >
+          プラン購入についてページに表示する契約条項のURLです。利用規約とは別に設定します。
         </SettingItem>
 
         <SettingItem

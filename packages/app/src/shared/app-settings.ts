@@ -29,6 +29,8 @@ export const KNOWN_SETTINGS = {
 	google_required: v.optional(v.picklist(['true', 'false']), 'false'),
 	terms_url: v.optional(optionalUrlSettingSchema, ''),
 	terms_updated_at: v.optional(optionalDateSettingSchema, ''),
+	privacy_policy_url: v.optional(optionalUrlSettingSchema, ''),
+	plan_purchase_terms_url: v.optional(optionalUrlSettingSchema, ''),
 	indieauth_blocked_servers: v.optional(v.pipe(v.string(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)), ''),
 	reject_mismatched_file_type: v.optional(v.picklist(['true', 'false']), 'false'),
 	crypto_payments_enabled: v.optional(v.picklist(['true', 'false']), 'false'),

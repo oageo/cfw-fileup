@@ -42,6 +42,8 @@ const googleAuthEnabled = ref(false);
 const googleRequired = ref(false);
 const termsUrl = ref('');
 const termsAccepted = ref(false);
+const privacyPolicyUrl = ref('');
+const privacyPolicyAccepted = ref(false);
 
 const activeMode = computed<'signin' | 'signup'>(() => (
 	mainRouter.currentRef.value.route.name === 'signup' ? 'signup' : 'signin'
@@ -61,12 +63,14 @@ const signupPasswordError = computed(() => {
 
 const canPasswordSignin = computed(() => !turnstileEnabled.value || signinTurnstileToken.value !== null);
 const termsRequired = computed(() => termsUrl.value !== '');
-const signupPrerequisitesRequired = computed(() => passphraseRequired.value || turnstileEnabled.value || termsRequired.value);
+const privacyPolicyRequired = computed(() => privacyPolicyUrl.value !== '');
+const signupPrerequisitesRequired = computed(() => passphraseRequired.value || turnstileEnabled.value || termsRequired.value || privacyPolicyRequired.value);
 const signupPrerequisitesMet = computed(() =>
 	(!signupPrerequisitesRequired.value || signupPrerequisitesConfirmed.value) &&
 	(!passphraseRequired.value || !!signupForm.passphrase) &&
 	(!turnstileEnabled.value || signupTurnstileToken.value !== null) &&
-	(!termsRequired.value || termsAccepted.value)
+	(!termsRequired.value || termsAccepted.value) &&
+	(!privacyPolicyRequired.value || privacyPolicyAccepted.value)
 );
 const signupUsernameReady = computed(() =>
 	signupPrerequisitesMet.value &&
@@ -89,6 +93,7 @@ async function fetchMeta(): Promise<void> {
 			googleAuthEnabled?: boolean;
 			googleRequired?: boolean;
 			termsUrl?: string;
+			privacyPolicyUrl?: string;
 		};
 		passphraseRequired.value = data.passphraseRequired ?? false;
 		turnstileEnabled.value = data.turnstileEnabled ?? false;
@@ -96,6 +101,7 @@ async function fetchMeta(): Promise<void> {
 		googleAuthEnabled.value = data.googleAuthEnabled ?? false;
 		googleRequired.value = data.googleRequired ?? false;
 		termsUrl.value = data.termsUrl ?? '';
+		privacyPolicyUrl.value = data.privacyPolicyUrl ?? '';
 	} catch (e) {
 		console.error('Failed to fetch meta:', e);
 	}
@@ -107,6 +113,9 @@ watch(() => signupForm.passphrase, () => {
 	signupPrerequisitesConfirmed.value = false;
 });
 watch(termsAccepted, () => {
+	signupPrerequisitesConfirmed.value = false;
+});
+watch(privacyPolicyAccepted, () => {
 	signupPrerequisitesConfirmed.value = false;
 });
 
@@ -134,6 +143,10 @@ function confirmSignupPrerequisites(): void {
 	}
 	if (termsRequired.value && !termsAccepted.value) {
 		signupError.value = '利用規約に同意してください';
+		return;
+	}
+	if (privacyPolicyRequired.value && !privacyPolicyAccepted.value) {
+		signupError.value = 'プライバシーポリシーに同意してください';
 		return;
 	}
 	signupPrerequisitesConfirmed.value = true;
@@ -595,6 +608,13 @@ async function signupWithPasskey(): Promise<void> {
               <input v-model="termsAccepted" type="checkbox" :class="$style.termsCheckbox">
               <span>
                 <a :href="termsUrl" target="_blank" rel="noopener noreferrer">利用規約</a>に同意する
+              </span>
+            </label>
+
+            <label v-if="privacyPolicyRequired" :class="$style.termsAgreement">
+              <input v-model="privacyPolicyAccepted" type="checkbox" :class="$style.termsCheckbox">
+              <span>
+                <a :href="privacyPolicyUrl" target="_blank" rel="noopener noreferrer">プライバシーポリシー</a>に同意する
               </span>
             </label>
 

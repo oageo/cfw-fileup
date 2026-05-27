@@ -3,8 +3,7 @@ import { onMounted, ref } from 'vue';
 
 const loading = ref(true);
 const error = ref('');
-const termsUrl = ref('');
-const termsUpdatedAt = ref('');
+const planPurchaseTermsUrl = ref('');
 
 async function load(): Promise<void> {
 	loading.value = true;
@@ -15,9 +14,8 @@ async function load(): Promise<void> {
 			error.value = '契約条項リンクの取得に失敗しました';
 			return;
 		}
-		const data = await res.json() as { termsUrl?: string; termsUpdatedAt?: string };
-		termsUrl.value = data.termsUrl ?? '';
-		termsUpdatedAt.value = data.termsUpdatedAt ?? '';
+		const data = await res.json() as { planPurchaseTermsUrl?: string };
+		planPurchaseTermsUrl.value = data.planPurchaseTermsUrl ?? '';
 	} catch (e) {
 		error.value = String(e);
 	} finally {
@@ -47,14 +45,11 @@ onMounted(load);
         <p>
           プランの購入には、管理者が設定した契約条項が適用されます。
         </p>
-        <p v-if="termsUrl">
-          <a :href="termsUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">契約条項を開く</a>
+        <p v-if="planPurchaseTermsUrl">
+          <a :href="planPurchaseTermsUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">契約条項を開く</a>
         </p>
         <p v-else class="text-muted">
           契約条項リンクは現在設定されていません。
-        </p>
-        <p v-if="termsUpdatedAt" class="text-muted">
-          契約条項更新日: {{ termsUpdatedAt }}
         </p>
         <p :class="$style.notice">
           購入後の取り消しや返金は自動では行われません。決済方法の性質上、すぐに対応できない場合があります。

@@ -152,6 +152,7 @@ const hasMimeTypeMismatch = ref(false);
 const hasExecutableContent = ref(false);
 const browseTermsLoading = ref(false);
 const browseTermsUrl = ref('');
+const browsePrivacyPolicyUrl = ref('');
 const browseTermsAccepted = ref(false);
 const browseTermsError = ref('');
 const metaLoading = ref(false);
@@ -197,10 +198,10 @@ const currentBrowseUrl = computed(() => {
 	if (!parsed) return location.href;
 	return `${location.origin}${parsed.fullPath}`;
 });
-const isTermsPage = computed(() => {
-	if (!browseTermsUrl.value) return false;
+function isCurrentPolicyPage(policyUrl: string): boolean {
+	if (!policyUrl) return false;
 	try {
-		const termsUrl = new URL(browseTermsUrl.value, location.origin);
+		const termsUrl = new URL(policyUrl, location.origin);
 		const currentUrl = new URL(currentBrowseUrl.value);
 		return termsUrl.origin === currentUrl.origin &&
 			currentUrl.pathname.startsWith(termsUrl.pathname) &&
@@ -208,14 +209,18 @@ const isTermsPage = computed(() => {
 	} catch {
 		return false;
 	}
-});
-const browseTermsRequiredAt = computed(() => {
-	if (!browseTermsUrl.value) return 0;
-	if (!browseTermsUpdatedAt.value) return 1;
-	const time = Date.parse(`${browseTermsUpdatedAt.value}T00:00:00.000Z`);
+}
+const isPolicyPage = computed(() => isCurrentPolicyPage(browseTermsUrl.value) || isCurrentPolicyPage(browsePrivacyPolicyUrl.value));
+function settingRequiredAt(url: string, updatedAt: string): number {
+	if (!url) return 0;
+	if (!updatedAt) return 1;
+	const time = Date.parse(`${updatedAt}T00:00:00.000Z`);
 	return Number.isNaN(time) ? 1 : time;
+}
+const browseTermsRequiredAt = computed(() => {
+	return Math.max(settingRequiredAt(browseTermsUrl.value, browseTermsUpdatedAt.value), browsePrivacyPolicyUrl.value ? 1 : 0);
 });
-const browseTermsBlocked = computed(() => !authStore.user && browseTermsUrl.value !== '' && !isTermsPage.value && !browseTermsAccepted.value);
+const browseTermsBlocked = computed(() => !authStore.user && (browseTermsUrl.value !== '' || browsePrivacyPolicyUrl.value !== '') && !isPolicyPage.value && !browseTermsAccepted.value);
 
 const browseTermsStorageKey = 'cfw-fileup:browse-terms-agreed-at';
 
@@ -266,9 +271,10 @@ async function fetchBrowseTerms(): Promise<void> {
 			browseTermsError.value = `利用規約の取得に失敗しました: ${res.status}`;
 			return;
 		}
-		const data = await res.json() as { termsUrl?: string; termsUpdatedAt?: string };
+		const data = await res.json() as { termsUrl?: string; termsUpdatedAt?: string; privacyPolicyUrl?: string };
 		browseTermsUrl.value = data.termsUrl ?? '';
 		browseTermsUpdatedAt.value = data.termsUpdatedAt ?? '';
+		browsePrivacyPolicyUrl.value = data.privacyPolicyUrl ?? '';
 		browseTermsAccepted.value = hasAcceptedBrowseTerms();
 		if (!browseTermsBlocked.value) fetchMeta();
 	} catch (e) {
@@ -603,15 +609,16 @@ watch(() => [entryPath.value, queryToken.value], () => {
     </div>
     <div v-else-if="browseTermsError" class="alert alert-error">{{ browseTermsError }}</div>
     <div v-else-if="browseTermsBlocked" class="card" :class="$style.termsGate">
-      <h2 :class="['card-title', $style.termsGateTitle]">利用規約への同意が必要です</h2>
+      <h2 :class="['card-title', $style.termsGateTitle]">規約の確認が必要です</h2>
       <p :class="[$style.termsGateDesc, 'text-muted']">
-        ファイルやディレクトリを表示する前に、利用規約を確認して同意してください。
+        ファイルやディレクトリを表示する前に、必要な規約を確認して同意してください。
       </p>
       <p v-if="browseTermsUpdatedAt" :class="[$style.termsGateDate, 'text-muted']">
         利用規約更新日: {{ browseTermsUpdatedAt }}
       </p>
       <div :class="$style.termsGateActions">
-        <a :href="browseTermsUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">利用規約を開く</a>
+        <a v-if="browseTermsUrl" :href="browseTermsUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">利用規約を開く</a>
+        <a v-if="browsePrivacyPolicyUrl" :href="browsePrivacyPolicyUrl" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">プライバシーポリシーを開く</a>
         <button type="button" class="btn btn-primary" @click="acceptBrowseTerms">同意して表示</button>
       </div>
     </div>

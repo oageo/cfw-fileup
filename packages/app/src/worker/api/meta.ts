@@ -13,6 +13,8 @@ type MetaResponse = {
 	passphraseRequired: boolean;
 	termsUrl: string;
 	termsUpdatedAt: string;
+	privacyPolicyUrl: string;
+	planPurchaseTermsUrl: string;
 	turnstileEnabled: boolean;
 	turnstileSiteKey: string;
 	googleAuthEnabled: boolean;
@@ -63,6 +65,16 @@ app.get('/meta', async (c) => {
 			.from(appSettings)
 			.where(eq(appSettings.key, 'terms_updated_at'))
 			.get();
+		const privacyPolicyUrlSetting = await db
+			.select()
+			.from(appSettings)
+			.where(eq(appSettings.key, 'privacy_policy_url'))
+			.get();
+		const planPurchaseTermsUrlSetting = await db
+			.select()
+			.from(appSettings)
+			.where(eq(appSettings.key, 'plan_purchase_terms_url'))
+			.get();
 		const cryptoPaymentsEnabled = await canAcceptCryptoPayments(c.env);
 		const walletConnectChains = cryptoPaymentsEnabled
 			? await db
@@ -76,6 +88,8 @@ app.get('/meta', async (c) => {
 			passphraseRequired: mode === 'passphrase',
 			termsUrl: termsUrlSetting?.value ?? '',
 			termsUpdatedAt: termsUpdatedAtSetting?.value ?? '',
+			privacyPolicyUrl: privacyPolicyUrlSetting?.value ?? '',
+			planPurchaseTermsUrl: planPurchaseTermsUrlSetting?.value ?? '',
 			turnstileEnabled: (c.env.TURNSTILE_SECRET as string) !== '',
 			turnstileSiteKey: c.env.TURNSTILE_SITE_KEY,
 			googleAuthEnabled,
@@ -93,6 +107,8 @@ app.get('/meta', async (c) => {
 			passphraseRequired: true,
 			termsUrl: '',
 			termsUpdatedAt: '',
+			privacyPolicyUrl: '',
+			planPurchaseTermsUrl: '',
 			turnstileEnabled: false,
 			turnstileSiteKey: '',
 			googleAuthEnabled: false,
