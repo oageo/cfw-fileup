@@ -875,6 +875,18 @@ onMounted(load);
 		                </span>
 		                ダウンロード数表示 {{ planGroup.plan.canUseDownloadCount ? 'できる' : 'できない' }}
 		              </div>
+		              <div :class="$style.capabilityLine">
+		                <span :class="!planGroup.plan.showAds ? $style.checkMark : $style.crossMark">
+		                  {{ !planGroup.plan.showAds ? '✔' : '×' }}
+		                </span>
+		                閲覧時の広告 {{ planGroup.plan.showAds ? '表示' : '非表示' }}
+		              </div>
+		              <div :class="$style.capabilityLine">
+		                <span :class="planGroup.plan.canDisableFileAds ? $style.checkMark : $style.crossMark">
+		                  {{ planGroup.plan.canDisableFileAds ? '✔' : '×' }}
+		                </span>
+		                配信ファイルの広告オフ {{ planGroup.plan.canDisableFileAds ? 'できる' : 'できない' }}
+		              </div>
 		              <div :class="$style.priceRows">
 		                <div v-for="price in planGroup.prices" :key="priceRowKey(price)" :class="$style.priceRow">
 		                  <span :class="$style.priceInfo">

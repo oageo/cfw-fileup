@@ -9,6 +9,8 @@ export const plans = sqliteTable('plans', {
 	maxFilesPerBucket: integer('max_files_per_bucket'),
 	maxDailyUploads: integer('max_daily_uploads'),
 	canUseDownloadCount: integer('can_use_download_count', { mode: 'boolean' }).notNull().default(false),
+	showAds: integer('show_ads', { mode: 'boolean' }).notNull().default(true),
+	canDisableFileAds: integer('can_disable_file_ads', { mode: 'boolean' }).notNull().default(false),
 	isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
 	sortOrder: integer('sort_order').notNull().default(0),
 	createdAt: integer('created_at').notNull(),
@@ -41,6 +43,8 @@ export const userQuotas = sqliteTable('user_quotas', {
 	maxFilesPerBucket: integer('max_files_per_bucket'),
 	maxDailyUploads: integer('max_daily_uploads'),
 	canUseDownloadCount: integer('can_use_download_count', { mode: 'boolean' }).notNull().default(false),
+	showAds: integer('show_ads', { mode: 'boolean' }).notNull().default(true),
+	canDisableFileAds: integer('can_disable_file_ads', { mode: 'boolean' }).notNull().default(false),
 	updatedAt: integer('updated_at').notNull(),
 });
 
@@ -51,4 +55,6 @@ export const globalQuotas = sqliteTable('global_quotas', {
 	maxFilesPerBucket: integer('max_files_per_bucket'),
 	maxDailyUploads: integer('max_daily_uploads'),
 	canUseDownloadCount: integer('can_use_download_count', { mode: 'boolean' }).notNull().default(false),
+	showAds: integer('show_ads', { mode: 'boolean' }).notNull().default(true),
+	canDisableFileAds: integer('can_disable_file_ads', { mode: 'boolean' }).notNull().default(false),
 });

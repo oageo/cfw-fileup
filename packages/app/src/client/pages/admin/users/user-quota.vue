@@ -19,6 +19,8 @@ interface QuotaForm {
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
 	canUseDownloadCount: boolean;
+	showAds: boolean;
+	canDisableFileAds: boolean;
 }
 
 interface UserPlanAssignment {
@@ -47,11 +49,23 @@ const quotaValueSchema = v.nullable(v.pipe(
 ));
 const booleanSettingSchema = v.picklist(['true', 'false']);
 
-const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null, canUseDownloadCount: false });
+const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null, canUseDownloadCount: false, showAds: true, canDisableFileAds: false });
 const canUseDownloadCountSetting = computed<'true' | 'false'>({
 	get: () => quota.value.canUseDownloadCount ? 'true' : 'false',
 	set: value => {
 		quota.value.canUseDownloadCount = value === 'true';
+	},
+});
+const showAdsSetting = computed<'true' | 'false'>({
+	get: () => quota.value.showAds ? 'true' : 'false',
+	set: value => {
+		quota.value.showAds = value === 'true';
+	},
+});
+const canDisableFileAdsSetting = computed<'true' | 'false'>({
+	get: () => quota.value.canDisableFileAds ? 'true' : 'false',
+	set: value => {
+		quota.value.canDisableFileAds = value === 'true';
 	},
 });
 const userPlan = ref<UserPlanAssignment | null>(null);
@@ -89,6 +103,8 @@ async function fetchQuota(): Promise<void> {
 			maxFilesPerBucket: userData.maxFilesPerBucket ?? null,
 			maxDailyUploads: userData.maxDailyUploads ?? null,
 			canUseDownloadCount: userData.canUseDownloadCount ?? false,
+			showAds: userData.showAds ?? true,
+			canDisableFileAds: userData.canDisableFileAds ?? false,
 		};
 	} catch (e) {
 		error.value = String(e);
@@ -170,6 +186,8 @@ function startCustomQuota(): void {
 		maxFilesPerBucket: sourceQuota.maxFilesPerBucket,
 		maxDailyUploads: sourceQuota.maxDailyUploads,
 		canUseDownloadCount: sourceQuota.canUseDownloadCount,
+		showAds: sourceQuota.showAds,
+		canDisableFileAds: sourceQuota.canDisableFileAds,
 	};
 	editingCustomQuota.value = true;
 }
@@ -314,6 +332,22 @@ async function recalculateEffectiveQuota(): Promise<void> {
               v-model="canUseDownloadCountSetting"
               :schema="booleanSettingSchema"
               title="DL数カウントを許可"
+              :saving="saving"
+              :show-save-button="false"
+              :save-on-change="false"
+            />
+            <SettingItem
+              v-model="showAdsSetting"
+              :schema="booleanSettingSchema"
+              title="閲覧時に広告を表示"
+              :saving="saving"
+              :show-save-button="false"
+              :save-on-change="false"
+            />
+            <SettingItem
+              v-model="canDisableFileAdsSetting"
+              :schema="booleanSettingSchema"
+              title="配信ファイルの広告オフを許可"
               :saving="saving"
               :show-save-button="false"
               :save-on-change="false"

@@ -12,6 +12,8 @@ const QuotaResponse = v.pipe(
 		maxFilesPerBucket: v.nullable(v.number()),
 		maxDailyUploads: v.nullable(v.number()),
 		canUseDownloadCount: v.boolean(),
+		showAds: v.boolean(),
+		canDisableFileAds: v.boolean(),
 	}),
 	v.metadata({ ref: 'Quota' }),
 );
@@ -23,6 +25,8 @@ const EffectiveQuotaResponse = v.pipe(
 		maxFilesPerBucket: v.nullable(v.number()),
 		maxDailyUploads: v.nullable(v.number()),
 		canUseDownloadCount: v.boolean(),
+		showAds: v.boolean(),
+		canDisableFileAds: v.boolean(),
 		effectiveQuotaExpiresAt: v.nullable(v.number()),
 		effectiveQuotaUpdatedAt: v.nullable(v.number()),
 		effectiveQuotaSource: v.nullable(EffectiveQuotaSource),
@@ -42,6 +46,8 @@ const QuotaInput = {
 	maxFilesPerBucket: v.optional(v.nullable(v.number())),
 	maxDailyUploads: v.optional(v.nullable(v.number())),
 	canUseDownloadCount: v.optional(v.boolean()),
+	showAds: v.optional(v.boolean()),
+	canDisableFileAds: v.optional(v.boolean()),
 } as const;
 const PlanResponse = v.pipe(
 	v.object({
@@ -52,6 +58,8 @@ const PlanResponse = v.pipe(
 		maxFilesPerBucket: v.nullable(v.number()),
 		maxDailyUploads: v.nullable(v.number()),
 		canUseDownloadCount: v.boolean(),
+		showAds: v.boolean(),
+		canDisableFileAds: v.boolean(),
 		isEnabled: v.boolean(),
 		sortOrder: v.number(),
 		createdAt: v.number(),

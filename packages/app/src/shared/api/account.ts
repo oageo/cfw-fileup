@@ -22,6 +22,8 @@ const EffectiveQuotaResponse = v.pipe(
 		maxFilesPerBucket: v.nullable(v.number()),
 		maxDailyUploads: v.nullable(v.number()),
 		canUseDownloadCount: v.boolean(),
+		showAds: v.boolean(),
+		canDisableFileAds: v.boolean(),
 		effectiveQuotaExpiresAt: v.nullable(v.number()),
 		effectiveQuotaUpdatedAt: v.nullable(v.number()),
 		effectiveQuotaSource: v.nullable(EffectiveQuotaSource),

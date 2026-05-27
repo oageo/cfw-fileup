@@ -8,6 +8,8 @@ export interface RateLimitConfig {
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
 	canUseDownloadCount: boolean;
+	showAds: boolean;
+	canDisableFileAds: boolean;
 }
 
 export type EffectiveQuotaSource = 'plan' | 'custom' | 'global' | 'default';
@@ -30,6 +32,8 @@ const defaultQuota: RateLimitConfig = {
 	maxFilesPerBucket: null,
 	maxDailyUploads: null,
 	canUseDownloadCount: false,
+	showAds: true,
+	canDisableFileAds: false,
 };
 
 function withMetadata(
@@ -53,6 +57,8 @@ function toRateLimitConfig(quota: EffectiveQuotaConfig): RateLimitConfig {
 		maxFilesPerBucket: quota.maxFilesPerBucket,
 		maxDailyUploads: quota.maxDailyUploads,
 		canUseDownloadCount: quota.canUseDownloadCount,
+		showAds: quota.showAds,
+		canDisableFileAds: quota.canDisableFileAds,
 	};
 }
 
@@ -62,6 +68,8 @@ function toStoredEffectiveQuotaConfig(user: {
 	effectiveMaxFilesPerBucket: number | null;
 	effectiveMaxDailyUploads: number | null;
 	effectiveCanUseDownloadCount: boolean;
+	effectiveShowAds: boolean;
+	effectiveCanDisableFileAds: boolean;
 	effectiveQuotaExpiresAt: number | null;
 	effectiveQuotaUpdatedAt: number | null;
 	effectiveQuotaSource: string | null;
@@ -73,6 +81,8 @@ function toStoredEffectiveQuotaConfig(user: {
 		maxFilesPerBucket: user.effectiveMaxFilesPerBucket,
 		maxDailyUploads: user.effectiveMaxDailyUploads,
 		canUseDownloadCount: user.effectiveCanUseDownloadCount,
+		showAds: user.effectiveShowAds,
+		canDisableFileAds: user.effectiveCanDisableFileAds,
 		effectiveQuotaExpiresAt: user.effectiveQuotaExpiresAt,
 		effectiveQuotaUpdatedAt: user.effectiveQuotaUpdatedAt,
 		effectiveQuotaSource: source === 'plan' || source === 'custom' || source === 'global' || source === 'default' ? source : null,
@@ -86,6 +96,8 @@ function toUserQuotaUpdate(quota: EffectiveQuotaConfig) {
 		effectiveMaxFilesPerBucket: quota.maxFilesPerBucket,
 		effectiveMaxDailyUploads: quota.maxDailyUploads,
 		effectiveCanUseDownloadCount: quota.canUseDownloadCount,
+		effectiveShowAds: quota.showAds,
+		effectiveCanDisableFileAds: quota.canDisableFileAds,
 		effectiveQuotaExpiresAt: quota.effectiveQuotaExpiresAt,
 		effectiveQuotaUpdatedAt: quota.effectiveQuotaUpdatedAt,
 		effectiveQuotaSource: quota.effectiveQuotaSource,
@@ -102,6 +114,8 @@ async function computeEffectiveQuotaForUser(env: Env, userId: string, now: numbe
 			maxFilesPerBucket: plans.maxFilesPerBucket,
 			maxDailyUploads: plans.maxDailyUploads,
 			canUseDownloadCount: plans.canUseDownloadCount,
+			showAds: plans.showAds,
+			canDisableFileAds: plans.canDisableFileAds,
 			expiresAt: userPlanAssignments.expiresAt,
 		})
 		.from(userPlanAssignments)
@@ -121,6 +135,8 @@ async function computeEffectiveQuotaForUser(env: Env, userId: string, now: numbe
 			maxFilesPerBucket: activePlan.maxFilesPerBucket,
 			maxDailyUploads: activePlan.maxDailyUploads,
 			canUseDownloadCount: activePlan.canUseDownloadCount,
+			showAds: activePlan.showAds,
+			canDisableFileAds: activePlan.canDisableFileAds,
 		}, now, activePlan.expiresAt, 'plan');
 	}
 
@@ -133,6 +149,8 @@ async function computeEffectiveQuotaForUser(env: Env, userId: string, now: numbe
 			maxFilesPerBucket: userQuota.maxFilesPerBucket,
 			maxDailyUploads: userQuota.maxDailyUploads,
 			canUseDownloadCount: userQuota.canUseDownloadCount,
+			showAds: userQuota.showAds,
+			canDisableFileAds: userQuota.canDisableFileAds,
 		}, now, null, 'custom');
 	}
 
@@ -155,6 +173,8 @@ async function getGlobalEffectiveQuota(env: Env, now: number): Promise<Effective
 			maxFilesPerBucket: globalQuota.maxFilesPerBucket,
 			maxDailyUploads: globalQuota.maxDailyUploads,
 			canUseDownloadCount: globalQuota.canUseDownloadCount,
+			showAds: globalQuota.showAds,
+			canDisableFileAds: globalQuota.canDisableFileAds,
 		}, now, null, 'global');
 	}
 
@@ -224,6 +244,8 @@ export async function getEffectiveQuotaForUser(env: Env, userId: string): Promis
 			effectiveMaxFilesPerBucket: users.effectiveMaxFilesPerBucket,
 			effectiveMaxDailyUploads: users.effectiveMaxDailyUploads,
 			effectiveCanUseDownloadCount: users.effectiveCanUseDownloadCount,
+			effectiveShowAds: users.effectiveShowAds,
+			effectiveCanDisableFileAds: users.effectiveCanDisableFileAds,
 			effectiveQuotaExpiresAt: users.effectiveQuotaExpiresAt,
 			effectiveQuotaUpdatedAt: users.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: users.effectiveQuotaSource,
@@ -248,6 +270,8 @@ export async function getEffectiveQuotaForUser(env: Env, userId: string): Promis
 		maxFilesPerBucket: user.effectiveMaxFilesPerBucket,
 		maxDailyUploads: user.effectiveMaxDailyUploads,
 		canUseDownloadCount: user.effectiveCanUseDownloadCount,
+		showAds: user.effectiveShowAds,
+		canDisableFileAds: user.effectiveCanDisableFileAds,
 		effectiveQuotaExpiresAt: user.effectiveQuotaExpiresAt,
 		effectiveQuotaUpdatedAt: user.effectiveQuotaUpdatedAt,
 		effectiveQuotaSource: source,
@@ -263,6 +287,8 @@ export async function getStoredEffectiveQuotaForUser(env: Env, userId: string): 
 			effectiveMaxFilesPerBucket: users.effectiveMaxFilesPerBucket,
 			effectiveMaxDailyUploads: users.effectiveMaxDailyUploads,
 			effectiveCanUseDownloadCount: users.effectiveCanUseDownloadCount,
+			effectiveShowAds: users.effectiveShowAds,
+			effectiveCanDisableFileAds: users.effectiveCanDisableFileAds,
 			effectiveQuotaExpiresAt: users.effectiveQuotaExpiresAt,
 			effectiveQuotaUpdatedAt: users.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: users.effectiveQuotaSource,
@@ -290,6 +316,8 @@ export async function getGlobalQuota(env: Env): Promise<RateLimitConfig> {
 			maxFilesPerBucket: globalQuota.maxFilesPerBucket,
 			maxDailyUploads: globalQuota.maxDailyUploads,
 			canUseDownloadCount: globalQuota.canUseDownloadCount,
+			showAds: globalQuota.showAds,
+			canDisableFileAds: globalQuota.canDisableFileAds,
 		};
 	}
 

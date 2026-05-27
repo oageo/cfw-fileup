@@ -15,6 +15,8 @@ export const users = sqliteTable('users', {
 	effectiveMaxFilesPerBucket: integer('effective_max_files_per_bucket'),
 	effectiveMaxDailyUploads: integer('effective_max_daily_uploads'),
 	effectiveCanUseDownloadCount: integer('effective_can_use_download_count', { mode: 'boolean' }).notNull().default(false),
+	effectiveShowAds: integer('effective_show_ads', { mode: 'boolean' }).notNull().default(true),
+	effectiveCanDisableFileAds: integer('effective_can_disable_file_ads', { mode: 'boolean' }).notNull().default(false),
 	effectiveQuotaExpiresAt: integer('effective_quota_expires_at'),
 	effectiveQuotaUpdatedAt: integer('effective_quota_updated_at'),
 	effectiveQuotaSource: text('effective_quota_source'),

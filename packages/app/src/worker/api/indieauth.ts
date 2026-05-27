@@ -533,6 +533,8 @@ app.get('/callback', async (c) => {
 			effectiveMaxFilesPerBucket: initialQuota.maxFilesPerBucket,
 			effectiveMaxDailyUploads: initialQuota.maxDailyUploads,
 			effectiveCanUseDownloadCount: initialQuota.canUseDownloadCount,
+			effectiveShowAds: initialQuota.showAds,
+			effectiveCanDisableFileAds: initialQuota.canDisableFileAds,
 			effectiveQuotaExpiresAt: initialQuota.effectiveQuotaExpiresAt,
 			effectiveQuotaUpdatedAt: initialQuota.effectiveQuotaUpdatedAt,
 			effectiveQuotaSource: initialQuota.effectiveQuotaSource,

@@ -15,13 +15,15 @@ interface Plan {
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
 	canUseDownloadCount: boolean;
+	showAds: boolean;
+	canDisableFileAds: boolean;
 	isEnabled: boolean;
 	sortOrder: number;
 	createdAt: number;
 	updatedAt: number;
 }
 
-type PlanForm = Pick<Plan, 'name' | 'maxBuckets' | 'maxBucketSizeBytes' | 'maxFilesPerBucket' | 'maxDailyUploads' | 'canUseDownloadCount' | 'isEnabled' | 'sortOrder'>;
+type PlanForm = Pick<Plan, 'name' | 'maxBuckets' | 'maxBucketSizeBytes' | 'maxFilesPerBucket' | 'maxDailyUploads' | 'canUseDownloadCount' | 'showAds' | 'canDisableFileAds' | 'isEnabled' | 'sortOrder'>;
 type NullableNumberPlanFormKey = 'maxBuckets' | 'maxBucketSizeBytes' | 'maxFilesPerBucket' | 'maxDailyUploads';
 
 const quotaValueSchema = v.nullable(v.pipe(
@@ -76,6 +78,8 @@ function emptyForm(): PlanForm {
 		maxFilesPerBucket: null,
 		maxDailyUploads: null,
 		canUseDownloadCount: false,
+		showAds: true,
+		canDisableFileAds: false,
 		isEnabled: true,
 		sortOrder: 0,
 	};
@@ -153,6 +157,8 @@ function startEdit(plan: Plan): void {
 		maxFilesPerBucket: plan.maxFilesPerBucket,
 		maxDailyUploads: plan.maxDailyUploads,
 		canUseDownloadCount: plan.canUseDownloadCount,
+		showAds: plan.showAds,
+		canDisableFileAds: plan.canDisableFileAds,
 		isEnabled: plan.isEnabled,
 		sortOrder: plan.sortOrder,
 	};
@@ -201,6 +207,8 @@ async function togglePlanEnabled(plan: Plan): Promise<void> {
 			maxFilesPerBucket: plan.maxFilesPerBucket,
 			maxDailyUploads: plan.maxDailyUploads,
 			canUseDownloadCount: plan.canUseDownloadCount,
+			showAds: plan.showAds,
+			canDisableFileAds: plan.canDisableFileAds,
 			isEnabled: !plan.isEnabled,
 			sortOrder: plan.sortOrder,
 		});
@@ -273,6 +281,14 @@ async function togglePlanEnabled(plan: Plan): Promise<void> {
               <span>DL数カウントを許可</span>
             </label>
             <label :class="$style.checkboxField">
+              <input v-model="form.showAds" type="checkbox">
+              <span>閲覧時に広告を表示</span>
+            </label>
+            <label :class="$style.checkboxField">
+              <input v-model="form.canDisableFileAds" type="checkbox">
+              <span>配信ファイルの広告オフを許可</span>
+            </label>
+            <label :class="$style.checkboxField">
               <input v-model="form.isEnabled" type="checkbox">
               <span>有効</span>
             </label>
@@ -302,6 +318,8 @@ async function togglePlanEnabled(plan: Plan): Promise<void> {
                   <th>ファイル</th>
                   <th>日次</th>
                   <th>DL数</th>
+                  <th>閲覧広告</th>
+                  <th>配信広告オフ</th>
                   <th>状態</th>
                   <th class="col-actions">操作</th>
                 </tr>
@@ -317,6 +335,16 @@ async function togglePlanEnabled(plan: Plan): Promise<void> {
                   <td>
                     <span :class="plan.canUseDownloadCount ? 'badge badge-success' : 'badge badge-muted'">
                       {{ plan.canUseDownloadCount ? '許可' : '不可' }}
+                    </span>
+                  </td>
+                  <td>
+                    <span :class="plan.showAds ? 'badge badge-warning' : 'badge badge-success'">
+                      {{ plan.showAds ? '表示' : '非表示' }}
+                    </span>
+                  </td>
+                  <td>
+                    <span :class="plan.canDisableFileAds ? 'badge badge-success' : 'badge badge-muted'">
+                      {{ plan.canDisableFileAds ? '許可' : '不可' }}
                     </span>
                   </td>
                   <td>

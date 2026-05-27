@@ -16,6 +16,7 @@ import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
 import MarkdownPreview from '@/components/MarkdownPreview.vue';
 import RawTextPreview from '@/components/RawTextPreview.vue';
 import JsonPreview from '@/components/JsonPreview.vue';
+import AdSlot from '@/components/AdSlot.vue';
 
 const props = defineProps<{
 	bucketName: string;
@@ -24,6 +25,7 @@ const props = defineProps<{
 	bucketId: string | null;
 	isOwner?: boolean;
 	isModerationForcedPrivate?: boolean;
+	ownerCanDisableFileAds?: boolean;
 	token?: string;
 }>();
 
@@ -335,6 +337,8 @@ onBeforeUnmount(() => {
         </Button.Content>
       </Button.Root>
     </div>
+
+    <AdSlot :owner-can-disable-file-ads="ownerCanDisableFileAds" />
 
     <div v-if="isImage" :class="$style.imagePreview">
       <img :src="downloadUrl" :alt="filePath" class="file-preview-image">

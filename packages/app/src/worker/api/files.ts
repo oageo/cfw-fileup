@@ -95,6 +95,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	const normalizedPath = path === '' || path.endsWith('/') ? path : `${path}/`;
 	const bucket = await db.select().from(buckets).where(eq(buckets.name, bucketName)).get();
 	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+	const ownerQuota = await getQuotaForUser(c.env, bucket.userId);
 
 	let isOwnerOrAdmin = forceOwner;
 	if (!isOwnerOrAdmin && allowBearerAuth) {
@@ -287,6 +288,7 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 		items,
 		nextCursor: rows.length > limit && lastRow ? encodeCursor({ type: lastRow.type, name: lastRow.name, key: lastRow.key }) : null,
 		hasMore: rows.length > limit,
+		ownerCanDisableFileAds: ownerQuota.canDisableFileAds,
 	};
 }
 
@@ -351,6 +353,7 @@ app.get('/meta', async (c) => {
 	if (!file) throw apiError(404, 'FILE_NOT_FOUND');
 
 	const hasMimeMismatch = hasSuspiciousFileType(file.path, file.mimeType ?? undefined);
+	const ownerQuota = await getQuotaForUser(c.env, file.userId);
 	const base = {
 		visibility: file.visibility,
 		isModerationForcedPrivate: file.isModerationForcedPrivate,
@@ -362,10 +365,10 @@ app.get('/meta', async (c) => {
 		hasMimeTypeMismatch: hasMimeMismatch,
 		hasExecutableContent: hasMimeMismatch && isExecutableMimeType(file.mimeType ?? undefined),
 		isOwner,
+		ownerCanDisableFileAds: ownerQuota.canDisableFileAds,
 		...((file.isDownloadCountEnabled && (isOwnerOrAdmin || file.isDownloadCountVisible)) ? { downloadCount: file.downloadCount } : {}),
 	};
 	if ((file.visibility === 'public' && !file.isModerationForcedPrivate) || isOwnerOrAdmin) {
-		const quota = isOwnerOrAdmin ? await getQuotaForUser(c.env, file.userId) : null;
 		return c.json({
 			...base,
 			fileId: file.id,
@@ -375,7 +378,7 @@ app.get('/meta', async (c) => {
 					isListed: file.isListed,
 					isDownloadCountEnabled: file.isDownloadCountEnabled,
 					isDownloadCountVisible: file.isDownloadCountVisible,
-					canUseDownloadCount: quota?.canUseDownloadCount ?? false,
+					canUseDownloadCount: ownerQuota.canUseDownloadCount,
 				}
 				: {}),
 		});

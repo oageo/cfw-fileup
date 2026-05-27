@@ -82,6 +82,8 @@ const PlanSummaryResponse = v.object({
 	maxFilesPerBucket: v.nullable(v.number()),
 	maxDailyUploads: v.nullable(v.number()),
 	canUseDownloadCount: v.boolean(),
+	showAds: v.boolean(),
+	canDisableFileAds: v.boolean(),
 	sortOrder: v.number(),
 });
 

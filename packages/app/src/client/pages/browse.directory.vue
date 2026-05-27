@@ -12,6 +12,7 @@ import { mainRouter } from '@/router';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import InfiniteLoadTrigger from '@/components/InfiniteLoadTrigger.vue';
 import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
+import AdSlot from '@/components/AdSlot.vue';
 import InputDialog from '@/components/InputDialog.vue';
 import MoveEntryDialog from '@/components/MoveEntryDialog.vue';
 import { MAX_DIRECTORY_NAME_LENGTH, MAX_FILE_PATH_LENGTH } from '../../shared/const';
@@ -33,6 +34,7 @@ const props = defineProps<{
 	entryPath?: string;
 	fileId?: string;
 	token?: string;
+	ownerCanDisableFileAds?: boolean;
 }>();
 
 const isArchive = computed(() => props.isTargz || props.isTar);
@@ -96,9 +98,12 @@ type DirectoryPage = {
 	items: DirectoryEntry[];
 	nextCursor: string | null;
 	hasMore: boolean;
+	ownerCanDisableFileAds: boolean;
 };
 const allArchiveEntries = ref<RawArchiveEntry[]>([]);
 const archivePath = ref('');
+const ownerCanDisableFileAds = ref(false);
+const effectiveOwnerCanDisableFileAds = computed(() => isArchive.value ? props.ownerCanDisableFileAds === true : ownerCanDisableFileAds.value);
 
 const formatSize = formatBytes;
 
@@ -880,6 +885,7 @@ async function load(): Promise<void> {
 			entries.value = data.items.map(toDisplayEntry);
 			directoryNextCursor.value = data.nextCursor;
 			directoryHasMore.value = data.hasMore;
+			ownerCanDisableFileAds.value = data.ownerCanDisableFileAds;
 		}
 	} catch (e) {
 		error.value = String(e);
@@ -898,6 +904,7 @@ async function loadMoreDirectory(): Promise<void> {
 		entries.value = [...entries.value, ...data.items.map(toDisplayEntry)];
 		directoryNextCursor.value = data.nextCursor;
 		directoryHasMore.value = data.hasMore;
+		ownerCanDisableFileAds.value = data.ownerCanDisableFileAds;
 	} catch (e) {
 		error.value = String(e);
 	} finally {
@@ -1196,6 +1203,8 @@ watch([isPartiallySelected, isAllSelected], async () => {
         </Popover.Root>
       </template>
     </div>
+
+    <AdSlot :owner-can-disable-file-ads="effectiveOwnerCanDisableFileAds" />
 
     <div :class="$style.viewToggle" aria-label="表示形式">
       <div v-if="isArchive && archivePath !== ''" class="mb-2">

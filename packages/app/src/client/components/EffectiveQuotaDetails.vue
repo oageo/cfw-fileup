@@ -9,6 +9,8 @@ interface EffectiveQuota {
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
 	canUseDownloadCount: boolean;
+	showAds: boolean;
+	canDisableFileAds: boolean;
 	effectiveQuotaExpiresAt: number | null;
 	effectiveQuotaUpdatedAt: number | null;
 	effectiveQuotaSource: EffectiveQuotaSource | null;
@@ -41,6 +43,10 @@ function formatDownloadCountPermission(value: boolean): string {
 	return value ? '許可' : '不可';
 }
 
+function formatBoolean(value: boolean): string {
+	return value ? '有効' : '無効';
+}
+
 function formatEffectiveQuotaSource(source: EffectiveQuotaSource | null): string {
 	switch (source) {
 		case 'plan': return '課金プラン';
@@ -71,6 +77,10 @@ function formatEffectiveQuotaSource(source: EffectiveQuotaSource | null): string
       <dd>{{ formatQuotaValue(quota.maxDailyUploads) }}</dd>
       <dt>DL数カウント</dt>
       <dd>{{ formatDownloadCountPermission(quota.canUseDownloadCount) }}</dd>
+      <dt>閲覧時の広告表示</dt>
+      <dd>{{ formatBoolean(quota.showAds) }}</dd>
+      <dt>配信ファイルの広告オフ</dt>
+      <dd>{{ formatDownloadCountPermission(quota.canDisableFileAds) }}</dd>
       <dt>有効期限</dt>
       <dd>{{ formatNullableDateTime(quota.effectiveQuotaExpiresAt) }}</dd>
       <dt>更新日時</dt>

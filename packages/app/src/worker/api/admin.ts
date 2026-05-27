@@ -631,6 +631,8 @@ app.post(
 				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 				maxDailyUploads: body.maxDailyUploads ?? null,
 				canUseDownloadCount: body.canUseDownloadCount ?? false,
+				showAds: body.showAds ?? true,
+				canDisableFileAds: body.canDisableFileAds ?? false,
 				updatedAt: now,
 			})
 			.onConflictDoUpdate({
@@ -641,6 +643,8 @@ app.post(
 					maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 					maxDailyUploads: body.maxDailyUploads ?? null,
 					canUseDownloadCount: body.canUseDownloadCount ?? false,
+					showAds: body.showAds ?? true,
+					canDisableFileAds: body.canDisableFileAds ?? false,
 					updatedAt: now,
 				},
 			});
@@ -653,6 +657,8 @@ app.post(
 				maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 				maxDailyUploads: body.maxDailyUploads ?? null,
 				canUseDownloadCount: body.canUseDownloadCount ?? false,
+				showAds: body.showAds ?? true,
+				canDisableFileAds: body.canDisableFileAds ?? false,
 			},
 		});
 
@@ -674,6 +680,8 @@ app.post(
 			maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 			maxDailyUploads: body.maxDailyUploads ?? null,
 			canUseDownloadCount: body.canUseDownloadCount ?? false,
+			showAds: body.showAds ?? true,
+			canDisableFileAds: body.canDisableFileAds ?? false,
 		};
 
 		await db
@@ -743,6 +751,8 @@ app.post(
 				maxFilesPerBucket: quota.maxFilesPerBucket,
 				maxDailyUploads: quota.maxDailyUploads,
 				canUseDownloadCount: quota.canUseDownloadCount,
+				showAds: quota.showAds,
+				canDisableFileAds: quota.canDisableFileAds,
 				effectiveQuotaExpiresAt: quota.effectiveQuotaExpiresAt,
 				effectiveQuotaSource: quota.effectiveQuotaSource,
 			},
@@ -772,6 +782,8 @@ app.post(
 				maxFilesPerBucket: userQuota?.maxFilesPerBucket ?? null,
 				maxDailyUploads: userQuota?.maxDailyUploads ?? null,
 				canUseDownloadCount: userQuota?.canUseDownloadCount ?? false,
+				showAds: userQuota?.showAds ?? true,
+				canDisableFileAds: userQuota?.canDisableFileAds ?? false,
 			},
 		}, 200);
 	}, getResponseDefWithAuth('/api/admin/get-user-custom-quota')),
@@ -900,6 +912,8 @@ app.post(
 			maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 			maxDailyUploads: body.maxDailyUploads ?? null,
 			canUseDownloadCount: body.canUseDownloadCount ?? false,
+			showAds: body.showAds ?? true,
+			canDisableFileAds: body.canDisableFileAds ?? false,
 			isEnabled: body.isEnabled ?? true,
 			sortOrder,
 			createdAt: now,
@@ -941,6 +955,8 @@ app.post(
 			maxFilesPerBucket: body.maxFilesPerBucket ?? null,
 			maxDailyUploads: body.maxDailyUploads ?? null,
 			canUseDownloadCount: body.canUseDownloadCount ?? false,
+			showAds: body.showAds ?? true,
+			canDisableFileAds: body.canDisableFileAds ?? false,
 			isEnabled: body.isEnabled ?? true,
 			sortOrder,
 			createdAt: existing.createdAt,
@@ -955,6 +971,8 @@ app.post(
 				maxFilesPerBucket: updated.maxFilesPerBucket,
 				maxDailyUploads: updated.maxDailyUploads,
 				canUseDownloadCount: updated.canUseDownloadCount,
+				showAds: updated.showAds,
+				canDisableFileAds: updated.canDisableFileAds,
 				isEnabled: updated.isEnabled,
 				sortOrder: updated.sortOrder,
 				updatedAt: updated.updatedAt,

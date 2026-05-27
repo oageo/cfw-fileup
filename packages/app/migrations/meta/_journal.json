@@ -8,6 +8,13 @@
       "when": 1779843570398,
       "tag": "0000_groovy_blue_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779853688502,
+      "tag": "0001_bumpy_miracleman",
+      "breakpoints": true
     }
   ]
 }

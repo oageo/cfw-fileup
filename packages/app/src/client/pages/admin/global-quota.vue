@@ -13,6 +13,8 @@ interface QuotaForm {
 	maxFilesPerBucket: number | null;
 	maxDailyUploads: number | null;
 	canUseDownloadCount: boolean;
+	showAds: boolean;
+	canDisableFileAds: boolean;
 }
 
 const quotaValueSchema = v.nullable(v.pipe(
@@ -22,11 +24,23 @@ const quotaValueSchema = v.nullable(v.pipe(
 ));
 const booleanSettingSchema = v.picklist(['true', 'false']);
 
-const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null, canUseDownloadCount: false });
+const quota = ref<QuotaForm>({ maxBuckets: null, maxBucketSizeBytes: null, maxFilesPerBucket: null, maxDailyUploads: null, canUseDownloadCount: false, showAds: true, canDisableFileAds: false });
 const canUseDownloadCountSetting = computed<'true' | 'false'>({
 	get: () => quota.value.canUseDownloadCount ? 'true' : 'false',
 	set: value => {
 		quota.value.canUseDownloadCount = value === 'true';
+	},
+});
+const showAdsSetting = computed<'true' | 'false'>({
+	get: () => quota.value.showAds ? 'true' : 'false',
+	set: value => {
+		quota.value.showAds = value === 'true';
+	},
+});
+const canDisableFileAdsSetting = computed<'true' | 'false'>({
+	get: () => quota.value.canDisableFileAds ? 'true' : 'false',
+	set: value => {
+		quota.value.canDisableFileAds = value === 'true';
 	},
 });
 const loading = ref(true);
@@ -48,6 +62,8 @@ async function fetchQuota(): Promise<void> {
 			maxFilesPerBucket: result.data.maxFilesPerBucket ?? null,
 			maxDailyUploads: result.data.maxDailyUploads ?? null,
 			canUseDownloadCount: result.data.canUseDownloadCount ?? false,
+			showAds: result.data.showAds ?? true,
+			canDisableFileAds: result.data.canDisableFileAds ?? false,
 		};
 	} catch (e) {
 		error.value = String(e);
@@ -131,6 +147,22 @@ async function saveQuota(): Promise<void> {
           v-model="canUseDownloadCountSetting"
           :schema="booleanSettingSchema"
           title="DL数カウントを許可"
+          :saving="saving"
+          :show-save-button="false"
+          :save-on-change="false"
+        />
+        <SettingItem
+          v-model="showAdsSetting"
+          :schema="booleanSettingSchema"
+          title="閲覧時に広告を表示"
+          :saving="saving"
+          :show-save-button="false"
+          :save-on-change="false"
+        />
+        <SettingItem
+          v-model="canDisableFileAdsSetting"
+          :schema="booleanSettingSchema"
+          title="配信ファイルの広告オフを許可"
           :saving="saving"
           :show-save-button="false"
           :save-on-change="false"

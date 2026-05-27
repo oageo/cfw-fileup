@@ -165,6 +165,7 @@ const fileDownloadCount = ref<number | null>(null);
 const fileIsDownloadCountEnabled = ref(false);
 const fileIsDownloadCountVisible = ref(false);
 const canUseDownloadCount = ref(false);
+const ownerCanDisableFileAds = ref(false);
 
 const activeTab = ref<'info' | 'tokens'>('info');
 const autoToken = ref<string | null>(null);
@@ -318,6 +319,7 @@ async function fetchMeta(): Promise<void> {
 	fileIsDownloadCountEnabled.value = false;
 	fileIsDownloadCountVisible.value = false;
 	canUseDownloadCount.value = false;
+	ownerCanDisableFileAds.value = false;
 	try {
 		const metaUrl = new URL('/api/files/meta', location.origin);
 		metaUrl.searchParams.set('bucketName', props.bucketName);
@@ -343,6 +345,7 @@ async function fetchMeta(): Promise<void> {
 			isDownloadCountEnabled?: boolean;
 			isDownloadCountVisible?: boolean;
 			canUseDownloadCount?: boolean;
+			ownerCanDisableFileAds?: boolean;
 			isOwner?: boolean;
 			fileId?: string;
 			bucketId?: string;
@@ -362,6 +365,7 @@ async function fetchMeta(): Promise<void> {
 		fileIsDownloadCountEnabled.value = data.isDownloadCountEnabled ?? false;
 		fileIsDownloadCountVisible.value = data.isDownloadCountVisible ?? false;
 		canUseDownloadCount.value = data.canUseDownloadCount ?? false;
+		ownerCanDisableFileAds.value = data.ownerCanDisableFileAds ?? false;
 		fileId.value = data.fileId ?? null;
 		fileBucketId.value = data.bucketId ?? null;
 
@@ -551,6 +555,7 @@ watch(() => [props.bucketName, props.filePath], () => {
 	fileIsDownloadCountEnabled.value = false;
 	fileIsDownloadCountVisible.value = false;
 	canUseDownloadCount.value = false;
+	ownerCanDisableFileAds.value = false;
 	clearExpiryTimer();
 	fetchBrowseTerms();
 });
@@ -655,8 +660,8 @@ watch(() => [entryPath.value, queryToken.value], () => {
 
         <!-- 詳細タブ: ファイル表示 -->
         <template v-if="activeTab === 'info'">
-          <BrowseDirectory v-if="isTargz || isTar" :bucketName="bucketName" :filePath="baseFilePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :fileId="fileId ?? undefined" />
-          <BrowseFile
+	          <BrowseDirectory v-if="isTargz || isTar" :bucketName="bucketName" :filePath="baseFilePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :fileId="fileId ?? undefined" :ownerCanDisableFileAds="ownerCanDisableFileAds" />
+	          <BrowseFile
             v-else
             :bucketName="bucketName"
             :filePath="baseFilePath"
@@ -664,8 +669,9 @@ watch(() => [entryPath.value, queryToken.value], () => {
             :fileId="fileId ?? ''"
             :bucketId="fileBucketId"
             :isOwner="fileIsOwner"
-            :isModerationForcedPrivate="fileIsModerationForcedPrivate"
-            @update:isModerationForcedPrivate="fileIsModerationForcedPrivateChanged"
+	            :isModerationForcedPrivate="fileIsModerationForcedPrivate"
+	            :ownerCanDisableFileAds="ownerCanDisableFileAds"
+	            @update:isModerationForcedPrivate="fileIsModerationForcedPrivateChanged"
           />
         </template>
 
@@ -722,7 +728,7 @@ watch(() => [entryPath.value, queryToken.value], () => {
 
       <!-- ログインなし or ディレクトリ or (非公開 + トークンあり): タブなし -->
       <template v-else>
-        <BrowseDirectory v-if="isDirectory || isTargz || isTar" :bucketName="bucketName" :filePath="baseFilePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :fileId="fileId ?? undefined" />
+	        <BrowseDirectory v-if="isDirectory || isTargz || isTar" :bucketName="bucketName" :filePath="baseFilePath" :isTargz="isTargz" :isTar="isTar" :entryPath="entryPath ?? ''" :token="autoToken ?? undefined" :fileId="fileId ?? undefined" :ownerCanDisableFileAds="ownerCanDisableFileAds" />
         <BrowseFile
           v-else-if="!isDirectory"
           :bucketName="bucketName"
@@ -731,8 +737,9 @@ watch(() => [entryPath.value, queryToken.value], () => {
           :fileId="fileId ?? ''"
           :bucketId="fileBucketId"
           :isOwner="fileIsOwner"
-          :isModerationForcedPrivate="fileIsModerationForcedPrivate"
-          @update:isModerationForcedPrivate="fileIsModerationForcedPrivateChanged"
+	          :isModerationForcedPrivate="fileIsModerationForcedPrivate"
+	          :ownerCanDisableFileAds="ownerCanDisableFileAds"
+	          @update:isModerationForcedPrivate="fileIsModerationForcedPrivateChanged"
         />
       </template>
     </template>

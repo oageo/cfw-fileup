@@ -6,6 +6,7 @@ import { authStore } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import AdSlot from '@/components/AdSlot.vue';
 import { formatBytes } from '@/utils/byte-size';
 import { isValidNameFormat, NAME_FORMAT_ERROR } from '../../../shared/name-validation';
 
@@ -135,6 +136,8 @@ onMounted(loadBuckets);
         <div v-else class="form-hint mt-1">英数字とアンダースコア [0-9a-zA-Z_] のみ使用できます</div>
         <div v-if="createError" class="alert alert-error mt-2">{{ createError }}</div>
       </div>
+
+      <AdSlot />
 
       <!-- 一覧 -->
       <div v-if="loading" class="page-loading">
