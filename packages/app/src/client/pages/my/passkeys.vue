@@ -235,14 +235,14 @@ onMounted(async () => {
             <div class="form-hint">このデバイスや認証器を識別するための名前</div>
           </div>
           <div :class="$style.registerActions">
-            <Button.Root
+            <button
               class="btn btn-primary"
               type="submit"
-              :loading="registering"
+              :disabled="registering"
+              :aria-busy="registering"
             >
-              <Button.Loading>登録中...</Button.Loading>
-              <Button.Content>登録</Button.Content>
-            </Button.Root>
+              {{ registering ? '登録中...' : '登録' }}
+            </button>
           </div>
         </Form>
         <div v-if="registerSuccess" :class="['alert', 'alert-success', $style.inlineAlert]">
