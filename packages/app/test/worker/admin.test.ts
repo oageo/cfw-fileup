@@ -31,6 +31,7 @@ describe('Admin access control', () => {
 			{ path: '/api/admin/suspend-user', body: { userId: 'x' } },
 			{ path: '/api/admin/unsuspend-user', body: { userId: 'x' } },
 			{ path: '/api/admin/make-admin', body: { userId: 'x' } },
+			{ path: '/api/admin/update-moderator', body: { userId: 'x', isModerator: true } },
 			{ path: '/api/admin/list-files', body: {} },
 			{ path: '/api/admin/list-moderation-audit-logs', body: {} },
 			{ path: '/api/admin/update-file-moderation', body: { fileId: 'x', isModerationForcedPrivate: true } },
@@ -64,6 +65,30 @@ describe('Admin access control', () => {
 			}, env);
 			expect(res.status).toBe(403);
 		}
+	});
+
+	test('moderator can use moderation endpoints but not admin-only settings', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const grantRes = await app.request('/api/admin/update-moderator', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, isModerator: true }),
+		}, env);
+		expect(grantRes.status).toBe(200);
+
+		const allowedRes = await app.request('/api/admin/list-files', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ limit: 10, cursor: null }),
+		}, env);
+		expect(allowedRes.status).toBe(200);
+
+		const deniedRes = await app.request('/api/admin/update-setting', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify({ key: 'registration_mode', value: 'closed' }),
+		}, env);
+		expect(deniedRes.status).toBe(403);
 	});
 });
 
@@ -169,7 +194,7 @@ describe('POST /api/admin/unsuspend-user', () => {
 });
 
 describe('POST /api/admin/make-admin', () => {
-	test('admin can make another user an admin', async () => {
+	test('admin cannot create a second admin', async () => {
 		const { adminToken, userToken, userId } = await setupAdminAndUser();
 
 		const res = await app.request('/api/admin/make-admin', {
@@ -177,7 +202,7 @@ describe('POST /api/admin/make-admin', () => {
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({ userId }),
 		}, env);
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(403);
 
 		const listRes = await app.request('/api/admin/list-users', {
 			method: 'POST',
@@ -186,14 +211,14 @@ describe('POST /api/admin/make-admin', () => {
 		}, env);
 		expect(listRes.status).toBe(200);
 		const users = await listRes.json() as { items: Array<{ id: string; isAdmin: boolean }> };
-		expect(users.items.find((user) => user.id === userId)?.isAdmin).toBe(true);
+		expect(users.items.find((user) => user.id === userId)?.isAdmin).toBe(false);
 
 		const promotedAdminRes = await app.request('/api/admin/get-global-quota', {
 			method: 'POST',
 			headers: authHeaders(userToken),
 			body: JSON.stringify({}),
 		}, env);
-		expect(promotedAdminRes.status).toBe(200);
+		expect(promotedAdminRes.status).toBe(403);
 	});
 
 	test('nonexistent user returns 404', async () => {

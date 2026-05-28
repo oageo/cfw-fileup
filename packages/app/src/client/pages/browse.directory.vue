@@ -182,7 +182,7 @@ const selectedFileEntries = computed(() => {
 			.filter((entry): entry is DisplayEntry => entry != null);
 	return selected.filter(entry => !entry.isDir && entry.fileId != null);
 });
-const canUpdateSelectedModeration = computed(() => !isArchive.value && authStore.user?.isAdmin === true && (selectAllMode.value || selectedFileEntries.value.length > 0));
+const canUpdateSelectedModeration = computed(() => !isArchive.value && ((authStore.user?.isAdmin ?? false) || (authStore.user?.isModerator ?? false)) && (selectAllMode.value || selectedFileEntries.value.length > 0));
 
 const selectedCount = computed(() => {
 	if (selectAllMode.value) return Math.max(0, selectableEntries.value.length - excludedPaths.value.size);
@@ -1351,13 +1351,13 @@ watch([isPartiallySelected, isAllSelected], async () => {
                           </Button.Content>
                         </Button.Root>
                         <div class="action-menu-divider" role="separator" />
-                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && !entry.isModerationForcedPrivate" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, true)">
+                        <Button.Root v-if="((authStore.user?.isAdmin ?? false) || (authStore.user?.isModerator ?? false)) && !entry.isDir && entry.fileId && !entry.isModerationForcedPrivate" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, true)">
                           <Button.Content>
                             <ShieldOff :size="16" :stroke-width="2" aria-hidden="true" />
                             強制非公開
                           </Button.Content>
                         </Button.Root>
-                        <Button.Root v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId && entry.isModerationForcedPrivate" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, false)">
+                        <Button.Root v-if="((authStore.user?.isAdmin ?? false) || (authStore.user?.isModerator ?? false)) && !entry.isDir && entry.fileId && entry.isModerationForcedPrivate" class="btn btn-ghost w-full" :class="$style.menuItem" @click="executeEntryUpdateModerationForcedPrivate(entry, false)">
                           <Button.Content>
                             <ShieldCheck :size="16" :stroke-width="2" aria-hidden="true" />
                             強制非公開を解除
@@ -1515,7 +1515,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
                   </Button.Root>
 
                   <Button.Root
-                    v-if="authStore.user?.isAdmin && !entry.isDir && entry.fileId"
+                    v-if="((authStore.user?.isAdmin ?? false) || (authStore.user?.isModerator ?? false)) && !entry.isDir && entry.fileId"
                     class="btn"
                     :class="[entry.isModerationForcedPrivate ? 'btn-ghost' : 'btn-ghost-danger', $style.gridCardActionButton, $style.gridCardIconButton]"
                     :aria-label="entry.isModerationForcedPrivate ? `${entry.name}の強制非公開を解除` : `${entry.name}を強制非公開`"

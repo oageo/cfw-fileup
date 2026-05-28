@@ -105,7 +105,7 @@ function toggleTheme(): void {
           </template>
           <NirA to="/tools/media-compress" :class="$style.navLink">ツール</NirA>
           <NirA to="/about" :class="$style.navLink">About</NirA>
-          <template v-if="authStore.user?.isAdmin">
+          <template v-if="authStore.user?.isAdmin || authStore.user?.isModerator">
             <NirA to="/admin" :class="$style.navLink">管理</NirA>
           </template>
         </div>

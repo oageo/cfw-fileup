@@ -13,6 +13,7 @@ import { tokenToDigest } from '../utils/crypto';
 import { getAppName } from '../utils/app-name';
 import { sendEmailLines } from '../utils/email';
 import { runContextBackgroundTask } from '../utils/background-task';
+import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -65,6 +66,7 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/file-reports/create', Env>) => {
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
+		await assertRateLimit(c.env, 'PUBLIC_FORM_RATE_LIMITER', rateLimitKey('file-report', body.fileId, getRequestIp(c.req)));
 		const reporterUser = await getOptionalReporterUser(c);
 		const file = await db.select({ id: files.id, userId: files.userId }).from(files).where(eq(files.id, body.fileId)).get();
 		if (!file) throw apiError(404, 'FILE_NOT_FOUND');

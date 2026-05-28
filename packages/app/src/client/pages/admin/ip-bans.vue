@@ -116,7 +116,7 @@ function formatDate(ms: number): string {
       <h2 class="section-title">IP BAN管理</h2>
     </div>
 
-    <div v-if="!authStore.user?.isAdmin" class="alert alert-error">
+    <div v-if="!(authStore.user?.isAdmin || authStore.user?.isModerator)" class="alert alert-error">
       管理者権限が必要です。
     </div>
 

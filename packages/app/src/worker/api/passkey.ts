@@ -16,6 +16,8 @@ import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToDigest, verif
 import { isValidNameFormat } from '../../shared/name-validation';
 import { validateUsername } from '../utils/name-validation';
 import { verifyTurnstile } from '../utils/turnstile';
+import { getRequestIp } from '../utils/request-ip';
+import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
@@ -494,6 +496,7 @@ app.post(
 		const appName = await getAppName(c.env);
 		const { username, passphrase, turnstileToken } = c.req.valid('json');
 		const trimmed = username.trim();
+		await assertRateLimit(c.env, 'AUTH_RATE_LIMITER', rateLimitKey('passkey-signup', trimmed, getRequestIp(c.req)));
 
 		if ((c.env.TURNSTILE_SECRET as string) !== '') {
 			if (!turnstileToken || !await verifyTurnstile(turnstileToken, c.env.TURNSTILE_SECRET)) {
@@ -655,6 +658,7 @@ app.post(
 				effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 			});
 		} catch (e) {
+			if (e instanceof Error && e.message.includes('users_single_admin_idx')) throw apiError(409, 'USERNAME_ALREADY_TAKEN');
 			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(409, 'USERNAME_ALREADY_TAKEN');
 			throw e;
 		}

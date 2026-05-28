@@ -27,6 +27,32 @@
       "name": "MAILER"
     }
   ],
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "734001",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "FILE_PASSPHRASE_RATE_LIMITER",
+      "namespace_id": "734002",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "PUBLIC_FORM_RATE_LIMITER",
+      "namespace_id": "734003",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "R2",

@@ -162,6 +162,7 @@ const AdminUserResponse = v.pipe(
 		id: IdString,
 		username: v.string(),
 		isAdmin: v.boolean(),
+		isModerator: v.boolean(),
 		isSuspended: v.boolean(),
 	}),
 	v.metadata({ ref: 'AdminUser' }),
@@ -197,6 +198,12 @@ export const adminApiDef = {
 		summary: 'Make a user an admin',
 		tags: ['admin'],
 		req: v.object({ userId: IdString }),
+		res: { ...OkResponse, ...AdminErrors, 400: MissingUserId, 404: UserNotFound },
+	},
+	'/api/admin/update-moderator': {
+		summary: 'Update moderator flag for a user',
+		tags: ['admin'],
+		req: v.object({ userId: IdString, isModerator: v.boolean() }),
 		res: { ...OkResponse, ...AdminErrors, 400: MissingUserId, 404: UserNotFound },
 	},
 	'/api/admin/delete-file': {

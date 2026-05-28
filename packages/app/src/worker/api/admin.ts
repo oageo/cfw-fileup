@@ -15,7 +15,7 @@ import {
 	refreshEffectiveQuotaForPlanUsers,
 	refreshEffectiveQuotaForGlobalFallbackUsers,
 } from '../utils/rate-limit';
-import { authMiddleware, adminMiddleware } from '../middleware/auth';
+import { authMiddleware, adminMiddleware, moderatorMiddleware } from '../middleware/auth';
 import { KNOWN_SETTINGS, KnownSettingRecordSchema } from '../../shared/app-settings';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
@@ -29,7 +29,48 @@ import { idPage, pageParams } from '../utils/pagination';
 const app = new Hono<{ Bindings: Env }>();
 
 app.use(authMiddleware);
-app.use(adminMiddleware);
+
+const moderatorPaths = [
+	'/list-ip-bans',
+	'/create-ip-ban',
+	'/delete-ip-ban',
+	'/list-file-reports',
+	'/get-file-report',
+	'/update-file-report',
+	'/list-files',
+	'/list-moderation-audit-logs',
+	'/update-file-moderation',
+	'/delete-file',
+] as const;
+
+const adminOnlyPaths = [
+	'/suspend-user',
+	'/unsuspend-user',
+	'/make-admin',
+	'/update-moderator',
+	'/delete-bucket',
+	'/purge-worker-cache',
+	'/set-user-quota',
+	'/set-global-quota',
+	'/get-user-quota',
+	'/get-user-effective-quota',
+	'/recalculate-user-effective-quota',
+	'/get-user-custom-quota',
+	'/get-global-quota',
+	'/delete-user-quota',
+	'/list-users',
+	'/update-setting',
+	'/get-settings',
+	'/list-plans',
+	'/create-plan',
+	'/update-plan',
+	'/assign-user-plan',
+	'/get-user-plan',
+	'/delete-user-plan',
+] as const;
+
+for (const path of moderatorPaths) app.use(path, moderatorMiddleware);
+for (const path of adminOnlyPaths) app.use(path, adminMiddleware);
 
 async function getNextPlanSortOrder(env: Env): Promise<number> {
 	const latestPlan = await getDb(env)
@@ -129,11 +170,44 @@ app.post(
 			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
-		await db.update(users).set({ isAdmin: true }).where(eq(users.id, body.userId));
+		const existingAdmin = await db
+			.select({ id: users.id })
+			.from(users)
+			.where(and(eq(users.isAdmin, true), ne(users.id, body.userId)))
+			.get();
+		if (existingAdmin) throw apiError(403, 'FORBIDDEN');
+
+		try {
+			await db.update(users).set({ isAdmin: true }).where(eq(users.id, body.userId));
+		} catch (error) {
+			if (String(error).includes('users_single_admin_idx')) throw apiError(403, 'FORBIDDEN');
+			throw error;
+		}
 		await recordModerationAuditLog(c, 'admin_user_made_admin', { targetUserId: body.userId });
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/admin/make-admin')),
+);
+
+app.post(
+	'/update-moderator',
+	describeRoute(omitResAndReq(apiDef['/api/admin/update-moderator'])),
+	validator('json', apiDef['/api/admin/update-moderator'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/update-moderator', Env>) => {
+		const db = getDb(c.env);
+		const body = c.req.valid('json');
+
+		const user = await db.select().from(users).where(eq(users.id, body.userId)).get();
+		if (!user) throw apiError(404, 'USER_NOT_FOUND');
+
+		await db.update(users).set({ isModerator: body.isModerator }).where(eq(users.id, body.userId));
+		await recordModerationAuditLog(c, 'admin_user_moderator_updated', {
+			targetUserId: body.userId,
+			data: { isModerator: body.isModerator },
+		});
+
+		return c.json({ ok: true }, 200);
+	}, getResponseDefWithAuth('/api/admin/update-moderator')),
 );
 
 app.post(
@@ -832,6 +906,7 @@ app.post(
 			id: users.id,
 			username: users.username,
 			isAdmin: users.isAdmin,
+			isModerator: users.isModerator,
 			isSuspended: users.isSuspended,
 		})
 			.from(users)

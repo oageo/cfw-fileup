@@ -480,6 +480,9 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		putMissingFileCache(c.env, fileId, response, (promise) => c.executionCtx.waitUntil(promise));
 		return response;
 	}
+	if (!file.isClosed) {
+		throw apiError(404, 'FILE_NOT_FOUND');
+	}
 	const fileRecord = file;
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
@@ -605,15 +608,15 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			const token = authorization.slice(7);
 			const tokenBytes = await tokenToDigest(token);
 			const tokenRecord = await db
-				.select({ tokenId: tokens.id, userId: tokens.userId, isAdmin: users.isAdmin, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
+				.select({ tokenId: tokens.id, userId: tokens.userId, isAdmin: users.isAdmin, isModerator: users.isModerator, isSuspended: users.isSuspended, isRevoked: tokens.isRevoked })
 				.from(tokens)
 				.innerJoin(users, eq(tokens.userId, users.id))
 				.where(tokenBytes === null ? sql`false` : eq(tokens.token, tokenBytes))
 				.get();
-			if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended || (!tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId)) {
+			if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended || (!tokenRecord.isAdmin && !tokenRecord.isModerator && tokenRecord.userId !== bucket.userId)) {
 				throw apiError(403, 'FORBIDDEN');
 			}
-			if (tokenRecord.isAdmin && tokenRecord.userId !== bucket.userId) {
+			if ((tokenRecord.isAdmin || tokenRecord.isModerator) && tokenRecord.userId !== bucket.userId) {
 				await db.insert(moderationAuditLogs).values({
 					id: genEaidx(Date.now()),
 					adminUserId: tokenRecord.userId,

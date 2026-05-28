@@ -32,8 +32,8 @@ async function purgeWorkerCache(): Promise<void> {
       <h2 class="section-title">管理パネル</h2>
     </div>
 
-    <div v-if="!authStore.user?.isAdmin" class="alert alert-error">
-      管理者権限が必要です。
+    <div v-if="!(authStore.user?.isAdmin || authStore.user?.isModerator)" class="alert alert-error">
+      管理者またはモデレーター権限が必要です。
     </div>
 
     <div v-else>
@@ -42,11 +42,11 @@ async function purgeWorkerCache(): Promise<void> {
 
       <div :class="$style.navWrapper">
         <ul class="admin-nav-list">
-          <li><NirA to="/admin/settings">アプリ設定</NirA></li>
-          <li><NirA to="/admin/global-quota">グローバルクォータ設定</NirA></li>
-          <li><NirA to="/admin/plans">課金プラン管理</NirA></li>
-          <li><NirA to="/admin/crypto-payments">Crypto payments</NirA></li>
-          <li><NirA to="/admin/users">ユーザー管理</NirA></li>
+          <li v-if="authStore.user?.isAdmin"><NirA to="/admin/settings">アプリ設定</NirA></li>
+          <li v-if="authStore.user?.isAdmin"><NirA to="/admin/global-quota">グローバルクォータ設定</NirA></li>
+          <li v-if="authStore.user?.isAdmin"><NirA to="/admin/plans">課金プラン管理</NirA></li>
+          <li v-if="authStore.user?.isAdmin"><NirA to="/admin/crypto-payments">Crypto payments</NirA></li>
+          <li v-if="authStore.user?.isAdmin"><NirA to="/admin/users">ユーザー管理</NirA></li>
           <li><NirA to="/admin/files">ファイル管理</NirA></li>
           <li><NirA to="/admin/file-reports">ファイル通報</NirA></li>
           <li><NirA to="/admin/audit-logs">監査ログ</NirA></li>
@@ -54,7 +54,7 @@ async function purgeWorkerCache(): Promise<void> {
         </ul>
       </div>
 
-      <div :class="$style.maintenance">
+      <div v-if="authStore.user?.isAdmin" :class="$style.maintenance">
         <h3 :class="$style.maintenanceTitle">メンテナンス</h3>
         <button class="btn btn-danger" type="button" :disabled="purging" @click="purgeWorkerCache">
           {{ purging ? 'パージ中...' : 'Workerキャッシュを全パージ' }}

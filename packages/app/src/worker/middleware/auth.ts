@@ -9,6 +9,7 @@ export type AuthUser = {
 	id: string;
 	username: string;
 	isAdmin: boolean;
+	isModerator: boolean;
 	isSuspended: boolean;
 	termsAgreedAt: number | null;
 	tokenId: string;
@@ -38,6 +39,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 			userId: tokens.userId,
 			username: users.username,
 			isAdmin: users.isAdmin,
+			isModerator: users.isModerator,
 			isSuspended: users.isSuspended,
 			termsAgreedAt: users.termsAgreedAt,
 			isRevoked: tokens.isRevoked,
@@ -64,6 +66,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 		id: tokenRecord.userId,
 		username: tokenRecord.username,
 		isAdmin: tokenRecord.isAdmin,
+		isModerator: tokenRecord.isModerator,
 		isSuspended: tokenRecord.isSuspended,
 		termsAgreedAt: tokenRecord.termsAgreedAt,
 		tokenId: tokenRecord.tokenId,
@@ -76,6 +79,14 @@ export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
 export const adminMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
 	const user = c.get('user');
 	if (!user.isAdmin) {
+		throw apiError(403, 'FORBIDDEN');
+	}
+	await next();
+});
+
+export const moderatorMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+	const user = c.get('user');
+	if (!user.isAdmin && !user.isModerator) {
 		throw apiError(403, 'FORBIDDEN');
 	}
 	await next();

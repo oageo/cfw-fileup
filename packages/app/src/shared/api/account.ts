@@ -77,6 +77,7 @@ export const accountApiDef = {
 				id: v.string(),
 				username: v.string(),
 				isAdmin: v.boolean(),
+				isModerator: v.boolean(),
 				termsAgreedAt: v.nullable(v.number()),
 				hasGoogle: v.boolean(),
 				hasMisskey: v.boolean(),

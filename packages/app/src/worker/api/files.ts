@@ -23,6 +23,7 @@ import { hashPassword, tokenToDigest } from '../utils/crypto';
 import { pageParams, type PageInput } from '../utils/pagination';
 import { likePrefix, notLikePrefix, prefixLikePattern } from '../utils/sql-like';
 import { ensureAncestorDirectories } from '../utils/ensure-ancestor-directories';
+import { assertValidTarIndexEntry, assertValidTargzIndexEntry } from '../utils/archive-index-validation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -302,6 +303,24 @@ async function shouldRejectMismatchedFileType(db: ReturnType<typeof getDb>): Pro
 	return setting?.value === 'true';
 }
 
+async function validateArchiveIndexRows(db: ReturnType<typeof getDb>, fileId: string, fileSize: number): Promise<void> {
+	const [tarIndexRows, targzIndexRows] = await Promise.all([
+		db.select().from(tarFiles).where(eq(tarFiles.fileId, fileId)),
+		db.select().from(targzFiles).where(eq(targzFiles.fileId, fileId)),
+	]);
+	try {
+		for (const entry of tarIndexRows) assertValidTarIndexEntry(entry, fileSize);
+		for (const entry of targzIndexRows) assertValidTargzIndexEntry(entry, fileSize);
+	} catch (error) {
+		await Promise.all([
+			db.delete(tarFiles).where(eq(tarFiles.fileId, fileId)),
+			db.delete(targzFiles).where(eq(targzFiles.fileId, fileId)),
+		]);
+		await db.update(files).set({ isTar: false, isTargz: false }).where(eq(files.id, fileId));
+		throw error;
+	}
+}
+
 app.use('/ls', shortGetCache({ maxAgeSeconds: 10 }));
 
 app.get('/ls', async (c) => {
@@ -541,6 +560,10 @@ app.post(
 		if (file.uploadExpiresAt < Date.now()) {
 			throw apiError(410, 'UPLOAD_EXPIRED');
 		}
+		const r2Object = await c.env.R2.head(file.r2Key);
+		if (r2Object) {
+			for (const entry of body.files) assertValidTargzIndexEntry(entry, r2Object.size);
+		}
 
 		const fileIds = body.files.map(() => genEaidx(Date.now()));
 
@@ -591,6 +614,10 @@ app.post(
 		if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 		if (bucket.userId !== user.id && !user.isAdmin) throw apiError(403, 'FORBIDDEN');
 		if (file.uploadExpiresAt < Date.now()) throw apiError(410, 'UPLOAD_EXPIRED');
+		const r2Object = await c.env.R2.head(file.r2Key);
+		if (r2Object) {
+			for (const entry of body.files) assertValidTarIndexEntry(entry, r2Object.size);
+		}
 
 		const fileIds = body.files.map(() => genEaidx(Date.now()));
 		for (let i = 0; i < body.files.length; i++) {
@@ -693,6 +720,7 @@ app.post(
 		const isDownloadCountVisible = isDownloadCountEnabled ? body.isDownloadCountVisible ?? false : false;
 
 		const fileSize = r2Object.size;
+		await validateArchiveIndexRows(db, file.id, fileSize);
 
 		let detectedMimeType: string | undefined;
 		let headerBytes: Uint8Array | undefined;

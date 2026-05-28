@@ -12,6 +12,7 @@ interface AdminUser {
 	id: string;
 	username: string;
 	isAdmin: boolean;
+	isModerator: boolean;
 	isSuspended: boolean;
 }
 
@@ -29,6 +30,9 @@ const unsuspendDialog = ref(false);
 const unsuspendTarget = ref<AdminUser | null>(null);
 const makeAdminDialog = ref(false);
 const makeAdminTarget = ref<AdminUser | null>(null);
+const moderatorDialog = ref(false);
+const moderatorTarget = ref<AdminUser | null>(null);
+const moderatorNextValue = ref(false);
 
 onMounted(() => fetchUsers());
 
@@ -70,6 +74,12 @@ function requestUnsuspend(user: AdminUser): void {
 function requestMakeAdmin(user: AdminUser): void {
 	makeAdminTarget.value = user;
 	makeAdminDialog.value = true;
+}
+
+function requestModerator(user: AdminUser, isModerator: boolean): void {
+	moderatorTarget.value = user;
+	moderatorNextValue.value = isModerator;
+	moderatorDialog.value = true;
 }
 
 async function executeSuspend(): Promise<void> {
@@ -116,6 +126,22 @@ async function executeMakeAdmin(): Promise<void> {
 		actionError.value = String(e);
 	}
 }
+
+async function executeModerator(): Promise<void> {
+	if (!moderatorTarget.value) return;
+	const userId = moderatorTarget.value.id;
+	const isModerator = moderatorNextValue.value;
+	moderatorDialog.value = false;
+	moderatorTarget.value = null;
+	actionError.value = '';
+	try {
+		const result = await apiPost('/api/admin/update-moderator', { userId, isModerator });
+		if (!result.ok) throw new Error('モデレーター権限の更新に失敗しました');
+		await fetchUsers();
+	} catch (e) {
+		actionError.value = String(e);
+	}
+}
 </script>
 
 <template>
@@ -154,6 +180,7 @@ async function executeMakeAdmin(): Promise<void> {
               <td :class="$style.usernameCell">{{ u.username }}</td>
               <td>
                 <span v-if="u.isAdmin" class="badge badge-admin">管理者</span>
+                <span v-else-if="u.isModerator" class="badge badge-admin">モデレーター</span>
                 <span v-else class="badge badge-muted">一般</span>
               </td>
               <td>
@@ -171,6 +198,12 @@ async function executeMakeAdmin(): Promise<void> {
                       <div class="action-menu-inner">
                         <Button.Root v-if="!u.isAdmin" class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestMakeAdmin(u)">
                           <Button.Content>管理者にする</Button.Content>
+                        </Button.Root>
+                        <Button.Root v-if="!u.isAdmin && !u.isModerator" class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestModerator(u, true)">
+                          <Button.Content>モデレーターにする</Button.Content>
+                        </Button.Root>
+                        <Button.Root v-if="u.isModerator" class="btn btn-ghost w-full" :class="$style.menuItem" @click="requestModerator(u, false)">
+                          <Button.Content>モデレーター解除</Button.Content>
                         </Button.Root>
                         <Button.Root v-if="!u.isSuspended" class="btn btn-ghost-danger w-full" :class="$style.menuItem" @click="requestSuspend(u)">
                           <Button.Content>停止</Button.Content>
@@ -221,6 +254,14 @@ async function executeMakeAdmin(): Promise<void> {
       confirm-label="管理者にする"
       @confirm="executeMakeAdmin"
       @cancel="makeAdminDialog = false"
+    />
+    <ConfirmDialog
+      v-model:open="moderatorDialog"
+      :title="moderatorNextValue ? 'モデレーターにする' : 'モデレーター解除'"
+      :message="moderatorTarget ? `ユーザー「${moderatorTarget.username}」のモデレーター権限を${moderatorNextValue ? '付与' : '解除'}しますか？` : ''"
+      :confirm-label="moderatorNextValue ? '付与する' : '解除する'"
+      @confirm="executeModerator"
+      @cancel="moderatorDialog = false"
     />
   </div>
 </template>

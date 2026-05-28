@@ -16,6 +16,7 @@ const BucketNameString = v.pipe(v.string(), v.maxLength(MAX_BUCKET_NAME_LENGTH))
 const FilePathString = v.pipe(v.string(), v.maxLength(MAX_FILE_PATH_LENGTH));
 const FileCreatePathString = v.pipe(v.string(), v.maxLength(MAX_FILE_PATH_LENGTH), filePathValidation);
 const MimeTypeString = v.pipe(v.string(), v.maxLength(MAX_MIME_TYPE_LENGTH));
+const NonNegativeSafeInteger = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER));
 
 const UploadingFileResponse = v.pipe(
 	v.object({
@@ -79,12 +80,12 @@ export const filesApiDef = {
 			files: v.pipe(v.array(v.object({
 				path: FileCreatePathString,
 				mimeType: MimeTypeString,
-				aStart: v.number(),
-				aFirstEnd: v.number(),
-				aFinalStart: v.number(),
-				aEnd: v.number(),
-				rStartOffset: v.number(),
-				rEndOffset: v.number(),
+				aStart: NonNegativeSafeInteger,
+				aFirstEnd: NonNegativeSafeInteger,
+				aFinalStart: NonNegativeSafeInteger,
+				aEnd: NonNegativeSafeInteger,
+				rStartOffset: NonNegativeSafeInteger,
+				rEndOffset: NonNegativeSafeInteger,
 			})), v.maxLength(MAX_ARCHIVE_INDEX_ENTRIES)),
 		}),
 		res: {
@@ -102,8 +103,8 @@ export const filesApiDef = {
 			files: v.pipe(v.array(v.object({
 				path: FileCreatePathString,
 				mimeType: MimeTypeString,
-				offset: v.number(),
-				size: v.number(),
+				offset: NonNegativeSafeInteger,
+				size: NonNegativeSafeInteger,
 			})), v.maxLength(MAX_ARCHIVE_INDEX_ENTRIES)),
 		}),
 		res: {

@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
         </Button.Content>
       </Button.Root>
       <Button.Root
-        v-if="authStore.user?.isAdmin"
+        v-if="authStore.user?.isAdmin || authStore.user?.isModerator"
         :class="['btn', isModerationForcedPrivate ? 'btn-ghost' : 'btn-ghost-danger']"
         :disabled="moderationSaving"
         @click="requestModerationForcedPrivate(!isModerationForcedPrivate)"

@@ -19,6 +19,7 @@ export type ModerationAuditAction =
 	| 'admin_user_suspended'
 	| 'admin_user_unsuspended'
 	| 'admin_user_made_admin'
+	| 'admin_user_moderator_updated'
 	| 'admin_ip_ban_created'
 	| 'admin_ip_ban_deleted'
 	| 'admin_file_report_updated'

@@ -1,7 +1,8 @@
-import { env } from 'cloudflare:workers';
+import { env as workerEnv } from 'cloudflare:workers';
 import workerApp from '../../src/worker/index';
 import migration0000 from '../../migrations/0000_curly_lady_deathstrike.sql?raw';
 import migration0001 from '../../migrations/0001_confused_wild_child.sql?raw';
+import migration0002 from '../../migrations/0002_last_whizzer.sql?raw';
 
 const defaultCf = {
 	country: 'JP',
@@ -18,13 +19,18 @@ const defaultCf = {
 };
 
 export const rawApp = workerApp;
+export const env = Object.assign(workerEnv, {
+	TURNSTILE_SECRET: '',
+	AUTH_RATE_LIMITER: undefined,
+	FILE_PASSPHRASE_RATE_LIMITER: undefined,
+	PUBLIC_FORM_RATE_LIMITER: undefined,
+});
 export const app = {
 	request: ((input: Parameters<typeof workerApp.request>[0], init?: Parameters<typeof workerApp.request>[1], envArg?: Parameters<typeof workerApp.request>[2]) => {
 		if (input instanceof Request) return workerApp.request(input, init, envArg);
 		return workerApp.request(input, { ...init, cf: (init as { cf?: unknown } | undefined)?.cf ?? defaultCf } as Parameters<typeof workerApp.request>[1], envArg);
 	}) as typeof workerApp.request,
 };
-export { env };
 
 export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 	const normalized = value.replaceAll('-', '+').replaceAll('_', '/');
@@ -40,6 +46,7 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 const migrations = [
 	migration0000,
 	migration0001,
+	migration0002,
 ] as const;
 
 const tables = [

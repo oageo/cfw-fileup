@@ -22,6 +22,9 @@ declare namespace Cloudflare {
 		EVM_CHAIN_RPC_URLS: string;
 		REOWN_PROJECT_ID: string;
 		MAILER: SendEmail;
+		AUTH_RATE_LIMITER: RateLimit;
+		FILE_PASSPHRASE_RATE_LIMITER: RateLimit;
+		PUBLIC_FORM_RATE_LIMITER: RateLimit;
 		MAIL_FROM: string;
 		PUBLIC_APP_URL: string;
 	}

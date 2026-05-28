@@ -66,6 +66,21 @@ describe('POST /api/files/create/open', () => {
 		expect(typeof body.uploadExpiry).toBe('number');
 	});
 
+	test('opened but unclosed file is not downloadable', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'draft.txt' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+		await env.R2.put(fileId, 'draft');
+
+		const res = await app.request(`/d/${fileId}`, { method: 'GET' }, env);
+		expect(res.status).toBe(404);
+	});
+
 	test('nonexistent bucket returns 404', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
@@ -331,6 +346,37 @@ describe('POST /api/files/create/targz-index', () => {
 		expect(res.status).toBe(400);
 	});
 
+	test('targz index outside uploaded object returns 400', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'archive.tar.gz' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+		await env.R2.put(fileId, new Uint8Array(8));
+
+		const res = await app.request('/api/files/create/targz-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{
+					path: 'file.txt',
+					mimeType: 'text/plain',
+					aStart: 0,
+					aFirstEnd: 4,
+					aFinalStart: 4,
+					aEnd: 9,
+					rStartOffset: 0,
+					rEndOffset: 0,
+				}],
+			}),
+		}, env);
+		expect(res.status).toBe(400);
+	});
+
 	test('nonexistent fileId returns 404', async () => {
 		const { data } = await signup('user1');
 		const token = String(data.token);
@@ -348,6 +394,28 @@ describe('POST /api/files/create/targz-index', () => {
 });
 
 describe('POST /api/files/create/tar-index', () => {
+	test('tar index outside uploaded object returns 400', async () => {
+		const { token, bucketId } = await setupUserAndBucket();
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'archive.tar' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+		await env.R2.put(fileId, new Uint8Array(8));
+
+		const res = await app.request('/api/files/create/tar-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{ path: 'file.txt', mimeType: 'text/plain', offset: 4, size: 5 }],
+			}),
+		}, env);
+		expect(res.status).toBe(400);
+	});
+
 	test('invalid tar index path returns 400', async () => {
 		const { token, bucketId } = await setupUserAndBucket();
 

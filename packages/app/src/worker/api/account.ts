@@ -22,6 +22,8 @@ import { verifyTurnstile } from '../utils/turnstile';
 import { getContextWaitUntil, runBackgroundTask, type WaitUntil } from '../utils/background-task';
 import { getAppName } from '../utils/app-name';
 import type { JsonCtx } from '../../shared/api';
+import { getRequestIp } from '../utils/request-ip';
+import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 
 const app = new Hono<{ Bindings: Env }>();
 const RECENT_AUTH_MS = 10 * 60 * 1000;
@@ -87,6 +89,7 @@ app.post(
 			id: user.id,
 			username: user.username,
 			isAdmin: user.isAdmin,
+			isModerator: user.isModerator,
 			termsAgreedAt: user.termsAgreedAt,
 			hasGoogle: userRecord.googleId !== null,
 			hasMisskey: linkedMisskeyAccounts.length > 0,
@@ -489,6 +492,7 @@ app.post(
 	validator('json', apiDef['/api/account/email/verify'].req),
 	describeResponse(async (c: JsonCtx<'/api/account/email/verify', Env>) => {
 		const body = c.req.valid('json');
+		await assertRateLimit(c.env, 'PUBLIC_FORM_RATE_LIMITER', rateLimitKey('email-verify', body.token, getRequestIp(c.req)));
 		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
 		if (turnstileSecret !== '') {
 			if (!body.turnstileToken) throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');

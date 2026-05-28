@@ -11,6 +11,24 @@ beforeEach(async () => {
 });
 
 describe('POST /api/signup', () => {
+	test('rate limited signup returns 429 before Turnstile verification', async () => {
+		const limit = vi.fn(async () => ({ success: false }));
+		const customEnv = Object.assign({}, env, {
+			TURNSTILE_SECRET: 'secret',
+			AUTH_RATE_LIMITER: { limit },
+		});
+
+		const res = await app.request('/api/signup', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ username: 'firstuser', password: 'password123' }),
+		}, customEnv);
+
+		expect(res.status).toBe(429);
+		expect(await res.json()).toEqual(expect.objectContaining({ error: 'RATE_LIMITED' }));
+		expect(limit).toHaveBeenCalledOnce();
+	});
+
 	test('first user becomes admin and returns userId + token', async () => {
 		const { status, data } = await signup('firstuser');
 		expect(status).toBe(200);

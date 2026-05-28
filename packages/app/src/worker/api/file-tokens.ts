@@ -12,6 +12,8 @@ import { verifyTurnstile } from '../utils/turnstile';
 import { apiError } from '../utils/api-error';
 import { recordModerationEvent } from '../utils/moderation';
 import { idPage, pageParams } from '../utils/pagination';
+import { getRequestIp } from '../utils/request-ip';
+import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -138,6 +140,7 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/file-tokens/create-by-passphrase', Env>) => {
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
+		await assertRateLimit(c.env, 'FILE_PASSPHRASE_RATE_LIMITER', rateLimitKey('file-passphrase', body.bucketName, body.filePath, getRequestIp(c.req)));
 
 		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
 		if (turnstileSecret !== '') {

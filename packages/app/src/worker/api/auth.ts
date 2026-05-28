@@ -14,6 +14,8 @@ import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 import { sendLoginNotification } from './login-email';
 import { runContextBackgroundTask } from '../utils/background-task';
+import { getRequestIp } from '../utils/request-ip';
+import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -32,6 +34,7 @@ app.post(
 		const body = c.req.valid('json');
 		// username は schema で trim・minLength・maxLength・regex 検証済み
 		const { username, password } = body;
+		await assertRateLimit(c.env, 'AUTH_RATE_LIMITER', rateLimitKey('signup', username, getRequestIp(c.req)));
 
 		if ((c.env.TURNSTILE_SECRET as string) !== '') {
 			const token = body.turnstileToken;
@@ -107,6 +110,7 @@ app.post(
 				effectiveQuotaSource: initialQuota.effectiveQuotaSource,
 			});
 		} catch (e) {
+			if (e instanceof Error && e.message.includes('users_single_admin_idx')) throw apiError(409, 'USERNAME_ALREADY_EXISTS');
 			if (e instanceof Error && e.message.includes('UNIQUE constraint failed')) throw apiError(409, 'USERNAME_ALREADY_EXISTS');
 			throw e;
 		}
@@ -135,6 +139,7 @@ app.post(
 		const db = getDb(c.env);
 		const body = c.req.valid('json');
 		const { username, password } = body;
+		await assertRateLimit(c.env, 'AUTH_RATE_LIMITER', rateLimitKey('signin', username, getRequestIp(c.req)));
 
 		if ((c.env.TURNSTILE_SECRET as string) !== '') {
 			const token = body.turnstileToken;

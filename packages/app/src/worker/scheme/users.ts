@@ -11,6 +11,7 @@ export const users = sqliteTable('users', {
 	googleId: text('google_id').unique(),
 	misskeyId: text('misskey_id').unique(),
 	isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
+	isModerator: integer('is_moderator', { mode: 'boolean' }).notNull().default(false),
 	isSuspended: integer('is_suspended', { mode: 'boolean' }).notNull().default(false),
 	termsAgreedAt: integer('terms_agreed_at'),
 	effectiveMaxBuckets: integer('effective_max_buckets'),
@@ -25,6 +26,7 @@ export const users = sqliteTable('users', {
 	effectiveQuotaSource: text('effective_quota_source'),
 }, (table) => [
 	uniqueIndex('users_username_lower_unique_idx').on(sql`lower(${table.username})`),
+	uniqueIndex('users_single_admin_idx').on(table.isAdmin).where(sql`${table.isAdmin} = 1`),
 ]);
 
 export const tokens = sqliteTable('tokens', {

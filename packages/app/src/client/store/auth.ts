@@ -4,6 +4,7 @@ export interface AuthUser {
 	id: string;
 	username: string;
 	isAdmin: boolean;
+	isModerator: boolean;
 	termsAgreedAt: number | null;
 	hasGoogle: boolean;
 	hasMisskey: boolean;
@@ -22,6 +23,7 @@ function loadStoredUser(): AuthUser | null {
 		if (!raw) return null;
 		const user = JSON.parse(raw) as Omit<AuthUser, 'termsAgreedAt' | 'hasGoogle' | 'hasMisskey' | 'hasPassword' | 'recentlyAuthenticated'> & {
 			termsAgreedAt?: number | null;
+			isModerator?: boolean;
 			hasGoogle?: boolean;
 			hasMisskey?: boolean;
 			hasPassword?: boolean;
@@ -32,6 +34,7 @@ function loadStoredUser(): AuthUser | null {
 		return {
 			...user,
 			termsAgreedAt: user.termsAgreedAt ?? null,
+			isModerator: user.isModerator ?? false,
 			hasGoogle: user.hasGoogle ?? false,
 			hasMisskey: user.hasMisskey ?? false,
 			hasPassword: user.hasPassword ?? true,
