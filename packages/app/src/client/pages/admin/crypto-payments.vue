@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Dialog } from '@vuetify/v0';
 import { authStore } from '@/store/auth';
 import { apiPost, type ApiSuccess } from '@/utils/api';
+import CryptoPaymentHistoryTable from '@/components/CryptoPaymentHistoryTable.vue';
 import NirA from '@/components/NirA.vue';
 import SettingItem from '@/components/SettingItem.vue';
 import { getChainMetadata } from '@/utils/chain-metadata';
@@ -40,6 +41,7 @@ const historyPrice = ref<Price | null>(null);
 const priceExpiresAtDraft = ref('');
 const rpcTestingChainId = ref<number | null>(null);
 const rpcTestResults = ref<Record<number, { ok: boolean; message: string }>>({});
+const checkingOrderId = ref<string | null>(null);
 
 const defaultChainForm = {
 	chainId: 8453,
@@ -397,6 +399,22 @@ async function saveCryptoPaymentsEnabled(value: 'true' | 'false'): Promise<void>
 		error.value = errorMessage(e);
 	} finally {
 		savingSetting.value = false;
+	}
+}
+
+async function checkOrder(order: Order): Promise<void> {
+	checkingOrderId.value = order.id;
+	error.value = '';
+	success.value = '';
+	try {
+		const result = await apiPost('/api/admin/check-crypto-payment-order', { orderId: order.id });
+		if (!result.ok) throw new Error(formatApiError(result.data, '決済の再確認に失敗しました'));
+		success.value = result.data.status === 'paid' ? '決済を確認しました' : '決済を再確認しました';
+		await loadAll();
+	} catch (e) {
+		error.value = errorMessage(e);
+	} finally {
+		checkingOrderId.value = null;
 	}
 }
 
@@ -795,24 +813,14 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
         </section>
 
         <section v-else-if="activeTab === 'orders'" :class="$style.section" role="tabpanel">
-          <div :class="['card', $style.tableCard]">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead><tr><th>ID</th><th>Asset</th><th>Chain</th><th>Status</th><th>tx</th><th>paidAt</th></tr></thead>
-                <tbody>
-                  <tr v-for="order in orders" :key="order.id">
-                    <td><code>{{ order.id }}</code></td>
-                    <td>{{ order.tokenSymbol }}</td>
-                    <td>{{ order.chainName }}</td>
-                    <td>{{ order.status }}</td>
-                    <td><code>{{ order.txHash ?? '-' }}</code></td>
-                    <td>{{ formatDate(order.paidAt) }}</td>
-                  </tr>
-                  <tr v-if="orders.length === 0"><td colspan="6" :class="$style.empty">注文はありません。</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <CryptoPaymentHistoryTable
+            :payments="orders"
+            :checking-payment-id="checkingOrderId"
+            show-user-id
+            check-label="再確認"
+            empty-text="注文はありません。"
+            @check="checkOrder"
+          />
         </section>
       </div>
 

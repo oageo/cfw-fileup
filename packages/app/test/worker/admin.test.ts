@@ -54,6 +54,7 @@ describe('Admin access control', () => {
 			{ path: '/api/admin/list-payment-asset-deployments', body: {} },
 			{ path: '/api/admin/list-payment-asset-plan-prices', body: {} },
 			{ path: '/api/admin/list-crypto-payment-orders', body: {} },
+			{ path: '/api/admin/check-crypto-payment-order', body: { orderId: 'x' } },
 			{ path: '/api/admin/get-billing-tax-summary', body: { from: 0, to: Date.now() + 1_000 } },
 		];
 
@@ -1476,6 +1477,77 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify({ orderId: order.id }),
 		}, env);
 		expect(secondCancelRes.status).toBe(404);
+	});
+
+	test('admin can list crypto payment orders for a specific user', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { data: otherData } = await signup('user2');
+		const otherToken = String(otherData.token);
+		const otherUserId = String(otherData.userId);
+		const { deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const wallet = await createLinkedWallet(userId);
+		const otherWallet = await createLinkedWallet(otherUserId, 8453, '0x4444444444444444444444444444444444444444');
+
+		const orderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify(await createOrderBody(userToken, price.id, deployment.id, wallet.id)),
+		}, env);
+		expect(orderRes.status).toBe(200);
+		const order = await orderRes.json() as { id: string; userId: string };
+
+		const otherOrderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(otherToken),
+			body: JSON.stringify(await createOrderBody(otherToken, price.id, deployment.id, otherWallet.id)),
+		}, env);
+		expect(otherOrderRes.status).toBe(200);
+		const otherOrder = await otherOrderRes.json() as { id: string; userId: string };
+
+		const adminListRes = await app.request('/api/admin/list-crypto-payment-orders', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ userId, limit: 20, cursor: null }),
+		}, env);
+		expect(adminListRes.status).toBe(200);
+		const adminList = await adminListRes.json() as { items: Array<{ id: string; userId: string }> };
+		expect(adminList.items).toContainEqual(expect.objectContaining({ id: order.id, userId }));
+		expect(adminList.items).not.toContainEqual(expect.objectContaining({ id: otherOrder.id, userId: otherUserId }));
+	});
+
+	test('admin can recheck another user crypto payment order', async () => {
+		const { adminToken, userToken, userId } = await setupAdminAndUser();
+		const { data: otherData } = await signup('user2');
+		const otherToken = String(otherData.token);
+		const { deployment, price } = await createCryptoOffer(adminToken);
+		await enableCryptoPayments();
+		const wallet = await createLinkedWallet(userId);
+
+		const orderRes = await app.request('/api/billing/create-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(userToken),
+			body: JSON.stringify(await createOrderBody(userToken, price.id, deployment.id, wallet.id)),
+		}, env);
+		expect(orderRes.status).toBe(200);
+		const order = await orderRes.json() as { id: string; status: string };
+		await env.DB.prepare('UPDATE crypto_payment_orders SET expires_at = ? WHERE id = ?').bind(Date.now() - 1_000, order.id).run();
+
+		const userCheckRes = await app.request('/api/billing/check-crypto-order', {
+			method: 'POST',
+			headers: authHeaders(otherToken),
+			body: JSON.stringify({ orderId: order.id }),
+		}, env);
+		expect(userCheckRes.status).toBe(404);
+
+		const adminCheckRes = await app.request('/api/admin/check-crypto-payment-order', {
+			method: 'POST',
+			headers: authHeaders(adminToken),
+			body: JSON.stringify({ orderId: order.id }),
+		}, env);
+		expect(adminCheckRes.status).toBe(200);
+		const checked = await adminCheckRes.json() as { id: string; userId: string; status: string };
+		expect(checked).toMatchObject({ id: order.id, userId, status: 'expired' });
 	});
 
 	test('payment offers preview same-plan extension and upgrade discount', async () => {

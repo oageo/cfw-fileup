@@ -18,6 +18,12 @@ const TX_TIMESTAMP_TOLERANCE_MS = 2_000;
 
 type OrderForConfirmation = typeof cryptoPaymentOrders.$inferSelect;
 type PaymentVerificationResult = 'confirmed' | 'pending';
+type CryptoPaymentOrderStatus = OrderForConfirmation['status'];
+
+export type CheckedCryptoPaymentOrder = {
+	before: { userId: string; status: CryptoPaymentOrderStatus };
+	order: OrderForConfirmation;
+};
 
 async function sendPurchaseReceiptNotification(env: Env, order: OrderForConfirmation, now = Date.now()): Promise<void> {
 	if (!await reserveEmailNotification(env, order.userId, 'purchase_receipt', `purchase:${order.id}`, now)) return;
@@ -158,6 +164,47 @@ export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId:
 	if (verificationResult === 'pending') return order;
 
 	return await markCryptoPaymentOrderPaid(env, order, normalizedTxHash, now, waitUntil);
+}
+
+export async function listCryptoPaymentOrders(env: Env, params: { userId?: string; cursor?: string | null; limit: number }): Promise<OrderForConfirmation[]> {
+	const db = getDb(env);
+	const where = params.userId && params.cursor
+		? and(eq(cryptoPaymentOrders.userId, params.userId), lt(cryptoPaymentOrders.id, params.cursor))
+		: params.userId
+			? eq(cryptoPaymentOrders.userId, params.userId)
+			: params.cursor
+				? lt(cryptoPaymentOrders.id, params.cursor)
+				: undefined;
+	return await db
+		.select()
+		.from(cryptoPaymentOrders)
+		.where(where)
+		.orderBy(desc(cryptoPaymentOrders.id))
+		.limit(params.limit);
+}
+
+export async function checkCryptoPaymentOrderWithPreviousStatus(env: Env, userId: string, orderId: string, waitUntil?: WaitUntil): Promise<CheckedCryptoPaymentOrder> {
+	const db = getDb(env);
+	const before = await db
+		.select({ userId: cryptoPaymentOrders.userId, status: cryptoPaymentOrders.status })
+		.from(cryptoPaymentOrders)
+		.where(and(eq(cryptoPaymentOrders.id, orderId), eq(cryptoPaymentOrders.userId, userId)))
+		.get();
+	if (!before) throw apiError(404, 'PAYMENT_ORDER_NOT_FOUND');
+	const order = await checkCryptoPaymentOrder(env, userId, orderId, waitUntil);
+	return { before, order };
+}
+
+export async function checkAnyCryptoPaymentOrderWithPreviousStatus(env: Env, orderId: string, waitUntil?: WaitUntil): Promise<CheckedCryptoPaymentOrder> {
+	const db = getDb(env);
+	const before = await db
+		.select({ userId: cryptoPaymentOrders.userId, status: cryptoPaymentOrders.status })
+		.from(cryptoPaymentOrders)
+		.where(eq(cryptoPaymentOrders.id, orderId))
+		.get();
+	if (!before) throw apiError(404, 'PAYMENT_ORDER_NOT_FOUND');
+	const order = await checkCryptoPaymentOrder(env, before.userId, orderId, waitUntil);
+	return { before, order };
 }
 
 export async function markZeroAmountCryptoPaymentOrderPaid(env: Env, userId: string, orderId: string, now = Date.now(), waitUntil?: WaitUntil): Promise<typeof cryptoPaymentOrders.$inferSelect> {

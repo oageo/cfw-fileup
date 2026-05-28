@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
-import { and, asc, desc, eq, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ne, sql } from 'drizzle-orm';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -8,6 +8,8 @@ import { evaluateDealDisplayEligibility, getPriceDisplayWindow, type PaymentDura
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
 import { ApiError, apiError } from '../utils/api-error';
+import { checkAnyCryptoPaymentOrderWithPreviousStatus, listCryptoPaymentOrders } from '../utils/billing';
+import { getContextWaitUntil } from '../utils/background-task';
 import { getDb } from '../utils/db';
 import { recordModerationAuditLog } from '../utils/moderation';
 import { omitResAndReq } from '../utils/omit';
@@ -677,16 +679,28 @@ app.post(
 	describeRoute(omitResAndReq(apiDef['/api/admin/list-crypto-payment-orders'])),
 	validator('json', apiDef['/api/admin/list-crypto-payment-orders'].req),
 	describeResponse(async (c: JsonCtx<'/api/admin/list-crypto-payment-orders', Env>) => {
-		const db = getDb(c.env);
-		const { limit, cursor } = pageParams(c.req.valid('json'));
-		const rows = await db
-			.select()
-			.from(cryptoPaymentOrders)
-			.where(cursor ? lt(cryptoPaymentOrders.id, cursor) : undefined)
-			.orderBy(desc(cryptoPaymentOrders.id))
-			.limit(limit + 1);
+		const body = c.req.valid('json');
+		const { limit, cursor } = pageParams(body);
+		const rows = await listCryptoPaymentOrders(c.env, { userId: body.userId, cursor, limit: limit + 1 });
 		return c.json(idPage(rows, limit, row => row), 200);
 	}, getResponseDefWithAuth('/api/admin/list-crypto-payment-orders')),
+);
+
+app.post(
+	'/check-crypto-payment-order',
+	describeRoute(omitResAndReq(apiDef['/api/admin/check-crypto-payment-order'])),
+	validator('json', apiDef['/api/admin/check-crypto-payment-order'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/check-crypto-payment-order', Env>) => {
+		const body = c.req.valid('json');
+		const { before, order } = await checkAnyCryptoPaymentOrderWithPreviousStatus(c.env, body.orderId, getContextWaitUntil(c));
+		if (before.status !== 'paid' && order.status === 'paid') {
+			await recordModerationAuditLog(c, 'admin_crypto_payment_order_confirmed', {
+				targetUserId: order.userId,
+				data: { orderId: order.id, chainId: order.chainId, txHash: order.txHash },
+			});
+		}
+		return c.json(order, 200);
+	}, getResponseDefWithAuth('/api/admin/check-crypto-payment-order')),
 );
 
 app.post(

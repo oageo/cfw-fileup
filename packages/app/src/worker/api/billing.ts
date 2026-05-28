@@ -5,7 +5,7 @@ import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { addPaymentDuration, calculatePaymentQuote, evaluateDealDisplayEligibility, type PaymentDurationUnit, type PaymentQuote, type PaymentQuoteCurrentPlan, type PriceHistoryPeriod } from '../../shared/billing-quote';
 import { authMiddleware } from '../middleware/auth';
 import { cryptoPaymentOrders, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans, userPlanAssignments, userWallets } from '../scheme/index';
-import { checkCryptoPaymentOrder, confirmCryptoPaymentOrder, getCryptoPaymentOrderExpiresAt, markZeroAmountCryptoPaymentOrderPaid } from '../utils/billing';
+import { checkCryptoPaymentOrderWithPreviousStatus, confirmCryptoPaymentOrder, getCryptoPaymentOrderExpiresAt, listCryptoPaymentOrders, markZeroAmountCryptoPaymentOrderPaid } from '../utils/billing';
 import { apiError } from '../utils/api-error';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
 import { getDb } from '../utils/db';
@@ -659,15 +659,9 @@ app.post(
 	describeRoute(omitResAndReq(apiDef['/api/billing/check-crypto-order'])),
 	validator('json', apiDef['/api/billing/check-crypto-order'].req),
 	describeResponse(async (c: JsonCtx<'/api/billing/check-crypto-order', Env>) => {
-		const db = getDb(c.env);
 		const user = c.get('user');
 		const body = c.req.valid('json');
-		const before = await db
-			.select({ status: cryptoPaymentOrders.status })
-			.from(cryptoPaymentOrders)
-			.where(and(eq(cryptoPaymentOrders.id, body.orderId), eq(cryptoPaymentOrders.userId, user.id)))
-			.get();
-		const order = await checkCryptoPaymentOrder(c.env, user.id, body.orderId, getContextWaitUntil(c));
+		const { before, order } = await checkCryptoPaymentOrderWithPreviousStatus(c.env, user.id, body.orderId, getContextWaitUntil(c));
 		if (before?.status !== 'paid' && order.status === 'paid') await recordModerationEvent(c, 'crypto_payment_order_confirmed', { orderId: order.id, chainId: order.chainId, txHash: order.txHash }, user.id, user.tokenId);
 		return c.json(order, 200);
 	}, getResponseDefWithAuth('/api/billing/check-crypto-order')),
@@ -700,17 +694,9 @@ app.post(
 	describeRoute(omitResAndReq(apiDef['/api/billing/list-my-payments'])),
 	validator('json', apiDef['/api/billing/list-my-payments'].req),
 	describeResponse(async (c: JsonCtx<'/api/billing/list-my-payments', Env>) => {
-		const db = getDb(c.env);
 		const user = c.get('user');
 		const { limit, cursor } = pageParams(c.req.valid('json'));
-		const rows = await db
-			.select()
-			.from(cryptoPaymentOrders)
-			.where(cursor
-				? and(eq(cryptoPaymentOrders.userId, user.id), lt(cryptoPaymentOrders.id, cursor))
-				: eq(cryptoPaymentOrders.userId, user.id))
-			.orderBy(desc(cryptoPaymentOrders.id))
-			.limit(limit + 1);
+		const rows = await listCryptoPaymentOrders(c.env, { userId: user.id, cursor, limit: limit + 1 });
 		return c.json(idPage(rows, limit, row => row), 200);
 	}, getResponseDefWithAuth('/api/billing/list-my-payments')),
 );

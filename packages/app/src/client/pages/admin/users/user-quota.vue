@@ -3,11 +3,12 @@ import { computed, ref, onMounted } from 'vue';
 import * as v from 'valibot';
 import { Button } from '@vuetify/v0';
 import { authStore } from '@/store/auth';
-import { apiPost, type ApiResult } from '@/utils/api';
+import { apiPost, type ApiResult, type ApiSuccess } from '@/utils/api';
 import NirA from '@/components/NirA.vue';
 import ByteSizeSettingItem from '@/components/ByteSizeSettingItem.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import CurrentPlanCard from '@/components/CurrentPlanCard.vue';
+import CryptoPaymentHistoryTable from '@/components/CryptoPaymentHistoryTable.vue';
 import EffectiveQuotaDetails from '@/components/EffectiveQuotaDetails.vue';
 import SettingItem from '@/components/SettingItem.vue';
 
@@ -33,6 +34,7 @@ interface UserPlanAssignment {
 }
 
 type EffectiveQuotaSource = 'plan' | 'custom' | 'global' | 'default';
+type Payment = ApiSuccess<'/api/admin/list-crypto-payment-orders'>['data']['items'][number];
 
 interface EffectiveQuota extends QuotaForm {
 	effectiveQuotaExpiresAt: number | null;
@@ -81,10 +83,13 @@ const success = ref('');
 const hasUserQuota = ref(false);
 const editingCustomQuota = ref(false);
 const resetDialog = ref(false);
+const payments = ref<Payment[]>([]);
+const paymentsLoading = ref(false);
+const checkingPaymentId = ref<string | null>(null);
 const activeUserPlan = computed(() => userPlan.value != null && userPlan.value.expiresAt > Date.now());
 
 onMounted(async () => {
-	await Promise.all([fetchQuota(), fetchEffectiveQuota(), fetchPlansAndAssignment(), fetchUser()]);
+	await Promise.all([fetchQuota(), fetchEffectiveQuota(), fetchPlansAndAssignment(), fetchUser(), fetchPayments()]);
 });
 
 async function fetchQuota(): Promise<void> {
@@ -153,6 +158,19 @@ async function fetchPlansAndAssignment(): Promise<void> {
 	}
 }
 
+async function fetchPayments(): Promise<void> {
+	paymentsLoading.value = true;
+	try {
+		const result = await apiPost('/api/admin/list-crypto-payment-orders', { userId: props.userId, limit: 20, cursor: null });
+		if (!result.ok) throw new Error('決済履歴の取得に失敗しました');
+		payments.value = result.data.items;
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		paymentsLoading.value = false;
+	}
+}
+
 async function saveQuota(): Promise<void> {
 	saving.value = true;
 	error.value = '';
@@ -176,6 +194,22 @@ function formatDateTime(timestamp: number): string {
 		dateStyle: 'medium',
 		timeStyle: 'short',
 	}).format(new Date(timestamp));
+}
+
+async function checkPayment(payment: Payment): Promise<void> {
+	checkingPaymentId.value = payment.id;
+	error.value = '';
+	success.value = '';
+	try {
+		const result = await apiPost('/api/admin/check-crypto-payment-order', { orderId: payment.id });
+		if (!result.ok) throw new Error(result.data.message || '決済の再確認に失敗しました');
+		success.value = result.data.status === 'paid' ? '決済を確認しました' : '決済を再確認しました';
+		await Promise.all([fetchPayments(), fetchPlansAndAssignment(), fetchEffectiveQuota()]);
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		checkingPaymentId.value = null;
+	}
 }
 
 function startCustomQuota(): void {
@@ -278,6 +312,20 @@ async function recalculateEffectiveQuota(): Promise<void> {
           </div>
           <div v-else class="text-muted">現在のプラン割当はありません。</div>
           <p :class="['text-muted', $style.formHint]">課金プランは支払い処理によってのみ付与されます。管理者がユーザーの容量や上限を変更する場合はカスタムクォータを使用してください。</p>
+          <div :class="$style.paymentHistoryHeader">
+            <h4 :class="$style.paymentHistoryTitle">決済履歴</h4>
+            <Button.Root type="button" class="btn btn-secondary btn-sm" :loading="paymentsLoading" @click="fetchPayments">
+              <Button.Loading>更新中...</Button.Loading>
+              <Button.Content>更新</Button.Content>
+            </Button.Root>
+          </div>
+          <CryptoPaymentHistoryTable
+            :payments="payments"
+            :loading="paymentsLoading"
+            :checking-payment-id="checkingPaymentId"
+            check-label="再確認"
+            @check="checkPayment"
+          />
         </div>
 
         <div v-else-if="activeTab === 'custom'" :class="$style.tabPanel">
@@ -438,7 +486,7 @@ async function recalculateEffectiveQuota(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 700px;
+  max-width: 960px;
 }
 
 .panel {
@@ -480,6 +528,19 @@ async function recalculateEffectiveQuota(): Promise<void> {
 .formHint {
   font-size: 0.875rem;
   margin: 0;
+}
+
+.paymentHistoryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.paymentHistoryTitle {
+  margin: 0;
+  font-size: 1rem;
 }
 
 .userIdRow {

@@ -569,8 +569,18 @@ export const billingApiDef = {
 	'/api/admin/list-crypto-payment-orders': {
 		summary: 'List crypto payment orders',
 		tags: ['admin', 'billing'],
-		req: v.object(PageRequestFields),
+		req: v.object({ userId: v.optional(IdString), ...PageRequestFields }),
 		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: pagedResponse(CryptoPaymentOrderResponse) } } } },
+	},
+	'/api/admin/check-crypto-payment-order': {
+		summary: 'Check a crypto payment order as admin',
+		tags: ['admin', 'billing'],
+		req: v.object({ orderId: IdString }),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: CryptoPaymentOrderResponse } } },
+			400: errorResponse('Invalid payment transaction', ['PAYMENT_CHAIN_RPC_NOT_CONFIGURED', 'PAYMENT_ORDER_EXPIRED', 'PAYMENT_TRANSACTION_INVALID']),
+			404: errorResponse('Payment order not found', ['PAYMENT_ORDER_NOT_FOUND']),
+		},
 	},
 	'/api/admin/get-billing-tax-summary': {
 		summary: 'Get billing tax summary',
