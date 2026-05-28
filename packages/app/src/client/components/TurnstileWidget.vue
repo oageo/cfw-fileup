@@ -19,6 +19,10 @@ function loadScript(): Promise<void> {
 }
 
 onMounted(async () => {
+	if (props.siteKey.trim() === '') {
+		emit('update:token', null);
+		return;
+	}
 	await loadScript();
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	widgetId = (window as any).turnstile.render(container.value!, {

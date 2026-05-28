@@ -4,6 +4,7 @@ import { appSettings, paymentChains } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { canAcceptCryptoPayments } from '../utils/crypto-payments';
 import { getPaymentChainRpcUrl } from '../utils/payment-rpc';
+import { isTurnstileConfigured } from '../utils/turnstile';
 import { DEFAULT_APP_NAME, DEFAULT_BILLING_RESIDENCY_STATEMENT } from '../../shared/app-settings';
 import { runBackgroundTask } from '../utils/background-task';
 
@@ -99,8 +100,8 @@ app.get('/meta', async (c) => {
 			termsUpdatedAt: settings.get('terms_updated_at') ?? '',
 			privacyPolicyUrl: settings.get('privacy_policy_url') ?? '',
 			planPurchaseTermsUrl: settings.get('plan_purchase_terms_url') ?? '',
-			turnstileEnabled: (c.env.TURNSTILE_SECRET as string) !== '',
-			turnstileSiteKey: c.env.TURNSTILE_SITE_KEY,
+			turnstileEnabled: isTurnstileConfigured(c.env),
+			turnstileSiteKey: isTurnstileConfigured(c.env) ? c.env.TURNSTILE_SITE_KEY : '',
 			googleAuthEnabled,
 			googleRequired,
 			indieAuthEnabled: true,

@@ -8,7 +8,7 @@ import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { authMiddleware } from '../middleware/auth';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
-import { verifyTurnstile } from '../utils/turnstile';
+import { isTurnstileConfigured, verifyTurnstile } from '../utils/turnstile';
 import { apiError } from '../utils/api-error';
 import { recordModerationEvent } from '../utils/moderation';
 import { idPage, pageParams } from '../utils/pagination';
@@ -143,7 +143,7 @@ app.post(
 		await assertRateLimit(c.env, 'FILE_PASSPHRASE_RATE_LIMITER', rateLimitKey('file-passphrase', body.bucketName, body.filePath, getRequestIp(c.req)));
 
 		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
-		if (turnstileSecret !== '') {
+		if (isTurnstileConfigured(c.env)) {
 			if (!body.turnstileToken) {
 				throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');
 			}

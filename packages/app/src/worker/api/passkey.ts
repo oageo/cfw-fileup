@@ -15,7 +15,7 @@ import { genEaidx, parseEaidx } from '../../shared/eaid-x';
 import { base64UrlToBytes, bytesToBase64Url, generateToken, tokenToDigest, verifyPassword } from '../utils/crypto';
 import { isValidNameFormat } from '../../shared/name-validation';
 import { validateUsername } from '../utils/name-validation';
-import { verifyTurnstile } from '../utils/turnstile';
+import { isTurnstileConfigured, verifyTurnstile } from '../utils/turnstile';
 import { getRequestIp } from '../utils/request-ip';
 import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
@@ -498,7 +498,7 @@ app.post(
 		const trimmed = username.trim();
 		await assertRateLimit(c.env, 'AUTH_RATE_LIMITER', rateLimitKey('passkey-signup', trimmed, getRequestIp(c.req)));
 
-		if ((c.env.TURNSTILE_SECRET as string) !== '') {
+		if (isTurnstileConfigured(c.env)) {
 			if (!turnstileToken || !await verifyTurnstile(turnstileToken, c.env.TURNSTILE_SECRET)) {
 				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
 			}

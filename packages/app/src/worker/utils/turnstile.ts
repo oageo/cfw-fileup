@@ -1,3 +1,7 @@
+export function isTurnstileConfigured(env: Env): boolean {
+	return (env.TURNSTILE_SECRET ?? '').trim() !== '' && (env.TURNSTILE_SITE_KEY ?? '').trim() !== '';
+}
+
 export async function verifyTurnstile(token: string, secret: string): Promise<boolean> {
 	const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
 		method: 'POST',

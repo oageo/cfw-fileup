@@ -398,7 +398,7 @@ describe('POST /api/file-tokens/create-by-passphrase', () => {
 	test('Turnstile enabled: missing turnstileToken returns 400', async () => {
 		const { token, bucketId, bucketName } = await setupUserAndBucket();
 		await createClosedFile(token, bucketId, bucketName, 'secret.txt', { visibility: 'passphrase', passphrase: 'hunter2' });
-		const customEnv = Object.assign({}, env, { TURNSTILE_SECRET: 'secret' });
+		const customEnv = Object.assign({}, env, { TURNSTILE_SECRET: 'secret', TURNSTILE_SITE_KEY: 'site-key' });
 
 		const res = await app.request('/api/file-tokens/create-by-passphrase', {
 			method: 'POST',
@@ -411,7 +411,7 @@ describe('POST /api/file-tokens/create-by-passphrase', () => {
 	test('Turnstile enabled: failed verification returns 400', async () => {
 		const { token, bucketId, bucketName } = await setupUserAndBucket();
 		await createClosedFile(token, bucketId, bucketName, 'secret.txt', { visibility: 'passphrase', passphrase: 'hunter2' });
-		const customEnv = Object.assign({}, env, { TURNSTILE_SECRET: 'secret' });
+		const customEnv = Object.assign({}, env, { TURNSTILE_SECRET: 'secret', TURNSTILE_SITE_KEY: 'site-key' });
 
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
 			json: () => Promise.resolve({ success: false }),
@@ -430,7 +430,7 @@ describe('POST /api/file-tokens/create-by-passphrase', () => {
 	test('Turnstile enabled: passed verification returns 200', async () => {
 		const { token, bucketId, bucketName } = await setupUserAndBucket();
 		await createClosedFile(token, bucketId, bucketName, 'secret.txt', { visibility: 'passphrase', passphrase: 'hunter2' });
-		const customEnv = Object.assign({}, env, { TURNSTILE_SECRET: 'secret' });
+		const customEnv = Object.assign({}, env, { TURNSTILE_SECRET: 'secret', TURNSTILE_SITE_KEY: 'site-key' });
 
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
 			json: () => Promise.resolve({ success: true }),

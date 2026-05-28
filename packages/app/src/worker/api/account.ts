@@ -18,7 +18,7 @@ import { getEffectiveQuotaForUser } from '../utils/rate-limit';
 import { createGoogleAuthUrl } from './google-auth';
 import { createIndieAuthUrl } from './indieauth';
 import { createEmailVerification, getEmailSendPreflightFailure, sendEmailLines, verifyAccountEmail, type EmailSendPreflightFailure } from '../utils/email';
-import { verifyTurnstile } from '../utils/turnstile';
+import { isTurnstileConfigured, verifyTurnstile } from '../utils/turnstile';
 import { getContextWaitUntil, runBackgroundTask, type WaitUntil } from '../utils/background-task';
 import { getAppName } from '../utils/app-name';
 import type { JsonCtx } from '../../shared/api';
@@ -494,7 +494,7 @@ app.post(
 		const body = c.req.valid('json');
 		await assertRateLimit(c.env, 'PUBLIC_FORM_RATE_LIMITER', rateLimitKey('email-verify', body.token, getRequestIp(c.req)));
 		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
-		if (turnstileSecret !== '') {
+		if (isTurnstileConfigured(c.env)) {
 			if (!body.turnstileToken) throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');
 			if (!await verifyTurnstile(body.turnstileToken, turnstileSecret)) {
 				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');

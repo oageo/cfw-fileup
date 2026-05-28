@@ -7,7 +7,7 @@ import { fileReports, files, tokens, users } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { apiError } from '../utils/api-error';
 import { omitResAndReq } from '../utils/omit';
-import { verifyTurnstile } from '../utils/turnstile';
+import { isTurnstileConfigured, verifyTurnstile } from '../utils/turnstile';
 import { getRequestIp } from '../utils/request-ip';
 import { tokenToDigest } from '../utils/crypto';
 import { getAppName } from '../utils/app-name';
@@ -73,7 +73,7 @@ app.post(
 		if (reporterUser?.id === file.userId) throw apiError(403, 'FORBIDDEN');
 
 		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
-		if (turnstileSecret !== '') {
+		if (isTurnstileConfigured(c.env)) {
 			if (!body.turnstileToken) throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');
 			if (!await verifyTurnstile(body.turnstileToken, turnstileSecret)) {
 				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');

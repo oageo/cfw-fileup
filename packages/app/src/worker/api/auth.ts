@@ -6,7 +6,7 @@ import { users, tokens, appSettings, passkeys, backupCodes } from '../scheme/ind
 import { getDb } from '../utils/db';
 import { hashPassword, tokenToDigest, verifyPassword, generateToken } from '../utils/crypto';
 import { genEaidx } from '../../shared/eaid-x';
-import { verifyTurnstile } from '../utils/turnstile';
+import { isTurnstileConfigured, verifyTurnstile } from '../utils/turnstile';
 import { validateUsername } from '../utils/name-validation';
 import { apiDef, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
@@ -36,7 +36,7 @@ app.post(
 		const { username, password } = body;
 		await assertRateLimit(c.env, 'AUTH_RATE_LIMITER', rateLimitKey('signup', username, getRequestIp(c.req)));
 
-		if ((c.env.TURNSTILE_SECRET as string) !== '') {
+		if (isTurnstileConfigured(c.env)) {
 			const token = body.turnstileToken;
 			if (!token || !await verifyTurnstile(token, c.env.TURNSTILE_SECRET)) {
 				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
@@ -141,7 +141,7 @@ app.post(
 		const { username, password } = body;
 		await assertRateLimit(c.env, 'AUTH_RATE_LIMITER', rateLimitKey('signin', username, getRequestIp(c.req)));
 
-		if ((c.env.TURNSTILE_SECRET as string) !== '') {
+		if (isTurnstileConfigured(c.env)) {
 			const token = body.turnstileToken;
 			if (!token || !await verifyTurnstile(token, c.env.TURNSTILE_SECRET)) {
 				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');

@@ -15,6 +15,7 @@ describe('POST /api/signup', () => {
 		const limit = vi.fn(async () => ({ success: false }));
 		const customEnv = Object.assign({}, env, {
 			TURNSTILE_SECRET: 'secret',
+			TURNSTILE_SITE_KEY: 'site-key',
 			AUTH_RATE_LIMITER: { limit },
 		});
 
@@ -392,7 +393,7 @@ describe('POST /api/account/email', () => {
 	test('requires Turnstile token for email verification when configured', async () => {
 		mockMxLookup();
 		const sent: Array<{ to: string; raw: string }> = [];
-		const customEnv = Object.assign(mailEnv(sent), { TURNSTILE_SECRET: 'secret' });
+		const customEnv = Object.assign(mailEnv(sent), { TURNSTILE_SECRET: 'secret', TURNSTILE_SITE_KEY: 'site-key' });
 		const { data } = await signup('user1');
 		const token = String(data.token);
 
