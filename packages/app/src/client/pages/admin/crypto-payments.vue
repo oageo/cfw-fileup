@@ -15,7 +15,9 @@ type Deployment = ApiSuccess<'/api/admin/list-payment-asset-deployments'>['data'
 type Price = ApiSuccess<'/api/admin/list-payment-asset-plan-prices'>['data'][number];
 type Plan = ApiSuccess<'/api/admin/list-plans'>['data'][number];
 type Order = ApiSuccess<'/api/admin/list-crypto-payment-orders'>['data']['items'][number];
-type ActiveTab = 'chains' | 'assets' | 'deployments' | 'prices' | 'orders';
+type SalesSummary = ApiSuccess<'/api/admin/get-billing-sales-summary'>['data'];
+type SalesSummaryBucket = SalesSummary['byCurrency'][number];
+type ActiveTab = 'chains' | 'assets' | 'deployments' | 'prices' | 'orders' | 'sales';
 type SaveResult = { ok: true; data: unknown } | { ok: false; data: { error?: string; message?: string } };
 const chains = ref<Chain[]>([]);
 const assets = ref<Asset[]>([]);
@@ -42,6 +44,8 @@ const priceExpiresAtDraft = ref('');
 const rpcTestingChainId = ref<number | null>(null);
 const rpcTestResults = ref<Record<number, { ok: boolean; message: string }>>({});
 const checkingOrderId = ref<string | null>(null);
+const salesSummary = ref<SalesSummary | null>(null);
+const salesSummaryLoading = ref(false);
 
 const defaultChainForm = {
 	chainId: 8453,
@@ -75,6 +79,10 @@ const priceForm = ref({
 	durationUnit: 'days' as 'days' | 'months' | 'years',
 	startsAt: formatDateTimeLocalInput(Date.now()),
 	expiresAt: '',
+});
+const salesRange = ref({
+	from: formatDateTimeLocalInput(new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()),
+	to: formatDateTimeLocalInput(Date.now()),
 });
 
 const enabledDeployments = computed(() => deployments.value.filter(deployment => deployment.isEnabled));
@@ -160,10 +168,31 @@ async function loadAll(): Promise<void> {
 		if (!deploymentForm.value.assetId && assets.value[0]) deploymentForm.value.assetId = assets.value[0].id;
 		if (!priceForm.value.assetId && assets.value[0]) priceForm.value.assetId = assets.value[0].id;
 		if (!priceForm.value.planId && plans.value[0]) priceForm.value.planId = plans.value[0].id;
+		await loadSalesSummary();
 	} catch (e) {
 		error.value = String(e);
 	} finally {
 		loading.value = false;
+	}
+}
+
+async function loadSalesSummary(): Promise<void> {
+	const from = parseDateTimeLocal(salesRange.value.from);
+	const to = parseDateTimeLocal(salesRange.value.to);
+	if (from == null || to == null || from >= to) {
+		error.value = '売上集計の期間が不正です';
+		return;
+	}
+	salesSummaryLoading.value = true;
+	error.value = '';
+	try {
+		const result = await apiPost('/api/admin/get-billing-sales-summary', { from, to });
+		if (!result.ok) throw new Error(result.data.message || '売上集計の取得に失敗しました');
+		salesSummary.value = result.data;
+	} catch (e) {
+		error.value = errorMessage(e);
+	} finally {
+		salesSummaryLoading.value = false;
 	}
 }
 
@@ -452,6 +481,14 @@ function formatAmount(amountBaseUnits: string, decimals: number | null, symbol: 
 	return `${integer}${fraction ? `.${fraction}` : ''} ${symbol}`;
 }
 
+function formatSalesAmount(amountBaseUnits: string, currency: string, decimals: number): string {
+	return formatAmount(amountBaseUnits, decimals, currency);
+}
+
+function formatSalesBucket(bucket: SalesSummaryBucket): string {
+	return `${formatSalesAmount(bucket.grossAmountBaseUnits, bucket.taxCurrency, bucket.decimals)} / ${formatSalesAmount(bucket.netAmountBaseUnits, bucket.taxCurrency, bucket.decimals)} / ${formatSalesAmount(bucket.taxAmountBaseUnits, bucket.taxCurrency, bucket.decimals)}`;
+}
+
 function getAssetDecimals(assetId: string): number | null {
 	return deployments.value.find(deployment => deployment.assetId === assetId)?.decimals ?? DEFAULT_PRICE_DECIMALS;
 }
@@ -559,6 +596,7 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
           <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'deployments' }" role="tab" :aria-selected="activeTab === 'deployments'" @click="activeTab = 'deployments'">デプロイメント</button>
           <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'prices' }" role="tab" :aria-selected="activeTab === 'prices'" @click="activeTab = 'prices'">プラン価格</button>
           <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'orders' }" role="tab" :aria-selected="activeTab === 'orders'" @click="activeTab = 'orders'">注文</button>
+          <button type="button" class="tab-btn" :class="{ 'tab-btn-active': activeTab === 'sales' }" role="tab" :aria-selected="activeTab === 'sales'" @click="activeTab = 'sales'">売上集計</button>
         </div>
 
         <section v-if="activeTab === 'chains'" :class="$style.section" role="tabpanel">
@@ -822,6 +860,112 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
             @check="checkOrder"
           />
         </section>
+
+        <section v-else-if="activeTab === 'sales'" :class="$style.section" role="tabpanel">
+          <form :class="['card', $style.actionPanel, $style.salesForm]" @submit.prevent="loadSalesSummary">
+            <div class="form-group">
+              <label class="form-label" for="sales-from">From</label>
+              <input id="sales-from" v-model="salesRange.from" class="form-input" type="datetime-local">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sales-to">To</label>
+              <input id="sales-to" v-model="salesRange.to" class="form-input" type="datetime-local">
+            </div>
+            <button class="btn btn-primary" type="submit" :disabled="salesSummaryLoading">
+              {{ salesSummaryLoading ? '集計中...' : '集計' }}
+            </button>
+          </form>
+
+          <div v-if="salesSummaryLoading" class="page-loading"><span class="spinner" />読み込み中...</div>
+          <template v-else-if="salesSummary">
+            <div :class="$style.salesOverview">
+              <div :class="['card', $style.salesMetric]">
+                <div :class="$style.metricLabel">件数</div>
+                <strong>{{ salesSummary.count }}</strong>
+              </div>
+              <div :class="['card', $style.salesMetric]">
+                <div :class="$style.metricLabel">税込売上</div>
+                <strong>{{ salesSummary.byCurrency.map(bucket => formatSalesAmount(bucket.grossAmountBaseUnits, bucket.taxCurrency, bucket.decimals)).join(' / ') || salesSummary.grossAmountBaseUnits }}</strong>
+              </div>
+              <div :class="['card', $style.salesMetric]">
+                <div :class="$style.metricLabel">税抜売上</div>
+                <strong>{{ salesSummary.byCurrency.map(bucket => formatSalesAmount(bucket.netAmountBaseUnits, bucket.taxCurrency, bucket.decimals)).join(' / ') || salesSummary.netAmountBaseUnits }}</strong>
+              </div>
+              <div :class="['card', $style.salesMetric]">
+                <div :class="$style.metricLabel">税額</div>
+                <strong>{{ salesSummary.byCurrency.map(bucket => formatSalesAmount(bucket.taxAmountBaseUnits, bucket.taxCurrency, bucket.decimals)).join(' / ') || salesSummary.taxAmountBaseUnits }}</strong>
+              </div>
+            </div>
+
+            <div :class="['card', $style.tableCard]">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Currency</th><th>Decimals</th><th>件数</th><th>税込 / 税抜 / 税額</th></tr></thead>
+                  <tbody>
+                    <tr v-for="bucket in salesSummary.byCurrency" :key="`${bucket.taxCurrency}:${bucket.decimals}`">
+                      <td>{{ bucket.taxCurrency }}</td>
+                      <td>{{ bucket.decimals }}</td>
+                      <td>{{ bucket.count }}</td>
+                      <td>{{ formatSalesBucket(bucket) }}</td>
+                    </tr>
+                    <tr v-if="salesSummary.byCurrency.length === 0"><td colspan="4" :class="$style.empty">売上はありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div :class="['card', $style.tableCard]">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Plan</th><th>Currency</th><th>件数</th><th>税込 / 税抜 / 税額</th></tr></thead>
+                  <tbody>
+                    <tr v-for="bucket in salesSummary.byPlan" :key="`${bucket.planId}:${bucket.taxCurrency}:${bucket.decimals}`">
+                      <td>{{ bucket.planName }}</td>
+                      <td>{{ bucket.taxCurrency }}</td>
+                      <td>{{ bucket.count }}</td>
+                      <td>{{ formatSalesBucket(bucket) }}</td>
+                    </tr>
+                    <tr v-if="salesSummary.byPlan.length === 0"><td colspan="4" :class="$style.empty">プラン別売上はありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div :class="['card', $style.tableCard]">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Asset</th><th>Currency</th><th>件数</th><th>税込 / 税抜 / 税額</th></tr></thead>
+                  <tbody>
+                    <tr v-for="bucket in salesSummary.byAsset" :key="`${bucket.assetId ?? bucket.tokenSymbol}:${bucket.taxCurrency}:${bucket.decimals}`">
+                      <td>{{ bucket.tokenSymbol }} <span class="text-muted">{{ bucket.tokenName }}</span></td>
+                      <td>{{ bucket.taxCurrency }}</td>
+                      <td>{{ bucket.count }}</td>
+                      <td>{{ formatSalesBucket(bucket) }}</td>
+                    </tr>
+                    <tr v-if="salesSummary.byAsset.length === 0"><td colspan="4" :class="$style.empty">Asset別売上はありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div :class="['card', $style.tableCard]">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Tax</th><th>Currency</th><th>件数</th><th>税込 / 税抜 / 税額</th></tr></thead>
+                  <tbody>
+                    <tr v-for="bucket in salesSummary.byRate" :key="`${bucket.taxName}:${bucket.taxRate}:${bucket.taxCurrency}`">
+                      <td>{{ bucket.taxName }} {{ bucket.taxRate }}</td>
+                      <td>{{ bucket.taxCurrency }}</td>
+                      <td>{{ bucket.count }}</td>
+                      <td>{{ formatSalesBucket(bucket) }}</td>
+                    </tr>
+                    <tr v-if="salesSummary.byRate.length === 0"><td colspan="4" :class="$style.empty">税率別売上はありません。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
+        </section>
       </div>
 
       <Dialog.Root :model-value="editingPrice != null" @update:model-value="(value) => { if (!value) closePriceExpiresAtDialog(); }">
@@ -948,6 +1092,36 @@ function formatDuration(value: number, unit: 'days' | 'months' | 'years'): strin
   :global(.form-group) {
     flex-basis: 160px;
   }
+}
+
+.salesForm {
+  align-items: end;
+
+  :global(.form-group) {
+    flex-basis: 220px;
+  }
+}
+
+.salesOverview {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.salesMetric {
+  padding: 16px;
+
+  strong {
+    display: block;
+    font-size: 1.05rem;
+    overflow-wrap: anywhere;
+  }
+}
+
+.metricLabel {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  margin-bottom: 6px;
 }
 
 .checkbox {

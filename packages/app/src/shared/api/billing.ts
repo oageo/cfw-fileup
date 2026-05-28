@@ -325,21 +325,43 @@ const BillingReceiptResponse = v.object({
 	}),
 });
 
-const BillingTaxSummaryResponse = v.object({
+const BillingSalesSummaryBucketFields = {
+	count: v.number(),
+	decimals: v.number(),
+	grossAmountBaseUnits: BigIntString,
+	netAmountBaseUnits: BigIntString,
+	taxAmountBaseUnits: BigIntString,
+};
+
+const BillingSalesSummaryResponse = v.object({
 	from: v.number(),
 	to: v.number(),
 	count: v.number(),
-	taxIncludedAmountBaseUnits: BigIntString,
-	taxExcludedAmountBaseUnits: BigIntString,
+	grossAmountBaseUnits: BigIntString,
+	netAmountBaseUnits: BigIntString,
 	taxAmountBaseUnits: BigIntString,
+	byCurrency: v.array(v.object({
+		taxCurrency: v.string(),
+		...BillingSalesSummaryBucketFields,
+	})),
 	byRate: v.array(v.object({
 		taxName: v.string(),
 		taxRate: v.string(),
 		taxCurrency: v.string(),
-		count: v.number(),
-		taxIncludedAmountBaseUnits: BigIntString,
-		taxExcludedAmountBaseUnits: BigIntString,
-		taxAmountBaseUnits: BigIntString,
+		...BillingSalesSummaryBucketFields,
+	})),
+	byPlan: v.array(v.object({
+		planId: IdString,
+		planName: v.string(),
+		taxCurrency: v.string(),
+		...BillingSalesSummaryBucketFields,
+	})),
+	byAsset: v.array(v.object({
+		assetId: v.nullable(IdString),
+		tokenSymbol: v.string(),
+		tokenName: v.string(),
+		taxCurrency: v.string(),
+		...BillingSalesSummaryBucketFields,
 	})),
 });
 
@@ -582,13 +604,13 @@ export const billingApiDef = {
 			404: errorResponse('Payment order not found', ['PAYMENT_ORDER_NOT_FOUND']),
 		},
 	},
-	'/api/admin/get-billing-tax-summary': {
-		summary: 'Get billing tax summary',
+	'/api/admin/get-billing-sales-summary': {
+		summary: 'Get billing sales summary',
 		tags: ['admin', 'billing'],
 		req: v.object({
 			from: v.pipe(v.number(), v.integer(), v.minValue(0)),
 			to: v.pipe(v.number(), v.integer(), v.minValue(0)),
 		}),
-		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: BillingTaxSummaryResponse } } } },
+		res: { 200: { description: 'Success', content: { 'application/json': { vSchema: BillingSalesSummaryResponse } } } },
 	},
 } as const satisfies ApiEndpointDefinitionRecord;

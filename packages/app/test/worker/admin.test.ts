@@ -55,7 +55,7 @@ describe('Admin access control', () => {
 			{ path: '/api/admin/list-payment-asset-plan-prices', body: {} },
 			{ path: '/api/admin/list-crypto-payment-orders', body: {} },
 			{ path: '/api/admin/check-crypto-payment-order', body: { orderId: 'x' } },
-			{ path: '/api/admin/get-billing-tax-summary', body: { from: 0, to: Date.now() + 1_000 } },
+			{ path: '/api/admin/get-billing-sales-summary', body: { from: 0, to: Date.now() + 1_000 } },
 		];
 
 		for (const { path, body } of endpoints) {
@@ -1267,7 +1267,7 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify({ priceId: price.id, deploymentId: deployment.id, payerWalletId: wallet.id, quotedAmountBaseUnits: '30000000', quoteCreatedAt: Date.now() }),
 		}, env);
 		expect(orderRes.status).toBe(200);
-		const order = await orderRes.json() as { id: string; amountBaseUnits: string; chainId: number; contractAddress: string; recipientAddress: string; payerAddress: string; status: string; taxName: string; taxRate: string; taxCurrency: string; taxIncludedAmountBaseUnits: string; taxExcludedAmountBaseUnits: string; taxAmountBaseUnits: string; taxStatementId: string | null };
+		const order = await orderRes.json() as { id: string; planId: string; amountBaseUnits: string; chainId: number; contractAddress: string; recipientAddress: string; payerAddress: string; status: string; taxName: string; taxRate: string; taxCurrency: string; taxIncludedAmountBaseUnits: string; taxExcludedAmountBaseUnits: string; taxAmountBaseUnits: string; taxStatementId: string | null };
 		expect(order).toMatchObject({
 			amountBaseUnits: '30000000',
 			chainId: 8453,
@@ -1301,15 +1301,27 @@ describe('Crypto payment administration', () => {
 		const receipt = await receiptRes.json() as { order: { id: string; taxAmountBaseUnits: string; taxCurrency: string }; seller: { name: string } };
 		expect(receipt.order).toMatchObject({ id: order.id, taxAmountBaseUnits: '2727273', taxCurrency: 'USD' });
 		expect(receipt.seller.name).toBeTruthy();
-		const summaryRes = await app.request('/api/admin/get-billing-tax-summary', {
+		const summaryRes = await app.request('/api/admin/get-billing-sales-summary', {
 			method: 'POST',
 			headers: authHeaders(adminToken),
 			body: JSON.stringify({ from: paidAt - 1_000, to: paidAt + 1_000 }),
 		}, env);
 		expect(summaryRes.status).toBe(200);
-		const summary = await summaryRes.json() as { count: number; taxIncludedAmountBaseUnits: string; taxExcludedAmountBaseUnits: string; taxAmountBaseUnits: string; byRate: Array<{ taxRate: string; taxCurrency: string; taxAmountBaseUnits: string }> };
-		expect(summary).toMatchObject({ count: 1, taxIncludedAmountBaseUnits: '30000000', taxExcludedAmountBaseUnits: '27272727', taxAmountBaseUnits: '2727273' });
+		const summary = await summaryRes.json() as {
+			count: number;
+			grossAmountBaseUnits: string;
+			netAmountBaseUnits: string;
+			taxAmountBaseUnits: string;
+			byCurrency: Array<{ taxCurrency: string; grossAmountBaseUnits: string; netAmountBaseUnits: string; taxAmountBaseUnits: string }>;
+			byRate: Array<{ taxRate: string; taxCurrency: string; taxAmountBaseUnits: string }>;
+			byPlan: Array<{ planId: string; planName: string; grossAmountBaseUnits: string }>;
+			byAsset: Array<{ assetId: string | null; tokenSymbol: string; grossAmountBaseUnits: string }>;
+		};
+		expect(summary).toMatchObject({ count: 1, grossAmountBaseUnits: '30000000', netAmountBaseUnits: '27272727', taxAmountBaseUnits: '2727273' });
+		expect(summary.byCurrency).toContainEqual(expect.objectContaining({ taxCurrency: 'USD', grossAmountBaseUnits: '30000000', netAmountBaseUnits: '27272727', taxAmountBaseUnits: '2727273' }));
 		expect(summary.byRate).toContainEqual(expect.objectContaining({ taxRate: '0.1', taxCurrency: 'USD', taxAmountBaseUnits: '2727273' }));
+		expect(summary.byPlan).toContainEqual(expect.objectContaining({ planId: order.planId, planName: 'Crypto Pro', grossAmountBaseUnits: '30000000' }));
+		expect(summary.byAsset).toContainEqual(expect.objectContaining({ tokenSymbol: 'USDC', grossAmountBaseUnits: '30000000' }));
 	});
 
 	test('crypto order creation rejects regions outside billing rules', async () => {

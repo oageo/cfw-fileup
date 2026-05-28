@@ -704,10 +704,10 @@ app.post(
 );
 
 app.post(
-	'/get-billing-tax-summary',
-	describeRoute(omitResAndReq(apiDef['/api/admin/get-billing-tax-summary'])),
-	validator('json', apiDef['/api/admin/get-billing-tax-summary'].req),
-	describeResponse(async (c: JsonCtx<'/api/admin/get-billing-tax-summary', Env>) => {
+	'/get-billing-sales-summary',
+	describeRoute(omitResAndReq(apiDef['/api/admin/get-billing-sales-summary'])),
+	validator('json', apiDef['/api/admin/get-billing-sales-summary'].req),
+	describeResponse(async (c: JsonCtx<'/api/admin/get-billing-sales-summary', Env>) => {
 		const body = c.req.valid('json');
 		const db = getDb(c.env);
 		const where = and(
@@ -718,42 +718,91 @@ app.post(
 		const total = await db
 			.select({
 				count: sql<number>`count(*)`,
-				taxIncludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
-				taxExcludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				grossAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				netAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
 				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
 			})
 			.from(cryptoPaymentOrders)
 			.where(where)
 			.get();
+		const byCurrency = await db
+			.select({
+				taxCurrency: cryptoPaymentOrders.taxCurrency,
+				decimals: cryptoPaymentOrders.decimals,
+				count: sql<number>`count(*)`,
+				grossAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				netAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
+			})
+			.from(cryptoPaymentOrders)
+			.where(where)
+			.groupBy(cryptoPaymentOrders.taxCurrency, cryptoPaymentOrders.decimals)
+			.orderBy(asc(cryptoPaymentOrders.taxCurrency), asc(cryptoPaymentOrders.decimals));
 		const byRate = await db
 			.select({
 				taxName: cryptoPaymentOrders.taxName,
 				taxRate: cryptoPaymentOrders.taxRate,
 				taxCurrency: cryptoPaymentOrders.taxCurrency,
+				decimals: cryptoPaymentOrders.decimals,
 				count: sql<number>`count(*)`,
-				taxIncludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
-				taxExcludedAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				grossAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				netAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
 				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
 			})
 			.from(cryptoPaymentOrders)
 			.where(where)
-			.groupBy(cryptoPaymentOrders.taxName, cryptoPaymentOrders.taxRate, cryptoPaymentOrders.taxCurrency)
-			.orderBy(asc(cryptoPaymentOrders.taxName), asc(cryptoPaymentOrders.taxRate), asc(cryptoPaymentOrders.taxCurrency));
+			.groupBy(cryptoPaymentOrders.taxName, cryptoPaymentOrders.taxRate, cryptoPaymentOrders.taxCurrency, cryptoPaymentOrders.decimals)
+			.orderBy(asc(cryptoPaymentOrders.taxName), asc(cryptoPaymentOrders.taxRate), asc(cryptoPaymentOrders.taxCurrency), asc(cryptoPaymentOrders.decimals));
+		const byPlan = await db
+			.select({
+				planId: cryptoPaymentOrders.planId,
+				planName: cryptoPaymentOrders.planName,
+				taxCurrency: cryptoPaymentOrders.taxCurrency,
+				decimals: cryptoPaymentOrders.decimals,
+				count: sql<number>`count(*)`,
+				grossAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				netAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
+			})
+			.from(cryptoPaymentOrders)
+			.where(where)
+			.groupBy(cryptoPaymentOrders.planId, cryptoPaymentOrders.planName, cryptoPaymentOrders.taxCurrency, cryptoPaymentOrders.decimals)
+			.orderBy(asc(cryptoPaymentOrders.planName), asc(cryptoPaymentOrders.taxCurrency), asc(cryptoPaymentOrders.decimals));
+		const byAsset = await db
+			.select({
+				assetId: cryptoPaymentOrders.assetId,
+				tokenSymbol: cryptoPaymentOrders.tokenSymbol,
+				tokenName: cryptoPaymentOrders.tokenName,
+				taxCurrency: cryptoPaymentOrders.taxCurrency,
+				decimals: cryptoPaymentOrders.decimals,
+				count: sql<number>`count(*)`,
+				grossAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxIncludedAmountBaseUnits} as integer)), 0)`,
+				netAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxExcludedAmountBaseUnits} as integer)), 0)`,
+				taxAmountBaseUnits: sql<string>`coalesce(sum(cast(${cryptoPaymentOrders.taxAmountBaseUnits} as integer)), 0)`,
+			})
+			.from(cryptoPaymentOrders)
+			.where(where)
+			.groupBy(cryptoPaymentOrders.assetId, cryptoPaymentOrders.tokenSymbol, cryptoPaymentOrders.tokenName, cryptoPaymentOrders.taxCurrency, cryptoPaymentOrders.decimals)
+			.orderBy(asc(cryptoPaymentOrders.tokenSymbol), asc(cryptoPaymentOrders.taxCurrency), asc(cryptoPaymentOrders.decimals));
+		const normalizeBucket = <T extends { count: number; grossAmountBaseUnits: string; netAmountBaseUnits: string; taxAmountBaseUnits: string }>(row: T): T => ({
+			...row,
+			grossAmountBaseUnits: String(row.grossAmountBaseUnits),
+			netAmountBaseUnits: String(row.netAmountBaseUnits),
+			taxAmountBaseUnits: String(row.taxAmountBaseUnits),
+		});
 		return c.json({
 			from: body.from,
 			to: body.to,
 			count: total?.count ?? 0,
-			taxIncludedAmountBaseUnits: String(total?.taxIncludedAmountBaseUnits ?? '0'),
-			taxExcludedAmountBaseUnits: String(total?.taxExcludedAmountBaseUnits ?? '0'),
+			grossAmountBaseUnits: String(total?.grossAmountBaseUnits ?? '0'),
+			netAmountBaseUnits: String(total?.netAmountBaseUnits ?? '0'),
 			taxAmountBaseUnits: String(total?.taxAmountBaseUnits ?? '0'),
-			byRate: byRate.map(row => ({
-				...row,
-				taxIncludedAmountBaseUnits: String(row.taxIncludedAmountBaseUnits),
-				taxExcludedAmountBaseUnits: String(row.taxExcludedAmountBaseUnits),
-				taxAmountBaseUnits: String(row.taxAmountBaseUnits),
-			})),
+			byCurrency: byCurrency.map(normalizeBucket),
+			byRate: byRate.map(normalizeBucket),
+			byPlan: byPlan.map(normalizeBucket),
+			byAsset: byAsset.map(normalizeBucket),
 		}, 200);
-	}, getResponseDefWithAuth('/api/admin/get-billing-tax-summary')),
+	}, getResponseDefWithAuth('/api/admin/get-billing-sales-summary')),
 );
 
 export const adminBillingRoutes = app;
