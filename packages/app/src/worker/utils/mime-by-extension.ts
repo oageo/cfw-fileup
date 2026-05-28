@@ -1,4 +1,5 @@
 import { lookup } from 'mrmime';
+import { filetypemime } from 'magic-bytes.js';
 
 const executableMimeTypes = new Set([
 	'application/vnd.microsoft.portable-executable',
@@ -25,6 +26,37 @@ export function preferExtensionMimeTypeForStorage(path: string, detectedMimeType
 		return 'image/svg+xml';
 	}
 	return detectedMimeType;
+}
+
+export function sniffFileMimeType(path: string, bytes: Uint8Array): string | undefined {
+	const magicMimeType = filetypemime(bytes)[0] ?? '';
+	const magicLooksLikeText = magicMimeType.startsWith('text/');
+	const usableMagicMimeType = magicMimeType === '' || magicMimeType === 'application/octet-stream' || (magicLooksLikeText && !looksLikeUtf8Text(bytes))
+		? undefined
+		: magicMimeType;
+	const detectedMimeType = detectExecutableMimeType(bytes) ?? usableMagicMimeType;
+	const extensionMimeType = inferMimeTypeByExtension(path);
+	const storageDetectedMimeType = preferExtensionMimeTypeForStorage(path, detectedMimeType);
+	const isUtf8Text = bytes.length === 0 || looksLikeUtf8Text(bytes);
+	return storageDetectedMimeType
+		?? (isUtf8Text ? extensionMimeType : undefined)
+		?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined);
+}
+
+export function selectStoredOrSniffedMimeType(options: {
+	path: string;
+	storedMimeType?: string | null;
+	sniffBytes: Uint8Array;
+	fallbackMimeType?: string;
+	isValidStoredMimeType?: (mimeType: string) => boolean;
+}): string {
+	const sniffedMimeType = sniffFileMimeType(options.path, options.sniffBytes) ?? options.fallbackMimeType ?? 'application/octet-stream';
+	const storedMimeType = options.storedMimeType;
+	if (storedMimeType == null || storedMimeType === '') return sniffedMimeType;
+	if (options.isValidStoredMimeType && !options.isValidStoredMimeType(storedMimeType)) return sniffedMimeType;
+	if (hasSuspiciousFileType(options.path, storedMimeType)) return sniffedMimeType;
+	if (hasSuspiciousFileType(options.path, sniffedMimeType)) return sniffedMimeType;
+	return storedMimeType;
 }
 
 function getExtension(path: string): string | undefined {

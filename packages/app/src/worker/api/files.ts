@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, gte, desc, sql, count, lt, lte, ne, type SQL } from 'drizzle-orm';
-import { filetypemime } from 'magic-bytes.js';
 import { apiError } from '../utils/api-error';
 import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
 import { getDb } from '../utils/db';
@@ -12,7 +11,7 @@ import { genEaidx } from '../../shared/eaid-x';
 import { apiDef, getResponseDefWithAuth, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { MAX_BUCKET_NAME_LENGTH, MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
-import { detectExecutableMimeType, hasSuspiciousFileType, inferMimeTypeByExtension, isExecutableMimeType, looksLikeUtf8Text, preferExtensionMimeTypeForStorage } from '../utils/mime-by-extension';
+import { hasSuspiciousFileType, inferMimeTypeByExtension, isExecutableMimeType, selectStoredOrSniffedMimeType } from '../utils/mime-by-extension';
 import { isValidDirectoryPath, isValidFilePath } from '../../shared/name-validation';
 import { validateDirectoryPathForbiddenNames } from '../utils/name-validation';
 import { findArchiveEntryPathConflict, hasFileDirectoryConflictForDirectory, hasFileDirectoryConflictForFile } from '../utils/path-conflicts';
@@ -725,21 +724,19 @@ app.post(
 				const r2Slice = await c.env.R2.get(file.r2Key, { range: { offset: 0, length: 4100 } });
 				if (r2Slice && 'bytes' in r2Slice) {
 					headerBytes = await r2Slice.bytes();
-					const magicMimeType = filetypemime(headerBytes)[0] ?? '';
-					const magicLooksLikeText = magicMimeType.startsWith('text/');
-					const usableMagicMimeType = magicMimeType === '' || magicMimeType === 'application/octet-stream' || (magicLooksLikeText && !looksLikeUtf8Text(headerBytes))
-						? undefined
-						: magicMimeType;
-					detectedMimeType = detectExecutableMimeType(headerBytes) ?? usableMagicMimeType;
 				}
 			} catch {
 				// fall back to client-provided content type
 			}
 		}
-		const extensionMimeType = inferMimeTypeByExtension(file.path);
-		const storageDetectedMimeType = preferExtensionMimeTypeForStorage(file.path, detectedMimeType);
-		const isUtf8Text = fileSize === 0 || (headerBytes ? looksLikeUtf8Text(headerBytes) : false);
-		const mimeType = storageDetectedMimeType ?? (isUtf8Text ? extensionMimeType : undefined) ?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined) ?? r2Object.httpMetadata?.contentType;
+		if (headerBytes !== undefined || fileSize === 0) {
+			detectedMimeType = selectStoredOrSniffedMimeType({
+				path: file.path,
+				sniffBytes: headerBytes ?? new Uint8Array(0),
+				fallbackMimeType: r2Object.httpMetadata?.contentType,
+			});
+		}
+		const mimeType = detectedMimeType ?? r2Object.httpMetadata?.contentType;
 		const mismatch = hasSuspiciousFileType(file.path, mimeType);
 		if (mismatch && await shouldRejectMismatchedFileType(c.env)) {
 			throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');

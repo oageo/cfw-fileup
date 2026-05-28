@@ -812,7 +812,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar individual file)', () => {
 			headers: authHeaders(token),
 			body: JSON.stringify({
 				fileId,
-				files: [{ path: 'hello.txt', mimeType: 'text/plain', offset: 512, size: fileContent.length }],
+				files: [{ path: 'hello.txt', mimeType: 'application/wasm', offset: 512, size: fileContent.length }],
 			}),
 		}, env);
 
@@ -824,6 +824,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar individual file)', () => {
 
 		const res = await app.request(`/d/${fileId}/%3Aentries/hello.txt`, {}, env);
 		expect(res.status).toBe(200);
+		expect(res.headers.get('Content-Type')).toBe('text/plain');
 		const body = await res.arrayBuffer();
 		expect(new Uint8Array(body)).toEqual(fileContent);
 	});
@@ -987,7 +988,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 				fileId,
 				files: [{
 					path: 'hello.txt',
-					mimeType: 'text/plain',
+					mimeType: 'application/wasm',
 					aStart: 0,
 					aFirstEnd: block.length,
 					aFinalStart: 0,
@@ -1009,6 +1010,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 			headers: { 'Accept-Encoding': 'gzip' },
 		}, env);
 		expect(gzipRes.status).toBe(200);
+		expect(gzipRes.headers.get('Content-Type')).toBe('text/plain');
 		expect(gzipRes.headers.get('Content-Encoding')).toBe('gzip');
 		expect(gzipRes.headers.get('Content-Disposition')).toBe('attachment; filename="hello.txt"; filename*=UTF-8\'\'hello.txt');
 		expect(gzipRes.headers.get('ETag')).toBe(`"v${cacheVersion}-${fileId}-hello.txt"`);

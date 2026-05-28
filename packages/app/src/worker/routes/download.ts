@@ -11,7 +11,7 @@ import { getWorkerCacheVersion, openWorkerCache, workerCacheBaseNames } from '..
 import { apiError, createApiErrorResponse } from '../utils/api-error';
 import { tokenToDigest } from '../utils/crypto';
 import { likePrefix } from '../utils/sql-like';
-import { hasSuspiciousFileType, inferMimeTypeByExtension } from '../utils/mime-by-extension';
+import { selectStoredOrSniffedMimeType } from '../utils/mime-by-extension';
 
 const app = new Hono<{ Bindings: Env }>();
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
@@ -325,15 +325,15 @@ function createMultipartRangeStreamFromR2(options: {
 }
 
 const VALID_MIME_TYPE = /^[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_.+]*$/;
+const mimeSniffBytes = 512;
 
-function sanitizeEntryMimeType(storedMimeType: string, entryPath: string): string {
-	if (!VALID_MIME_TYPE.test(storedMimeType)) {
-		return inferMimeTypeByExtension(entryPath) ?? 'application/octet-stream';
-	}
-	if (hasSuspiciousFileType(entryPath, storedMimeType)) {
-		return inferMimeTypeByExtension(entryPath) ?? 'application/octet-stream';
-	}
-	return storedMimeType;
+function selectEntryMimeType(storedMimeType: string, entryPath: string, sniffBytes: Uint8Array): string {
+	return selectStoredOrSniffedMimeType({
+		path: entryPath,
+		storedMimeType,
+		sniffBytes,
+		isValidStoredMimeType: mimeType => VALID_MIME_TYPE.test(mimeType),
+	});
 }
 
 function getTargzEntryHeaders(download: DownloadContext, path: string, mimeType: string): HeadersInit {
@@ -740,10 +740,21 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 		if (!rangeData?.body) {
 			throw apiError(500, 'FAILED_TO_RETRIEVE_FILE');
 		}
+		const sniffData = indexEntry.size > 0
+			? await c.env.R2.get(file.r2Key, {
+				range: {
+					offset: indexEntry.offset,
+					length: Math.min(indexEntry.size, mimeSniffBytes),
+				},
+			})
+			: null;
+		const sniffBytes = sniffData?.body
+			? new Uint8Array(await sniffData.arrayBuffer())
+			: new Uint8Array(0);
 
 		const response = new Response(rangeData.body, {
 			headers: download.withDownloadHeaders({
-				'Content-Type': sanitizeEntryMimeType(indexEntry.mimeType, indexEntry.path),
+				'Content-Type': selectEntryMimeType(indexEntry.mimeType, indexEntry.path, sniffBytes),
 				'Content-Disposition': download.createContentDisposition(toDownloadBasename(indexEntry.path)),
 				'Content-Length': String(indexEntry.size),
 			}),
@@ -783,6 +794,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 				? firstDecompressed.slice(indexEntry.rStartOffset, firstDecompressed.length - indexEntry.rEndOffset)
 				: firstDecompressed.slice(indexEntry.rStartOffset);
 			const firstBgzfBlock = await createBgzfBlock(firstTrimmed);
+			const sniffBytes = firstTrimmed.slice(0, mimeSniffBytes);
 
 			const intermediateData = !isSingleBlock && indexEntry.aFirstEnd < indexEntry.aFinalStart
 				? await c.env.R2.get(file.r2Key, {
@@ -828,7 +840,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			});
 
 			const response = new Response(combinedStream, {
-				headers: getTargzEntryHeaders(download, indexEntry.path, sanitizeEntryMimeType(indexEntry.mimeType, indexEntry.path)),
+				headers: getTargzEntryHeaders(download, indexEntry.path, selectEntryMimeType(indexEntry.mimeType, indexEntry.path, sniffBytes)),
 				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', requestedEntryPath);
