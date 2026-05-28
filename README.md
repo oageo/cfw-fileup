@@ -71,6 +71,43 @@ pnpm wrangler secret put EVM_CHAIN_RPC_URLS --env test
 
 公開 repo に実デプロイ用の Worker/D1/R2 設定を置きたくない場合は、private repo に `wrangler.*.jsonc` を置いて `pnpm --filter app deploy:config -- <config>` でデプロイできます。詳しくは [docs/private-deploy-repo.md](docs/private-deploy-repo.md) を参照してください。
 
+## Deploy with a private Wrangler config
+
+実環境の Worker 名、D1 database ID、R2 bucket 名、公開 URL などを公開 repo に置きたくない場合は、別の private repo に `wrangler.*.jsonc` を置きます。
+
+推奨配置:
+
+```text
+workspace/
+  cfw-fileup/
+  cfw-fileup-deploy/
+    wrangler.test.jsonc
+    wrangler.prod.jsonc
+```
+
+private config の `main` は、private config から見た app の Worker entrypoint を指します。
+
+```jsonc
+{
+  "main": "../cfw-fileup/packages/app/src/worker/index.ts"
+}
+```
+
+デプロイ:
+
+```bash
+cd cfw-fileup
+pnpm install --frozen-lockfile
+pnpm --filter app typecheck
+pnpm --filter app deploy:config -- ../../../cfw-fileup-deploy/wrangler.test.jsonc cfw-fileup-db-test
+```
+
+`deploy:config` は同じ config を Vite build と Wrangler deploy の両方に渡します。第2引数に D1 database name を渡すと、deploy 前に remote migration も実行します。migration が不要な場合は省略できます。
+
+```bash
+pnpm --filter app deploy:config -- ../../../cfw-fileup-deploy/wrangler.test.jsonc
+```
+
 ## Local DB Migration
 ```bash
 pnpm run --filter app db:migrate:local
