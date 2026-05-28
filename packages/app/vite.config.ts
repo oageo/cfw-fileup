@@ -7,6 +7,7 @@ import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const devTunnelName = process.env.CF_DEV_TUNNEL;
+const wranglerConfigPath = process.env.CF_WRANGLER_CONFIG_PATH ?? './wrangler.jsonc';
 const require = createRequire(import.meta.url);
 const rootPackageJson = require('../../package.json') as { repository?: string | { url?: string } };
 const viemPackageJson = require('viem/package.json') as { version: string };
@@ -54,7 +55,7 @@ export default defineConfig({
 	},
 	plugins: [
 		cloudflare({
-			configPath: './wrangler.jsonc',
+			configPath: wranglerConfigPath,
 			tunnel: devTunnel as boolean,
 		}),
 		{

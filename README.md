@@ -69,6 +69,8 @@ pnpm wrangler secret put EVM_CHAIN_RPC_URLS
 pnpm wrangler secret put EVM_CHAIN_RPC_URLS --env test
 ```
 
+公開 repo に実デプロイ用の Worker/D1/R2 設定を置きたくない場合は、private repo に `wrangler.*.jsonc` を置いて `pnpm --filter app deploy:config -- <config>` でデプロイできます。詳しくは [docs/private-deploy-repo.md](docs/private-deploy-repo.md) を参照してください。
+
 ## Local DB Migration
 ```bash
 pnpm run --filter app db:migrate:local
