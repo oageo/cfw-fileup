@@ -3,12 +3,21 @@ const HASH_LENGTH_BITS = 256;
 const HASH_LENGTH_BYTES = HASH_LENGTH_BITS / 8;
 const SALT_LENGTH = 16;
 
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+	if (a.length !== b.length) return false;
+	let diff = 0;
+	for (let i = 0; i < a.length; i++) {
+		diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+	}
+	return diff === 0;
+}
+
 // workerd supports Uint8Array base64 helpers, but Node v24.16.0 does not yet.
 // Keep this btoa/atob path until the local test runtime catches up.
 export function bytesToBase64Url(bytes: Uint8Array): string {
 	let binary = '';
 	for (let i = 0; i < bytes.length; i++) {
-		binary += String.fromCharCode(bytes[i]!);
+		binary += String.fromCharCode(bytes[i] ?? 0);
 	}
 	return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
@@ -82,7 +91,7 @@ export async function verifyPassword(password: string, stored: Uint8Array): Prom
 	);
 
 	const hash = new Uint8Array(derivedBits);
-	return hash.length === expectedHash.length && hash.every((byte, i) => byte === expectedHash[i]);
+	return timingSafeEqual(hash, expectedHash);
 }
 
 export function generateToken(): string {

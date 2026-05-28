@@ -6,6 +6,7 @@ export async function sendLoginNotification(env: Env, options: {
 	userId: string;
 	method: string;
 	request: { header(name: string): string | undefined };
+	tokenId?: string;
 }): Promise<void> {
 	const appName = await getAppName(env);
 	const ip = getRequestIp(options.request) ?? 'unknown';

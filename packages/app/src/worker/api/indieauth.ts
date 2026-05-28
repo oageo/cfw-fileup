@@ -11,8 +11,8 @@ import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../..
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 import { getAppName } from '../utils/app-name';
-import { sendLoginNotification } from './login-email';
 import { runContextBackgroundTask } from '../utils/background-task';
+import { sendLoginNotification } from './login-email';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MISSKEY_OAUTH_SCOPE = 'read:account';
@@ -268,6 +268,27 @@ function escapeHtml(value: string): string {
 		'"': '&quot;',
 		'\'': '&#39;',
 	})[char] ?? char);
+}
+
+function createAuthCompleteHtml(token: string, redirectPath = '/my/buckets'): string {
+	const tokenJson = JSON.stringify(token);
+	const redirectPathJson = JSON.stringify(redirectPath);
+	return `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="referrer" content="no-referrer">
+		<title>Signing in...</title>
+	</head>
+	<body>
+		<script>
+			localStorage.setItem('cfw_fileup_token', ${tokenJson});
+			localStorage.removeItem('cfw_fileup_user');
+			location.replace(${redirectPathJson});
+		</script>
+	</body>
+</html>`;
 }
 
 app.get('/client', async (c) => {
@@ -596,7 +617,11 @@ app.get('/callback', async (c) => {
 		}), 'Failed to send login notification:');
 	}
 
-	return c.redirect(`/signin?indieauth_token=${encodeURIComponent(tokenValue)}`, 302);
+	return c.html(createAuthCompleteHtml(tokenValue), 200, {
+		'Cache-Control': 'no-store',
+		'Content-Security-Policy': 'default-src \'none\'; script-src \'unsafe-inline\'; navigate-to \'self\'; base-uri \'none\'; form-action \'none\'',
+		'Referrer-Policy': 'no-referrer',
+	});
 });
 
 // API endpoint to complete IndieAuth sign-in from the frontend (exchange temp token)

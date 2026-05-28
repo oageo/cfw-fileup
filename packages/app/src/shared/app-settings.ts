@@ -18,7 +18,19 @@ export const registrationModeSchema = v.picklist(['closed', 'passphrase', 'open'
 export type RegistrationMode = v.InferOutput<typeof registrationModeSchema>;
 export const optionalUrlSettingSchema = v.union([
 	v.literal(''),
-	v.pipe(v.string(), v.url(), v.maxLength(MAX_APP_SETTING_TEXT_LENGTH)),
+	v.pipe(
+		v.string(),
+		v.url(),
+		v.maxLength(MAX_APP_SETTING_TEXT_LENGTH),
+		v.check((value) => {
+			try {
+				const url = new URL(value);
+				return url.protocol === 'https:' || url.protocol === 'http:';
+			} catch {
+				return false;
+			}
+		}, 'URL must use http or https'),
+	),
 ]);
 export const optionalDateSettingSchema = v.union([
 	v.literal(''),

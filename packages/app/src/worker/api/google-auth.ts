@@ -10,8 +10,8 @@ import { isValidNameFormat } from '../../shared/name-validation';
 import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
-import { sendLoginNotification } from './login-email';
 import { runContextBackgroundTask } from '../utils/background-task';
+import { sendLoginNotification } from './login-email';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -42,6 +42,27 @@ function getRedirectUri(env: Env, url: URL): string {
 
 function googleErrorLocation(error: string, path: '/signin' | '/signup' = '/signin'): string {
 	return `${path}?google_error=${encodeURIComponent(error)}`;
+}
+
+function createAuthCompleteHtml(token: string, redirectPath = '/my/buckets'): string {
+	const tokenJson = JSON.stringify(token);
+	const redirectPathJson = JSON.stringify(redirectPath);
+	return `<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="referrer" content="no-referrer">
+		<title>Signing in...</title>
+	</head>
+	<body>
+		<script>
+			localStorage.setItem('cfw_fileup_token', ${tokenJson});
+			localStorage.removeItem('cfw_fileup_user');
+			location.replace(${redirectPathJson});
+		</script>
+	</body>
+</html>`;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -289,8 +310,11 @@ app.get('/callback', async (c) => {
 		}), 'Failed to send login notification:');
 	}
 
-	// Redirect to frontend signin page with token as query parameter
-	return c.redirect(`/signin?google_token=${encodeURIComponent(tokenValue)}`, 302);
+	return c.html(createAuthCompleteHtml(tokenValue), 200, {
+		'Cache-Control': 'no-store',
+		'Content-Security-Policy': 'default-src \'none\'; script-src \'unsafe-inline\'; navigate-to \'self\'; base-uri \'none\'; form-action \'none\'',
+		'Referrer-Policy': 'no-referrer',
+	});
 });
 
 // API endpoint to complete Google sign-in from the frontend (exchange token)
