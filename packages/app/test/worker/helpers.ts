@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import workerApp from '../../src/worker/index';
 import migration0000 from '../../migrations/0000_curly_lady_deathstrike.sql?raw';
+import migration0001 from '../../migrations/0001_confused_wild_child.sql?raw';
 
 const defaultCf = {
 	country: 'JP',
@@ -38,6 +39,7 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 
 const migrations = [
 	migration0000,
+	migration0001,
 ] as const;
 
 const tables = [
@@ -64,6 +66,8 @@ const tables = [
 	'files',
 	'directories',
 	'oauth_states',
+	'email_verification_tokens',
+	'email_notification_events',
 	'tokens',
 	'user_plan_assignments',
 	'user_quotas',
@@ -127,6 +131,8 @@ export async function clearDb(): Promise<void> {
 		env.DB.prepare('DELETE FROM files'),
 		env.DB.prepare('DELETE FROM directories'),
 		env.DB.prepare('DELETE FROM oauth_states'),
+		env.DB.prepare('DELETE FROM email_verification_tokens'),
+		env.DB.prepare('DELETE FROM email_notification_events'),
 		env.DB.prepare('DELETE FROM tokens'),
 		env.DB.prepare('DELETE FROM user_plan_assignments'),
 		env.DB.prepare('DELETE FROM user_quotas'),

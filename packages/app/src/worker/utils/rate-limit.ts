@@ -1,6 +1,9 @@
 import { and, desc, eq, gt, lt, sql } from 'drizzle-orm';
-import { userQuotas, globalQuotas, userPlanAssignments, plans, users } from '../scheme/index';
+import { buckets, userQuotas, globalQuotas, userPlanAssignments, plans, users } from '../scheme/index';
 import { getDb } from './db';
+import { reserveEmailNotification, sendAccountEmailLines } from './email';
+import { getAppName } from './app-name';
+import { runBackgroundTask, type WaitUntil } from './background-task';
 
 export interface RateLimitConfig {
 	maxBuckets: number | null;
@@ -24,6 +27,33 @@ export interface StoredEffectiveQuotaConfig extends RateLimitConfig {
 	effectiveQuotaExpiresAt: number | null;
 	effectiveQuotaUpdatedAt: number | null;
 	effectiveQuotaSource: EffectiveQuotaSource | null;
+}
+
+async function sendQuotaExceededAfterPlanEndNotification(env: Env, options: {
+	userId: string;
+	previousPlanExpiresAt: number;
+	maxBucketSizeBytes: number;
+	now: number;
+}): Promise<void> {
+	const exceededBuckets = await getDb(env)
+		.select({ name: buckets.name, usedBytes: buckets.usedBytes })
+		.from(buckets)
+		.where(and(eq(buckets.userId, options.userId)));
+	const exceeded = exceededBuckets.filter(bucket => bucket.usedBytes > options.maxBucketSizeBytes);
+	if (exceeded.length === 0) return;
+	const eventKey = `quota-exceeded:${options.previousPlanExpiresAt}:${options.maxBucketSizeBytes}`;
+	if (!await reserveEmailNotification(env, options.userId, 'quota_exceeded', eventKey, options.now)) return;
+	const appName = await getAppName(env);
+	await sendAccountEmailLines(env, options.userId, `${appName} 保存容量超過のお知らせ`, [
+		'上位プランの期間終了により、現在の保存容量が新しい上限を超えています。',
+		'',
+		`プラン終了日時: ${new Date(options.previousPlanExpiresAt).toISOString()}`,
+		`現在のバケット容量上限: ${formatBytes(options.maxBucketSizeBytes)}`,
+		'',
+		...exceeded.map(bucket => `- ${bucket.name}: ${formatBytes(bucket.usedBytes)}`),
+		'',
+		'ファイルを整理するか、必要に応じてプランを購入してください。',
+	]);
 }
 
 const defaultQuota: RateLimitConfig = {
@@ -185,14 +215,36 @@ export async function getInitialEffectiveQuotaForUser(env: Env, now = Date.now()
 	return getGlobalEffectiveQuota(env, now);
 }
 
-export async function refreshEffectiveQuotaForUser(env: Env, userId: string, now = Date.now()): Promise<EffectiveQuotaConfig> {
+export async function refreshEffectiveQuotaForUser(env: Env, userId: string, now = Date.now(), waitUntil?: WaitUntil): Promise<EffectiveQuotaConfig> {
 	const db = getDb(env);
+	const previous = await db
+		.select({
+			effectiveQuotaSource: users.effectiveQuotaSource,
+			effectiveQuotaExpiresAt: users.effectiveQuotaExpiresAt,
+		})
+		.from(users)
+		.where(eq(users.id, userId))
+		.get();
 	const quota = await computeEffectiveQuotaForUser(env, userId, now);
 
 	await db
 		.update(users)
 		.set(toUserQuotaUpdate(quota))
 		.where(eq(users.id, userId));
+
+	if (
+		previous?.effectiveQuotaSource === 'plan'
+		&& previous.effectiveQuotaExpiresAt !== null
+		&& previous.effectiveQuotaExpiresAt <= now
+		&& quota.maxBucketSizeBytes !== null
+	) {
+		runBackgroundTask(waitUntil, sendQuotaExceededAfterPlanEndNotification(env, {
+			userId,
+			previousPlanExpiresAt: previous.effectiveQuotaExpiresAt,
+			maxBucketSizeBytes: quota.maxBucketSizeBytes,
+			now,
+		}), 'Failed to send quota exceeded notification:');
+	}
 
 	return quota;
 }
@@ -322,4 +374,11 @@ export async function getGlobalQuota(env: Env): Promise<RateLimitConfig> {
 	}
 
 	return defaultQuota;
+}
+
+function formatBytes(value: number): string {
+	if (value < 1024) return `${value} B`;
+	if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+	if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MiB`;
+	return `${(value / 1024 / 1024 / 1024).toFixed(1)} GiB`;
 }

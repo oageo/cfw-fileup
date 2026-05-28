@@ -94,7 +94,7 @@ export function isBillingRegionAllowed(rules: BillingRegionRules, snapshot: CfRe
 	return rules.mode === 'allow' ? matched : !matched;
 }
 
-export async function assertBillingRegionAllowed(env: Env, request: Request): Promise<CfRegionSnapshot> {
+export async function assertBillingRegionAllowed(env: Env, request: Request): Promise<CfRegionSnapshot & { country: string }> {
 	const snapshot = getCfRegionSnapshot(request);
 	if (snapshot?.country == null) throw apiError(403, 'PAYMENT_REGION_NOT_ALLOWED');
 	let rules: BillingRegionRules;
@@ -104,7 +104,7 @@ export async function assertBillingRegionAllowed(env: Env, request: Request): Pr
 		throw apiError(403, 'PAYMENT_REGION_NOT_ALLOWED');
 	}
 	if (!isBillingRegionAllowed(rules, snapshot)) throw apiError(403, 'PAYMENT_REGION_NOT_ALLOWED');
-	return snapshot;
+	return snapshot as CfRegionSnapshot & { country: string };
 }
 
 export function stringifyCfRegionSnapshot(snapshot: CfRegionSnapshot): string {

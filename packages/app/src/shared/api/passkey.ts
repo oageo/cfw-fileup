@@ -125,7 +125,9 @@ export const passkeyApiDef = {
 	'/api/passkey/authenticate/begin': {
 		summary: 'Begin passkey authentication',
 		tags: ['passkey'],
-		req: v.object({}),
+		req: v.object({
+			purpose: v.optional(v.picklist(['login', 'reauthenticate'])),
+		}),
 		res: {
 			200: { description: 'Authentication options', content: { 'application/json': { vSchema: v.object({ challengeId: v.string(), options: PublicKeyCredentialRequestOptionsJSON }) } } },
 		},
@@ -136,6 +138,7 @@ export const passkeyApiDef = {
 		req: v.object({
 			challengeId: IdString,
 			credential: AuthenticationResponseJSON,
+			purpose: v.optional(v.picklist(['login', 'reauthenticate'])),
 		}),
 		res: {
 			200: { description: 'Authentication successful', content: { 'application/json': { vSchema: v.object({ token: v.string() }) } } },

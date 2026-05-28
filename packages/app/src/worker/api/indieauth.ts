@@ -11,6 +11,8 @@ import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../..
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 import { getAppName } from '../utils/app-name';
+import { sendLoginNotification } from './login-email';
+import { runContextBackgroundTask } from '../utils/background-task';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MISSKEY_OAUTH_SCOPE = 'read:account';
@@ -481,6 +483,7 @@ app.get('/callback', async (c) => {
 	let user = linkedAccount
 		? await db.select().from(users).where(eq(users.id, linkedAccount.userId)).get()
 		: await db.select().from(users).where(eq(users.misskeyId, misskeyId)).get();
+	const isExistingUser = user !== undefined;
 
 	if (user) {
 		if (user.isSuspended) {
@@ -584,6 +587,14 @@ app.get('/callback', async (c) => {
 		token: tokenBytes,
 	});
 	await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'indieauth' }, user.id, tokenId);
+	if (isExistingUser) {
+		runContextBackgroundTask(c, sendLoginNotification(c.env, {
+			userId: user.id,
+			method: 'indieauth',
+			request: c.req,
+			tokenId,
+		}), 'Failed to send login notification:');
+	}
 
 	return c.redirect(`/signin?indieauth_token=${encodeURIComponent(tokenValue)}`, 302);
 });

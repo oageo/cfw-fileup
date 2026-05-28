@@ -9,6 +9,8 @@ export interface AuthUser {
 	hasMisskey: boolean;
 	hasPassword: boolean;
 	recentlyAuthenticated: boolean;
+	email: string | null;
+	emailVerifiedAt: number | null;
 }
 
 const TOKEN_KEY = 'cfw_fileup_token';
@@ -24,6 +26,8 @@ function loadStoredUser(): AuthUser | null {
 			hasMisskey?: boolean;
 			hasPassword?: boolean;
 			recentlyAuthenticated?: boolean;
+			email?: string | null;
+			emailVerifiedAt?: number | null;
 		};
 		return {
 			...user,
@@ -32,6 +36,8 @@ function loadStoredUser(): AuthUser | null {
 			hasMisskey: user.hasMisskey ?? false,
 			hasPassword: user.hasPassword ?? true,
 			recentlyAuthenticated: user.recentlyAuthenticated ?? false,
+			email: user.email ?? null,
+			emailVerifiedAt: user.emailVerifiedAt ?? null,
 		};
 	} catch {
 		return null;

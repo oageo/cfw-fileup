@@ -17,6 +17,10 @@ import { getPaymentChainRpcUrl, normalizeEthAddress } from '../utils/payment-rpc
 import { getEffectiveQuotaForUser } from '../utils/rate-limit';
 import { createGoogleAuthUrl } from './google-auth';
 import { createIndieAuthUrl } from './indieauth';
+import { createEmailVerification, getEmailSendPreflightFailure, sendEmailLines, verifyAccountEmail, type EmailSendPreflightFailure } from '../utils/email';
+import { verifyTurnstile } from '../utils/turnstile';
+import { getContextWaitUntil, runBackgroundTask, type WaitUntil } from '../utils/background-task';
+import { getAppName } from '../utils/app-name';
 import type { JsonCtx } from '../../shared/api';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -24,6 +28,32 @@ const RECENT_AUTH_MS = 10 * 60 * 1000;
 const WALLET_LINK_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 
 app.use(authMiddleware);
+
+async function assertCanSendVerificationEmail(env: Env, email: string): Promise<void> {
+	const failure = await getEmailSendPreflightFailure(env, email);
+	if (failure === null) return;
+	const errors: Record<EmailSendPreflightFailure, { status: 400 | 503; code: 'EMAIL_NOT_CONFIGURED' | 'PUBLIC_APP_URL_NOT_CONFIGURED' | 'EMAIL_DOMAIN_HAS_NO_MX'; message: string }> = {
+		email_not_configured: { status: 503, code: 'EMAIL_NOT_CONFIGURED', message: 'Email sending is not configured' },
+		public_app_url_not_configured: { status: 503, code: 'PUBLIC_APP_URL_NOT_CONFIGURED', message: 'PUBLIC_APP_URL is not configured' },
+		recipient_domain_has_no_mx: { status: 400, code: 'EMAIL_DOMAIN_HAS_NO_MX', message: 'Recipient domain has no MX record' },
+	};
+	const error = errors[failure];
+	throw apiError(error.status, error.code, error.message);
+}
+
+async function sendEmailVerification(env: Env, userId: string, email: string, requestUrl: string, waitUntil?: WaitUntil): Promise<void> {
+	const now = Date.now();
+	const { verifyUrl } = await createEmailVerification(env, userId, email, requestUrl, now);
+	const appName = await getAppName(env);
+	runBackgroundTask(waitUntil, sendEmailLines(env, email, `${appName} メールアドレス確認`, [
+		`${appName} のメールアドレス確認です。`,
+		'',
+		'次のリンクを開いてメールアドレスを確認してください。',
+		verifyUrl,
+		'',
+		'このメールに心当たりがない場合は破棄してください。',
+	]), 'Failed to send email verification:');
+}
 
 async function assertSensitiveActionAuth(env: Env, userId: string, currentPassword: string | undefined, reauthenticatedAt: number | null): Promise<void> {
 	if (reauthenticatedAt !== null && Date.now() - reauthenticatedAt <= RECENT_AUTH_MS) return;
@@ -62,6 +92,8 @@ app.post(
 			hasMisskey: linkedMisskeyAccounts.length > 0,
 			hasPassword: userRecord.passwordHash !== null,
 			recentlyAuthenticated: user.reauthenticatedAt !== null && Date.now() - user.reauthenticatedAt <= RECENT_AUTH_MS,
+			email: userRecord.email,
+			emailVerifiedAt: userRecord.emailVerifiedAt,
 		}, 200);
 	}, getResponseDefWithAuth('/api/account/me')),
 );
@@ -406,6 +438,71 @@ app.post(
 
 		return c.json({ ok: true }, 200);
 	}, getResponseDefWithAuth('/api/account/update')),
+);
+
+app.post(
+	'/email/update',
+	describeRoute(omitResAndReq(apiDef['/api/account/email/update'])),
+	validator('json', apiDef['/api/account/email/update'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/email/update', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const email = c.req.valid('json').email?.trim().toLowerCase() ?? null;
+
+		if (email !== null) {
+			await assertCanSendVerificationEmail(c.env, email);
+		}
+
+		await db.update(users).set({
+			email,
+			emailVerifiedAt: null,
+		}).where(eq(users.id, user.id));
+
+		if (email !== null) {
+			await sendEmailVerification(c.env, user.id, email, c.req.url, getContextWaitUntil(c));
+		}
+
+		return c.json({ ok: true, email, emailVerifiedAt: null }, 200);
+	}, getResponseDefWithAuth('/api/account/email/update')),
+);
+
+app.post(
+	'/email/resend-verification',
+	describeRoute(omitResAndReq(apiDef['/api/account/email/resend-verification'])),
+	validator('json', apiDef['/api/account/email/resend-verification'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/email/resend-verification', Env>) => {
+		const db = getDb(c.env);
+		const user = c.get('user');
+		const userRecord = await db.select({ email: users.email, emailVerifiedAt: users.emailVerifiedAt }).from(users).where(eq(users.id, user.id)).get();
+		if (!userRecord?.email) throw apiError(400, 'EMAIL_IS_REQUIRED');
+		if (userRecord.emailVerifiedAt === null) {
+			await assertCanSendVerificationEmail(c.env, userRecord.email);
+			await sendEmailVerification(c.env, user.id, userRecord.email, c.req.url, getContextWaitUntil(c));
+		}
+		return c.json({ ok: true }, 200);
+	}, getResponseDefWithAuth('/api/account/email/resend-verification')),
+);
+
+app.post(
+	'/email/verify',
+	describeRoute(omitResAndReq(apiDef['/api/account/email/verify'])),
+	validator('json', apiDef['/api/account/email/verify'].req),
+	describeResponse(async (c: JsonCtx<'/api/account/email/verify', Env>) => {
+		const body = c.req.valid('json');
+		const turnstileSecret = c.env.TURNSTILE_SECRET as string;
+		if (turnstileSecret !== '') {
+			if (!body.turnstileToken) throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');
+			if (!await verifyTurnstile(body.turnstileToken, turnstileSecret)) {
+				throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
+			}
+		}
+		try {
+			const result = await verifyAccountEmail(c.env, body.token);
+			return c.json({ ok: true, ...result }, 200);
+		} catch {
+			throw apiError(400, 'EMAIL_VERIFICATION_TOKEN_INVALID');
+		}
+	}, getResponseDefWithAuth('/api/account/email/verify')),
 );
 
 app.post(

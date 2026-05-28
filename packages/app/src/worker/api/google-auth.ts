@@ -10,6 +10,8 @@ import { isValidNameFormat } from '../../shared/name-validation';
 import { MAX_ID_LENGTH, MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../../shared/const';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
+import { sendLoginNotification } from './login-email';
+import { runContextBackgroundTask } from '../utils/background-task';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -183,6 +185,7 @@ app.get('/callback', async (c) => {
 
 	// Check if user exists with this Google ID
 	let user = linkedUser;
+	const isExistingUser = user !== undefined;
 
 	if (user) {
 		// Existing Google user - sign in
@@ -277,6 +280,14 @@ app.get('/callback', async (c) => {
 		token: tokenBytes,
 	});
 	await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'google' }, user.id, tokenId);
+	if (isExistingUser) {
+		runContextBackgroundTask(c, sendLoginNotification(c.env, {
+			userId: user.id,
+			method: 'google',
+			request: c.req,
+			tokenId,
+		}), 'Failed to send login notification:');
+	}
 
 	// Redirect to frontend signin page with token as query parameter
 	return c.redirect(`/signin?google_token=${encodeURIComponent(tokenValue)}`, 302);

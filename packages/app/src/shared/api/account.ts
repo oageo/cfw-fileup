@@ -1,7 +1,7 @@
 import * as v from 'valibot';
 import { errorResponse, PageRequestFields, pagedResponse, IdString } from '../api.schemas.js';
 import { nameFormatValidation } from '../name-validation.js';
-import { MAX_PASSPHRASE_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
+import { MAX_PASSPHRASE_LENGTH, MAX_TURNSTILE_TOKEN_LENGTH, MAX_USERNAME_LENGTH } from '../const.js';
 import type { ApiEndpointDefinitionRecord } from '../api.types.js';
 
 const AccountTokenResponse = v.pipe(
@@ -65,6 +65,7 @@ const WalletLinkChainResponse = v.pipe(
 	}),
 	v.metadata({ ref: 'WalletLinkChain' }),
 );
+const OptionalEmail = v.nullable(v.pipe(v.string(), v.trim(), v.maxLength(320), v.email()));
 
 export const accountApiDef = {
 	'/api/account/me': {
@@ -81,6 +82,8 @@ export const accountApiDef = {
 				hasMisskey: v.boolean(),
 				hasPassword: v.boolean(),
 				recentlyAuthenticated: v.boolean(),
+				email: v.nullable(v.string()),
+				emailVerifiedAt: v.nullable(v.number()),
 			}) } } },
 		},
 	},
@@ -217,6 +220,48 @@ export const accountApiDef = {
 			400: errorResponse('Bad request (missing currentPassword or password too short)', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'INVALID_USERNAME_FORMAT']),
 			404: errorResponse('User not found', ['USER_NOT_FOUND']),
 			409: errorResponse('Username already exists', ['USERNAME_ALREADY_EXISTS']),
+		},
+	},
+	'/api/account/email/update': {
+		summary: 'Update optional account email address',
+		tags: ['account'],
+		req: v.object({
+			email: OptionalEmail,
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
+				ok: v.literal(true),
+				email: v.nullable(v.string()),
+				emailVerifiedAt: v.nullable(v.number()),
+			}) } } },
+			400: errorResponse('Invalid email update', ['EMAIL_IS_REQUIRED', 'EMAIL_DOMAIN_HAS_NO_MX']),
+			503: errorResponse('Email sending is not configured', ['EMAIL_NOT_CONFIGURED', 'PUBLIC_APP_URL_NOT_CONFIGURED']),
+		},
+	},
+	'/api/account/email/resend-verification': {
+		summary: 'Resend account email verification',
+		tags: ['account'],
+		req: v.object({}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
+			400: errorResponse('Email is required', ['EMAIL_IS_REQUIRED', 'EMAIL_DOMAIN_HAS_NO_MX']),
+			503: errorResponse('Email sending is not configured', ['EMAIL_NOT_CONFIGURED', 'PUBLIC_APP_URL_NOT_CONFIGURED']),
+		},
+	},
+	'/api/account/email/verify': {
+		summary: 'Verify account email address',
+		tags: ['account'],
+		req: v.object({
+			token: v.pipe(v.string(), v.minLength(1), v.maxLength(512)),
+			turnstileToken: v.optional(v.pipe(v.string(), v.maxLength(MAX_TURNSTILE_TOKEN_LENGTH))),
+		}),
+		res: {
+			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
+				ok: v.literal(true),
+				email: v.string(),
+				emailVerifiedAt: v.number(),
+			}) } } },
+			400: errorResponse('Invalid email verification token or Turnstile failure', ['EMAIL_VERIFICATION_TOKEN_INVALID', 'TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED']),
 		},
 	},
 	'/api/account/tokens': {

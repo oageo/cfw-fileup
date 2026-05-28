@@ -10,6 +10,9 @@ import { omitResAndReq } from '../utils/omit';
 import { verifyTurnstile } from '../utils/turnstile';
 import { getRequestIp } from '../utils/request-ip';
 import { tokenToDigest } from '../utils/crypto';
+import { getAppName } from '../utils/app-name';
+import { sendEmailLines } from '../utils/email';
+import { runContextBackgroundTask } from '../utils/background-task';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -34,6 +37,25 @@ async function getOptionalReporterUser(c: JsonCtx<'/api/file-reports/create', En
 
 	if (!tokenRecord || tokenRecord.isRevoked || tokenRecord.isSuspended) return null;
 	return { id: tokenRecord.userId, username: tokenRecord.username };
+}
+
+async function sendReporterCopy(env: Env, report: {
+	id: string;
+	fileId: string;
+	reporterEmail: string;
+	createdAt: number;
+}): Promise<void> {
+	const appName = await getAppName(env);
+	await sendEmailLines(env, report.reporterEmail, `${appName} 通報を受け付けました (自動返信)`, [
+		`${appName} への通報を受け付けました。`,
+		'',
+		`受付日時: ${new Date(report.createdAt).toISOString()}`,
+		`通報ID: ${report.id}`,
+		`対象ファイルID: ${report.fileId}`,
+		'',
+		'通報内容は管理者が確認します。必要に応じて管理者から連絡する場合があります。',
+		'このメールは通報フォームに入力されたメールアドレス宛てに送信しています。',
+	]);
 }
 
 app.post(
@@ -76,6 +98,12 @@ app.post(
 			createdAt: now,
 			updatedAt: now,
 		});
+		runContextBackgroundTask(c, sendReporterCopy(c.env, {
+			id,
+			fileId: body.fileId,
+			reporterEmail: body.reporterEmail,
+			createdAt: now,
+		}), 'Failed to send file report copy:');
 
 		return c.json({ ok: true, id }, 200);
 	}, apiDef['/api/file-reports/create'].res),

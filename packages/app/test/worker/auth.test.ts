@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
 
 beforeAll(async () => {
@@ -6,6 +6,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+	vi.restoreAllMocks();
 	await clearDb();
 });
 
@@ -262,6 +263,190 @@ describe('POST /api/account/update', () => {
 		// Verify can sign in with new password
 		const { status } = await signin('user1', 'newpassword456');
 		expect(status).toBe(200);
+	});
+});
+
+describe('POST /api/account/email', () => {
+	function mailEnv(sent: Array<{ to: string; raw: string }>): typeof env {
+		return Object.assign({}, env, {
+			MAIL_FROM: 'noreply@example.com',
+			MAIL_MX_CHECK_DISABLED: 'true',
+			PUBLIC_APP_URL: 'https://files.example.com',
+			MAILER: {
+				async send(message: { to: string; raw?: string }): Promise<void> {
+					sent.push({ to: message.to, raw: message.raw ?? '' });
+				},
+			},
+		});
+	}
+
+	async function waitForSent(sent: unknown[], count: number): Promise<void> {
+		for (let i = 0; i < 20 && sent.length < count; i++) {
+			await new Promise(resolve => setTimeout(resolve, 0));
+		}
+	}
+
+	function mockMxLookup(hasMx = true): void {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+			Status: hasMx ? 0 : 3,
+			Answer: hasMx ? [{ type: 15, data: '10 mail.example.com.' }] : [],
+		}), { status: 200, headers: { 'Content-Type': 'application/dns-json' } }));
+	}
+
+	test('stores verification token as blob and verifies the email', async () => {
+		mockMxLookup();
+		const sent: Array<{ to: string; raw: string }> = [];
+		const customEnv = mailEnv(sent);
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const updateRes = await app.request('/api/account/email/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ email: 'User@Gmail.com' }),
+		}, customEnv);
+		expect(updateRes.status).toBe(200);
+		await waitForSent(sent, 1);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.to).toBe('user@gmail.com');
+
+		const row = await env.DB.prepare('SELECT token FROM email_verification_tokens').first<{ token: ArrayBuffer | number[] }>();
+		expect(row?.token).not.toEqual(expect.any(String));
+		const tokenLength = row?.token instanceof ArrayBuffer ? row.token.byteLength : row?.token.length;
+		expect(tokenLength).toBe(32);
+		const match = /email_verification_token=([^\s]+)/.exec(sent[0]?.raw ?? '');
+		expect(match?.[1]).toBeTruthy();
+
+		const verifyRes = await app.request('/api/account/email/verify', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ token: decodeURIComponent(match?.[1] ?? '') }),
+		}, customEnv);
+		expect(verifyRes.status).toBe(200);
+
+		const meRes = await app.request('/api/account/me', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({}),
+		}, customEnv);
+		const me = await meRes.json() as { email: string | null; emailVerifiedAt: number | null };
+		expect(me.email).toBe('user@gmail.com');
+		expect(typeof me.emailVerifiedAt).toBe('number');
+	});
+
+	test('sends login notification only after email verification', async () => {
+		mockMxLookup();
+		const sent: Array<{ to: string; raw: string }> = [];
+		const customEnv = mailEnv(sent);
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		await signin('user1', 'password123');
+		await waitForSent(sent, 1);
+		expect(sent).toHaveLength(0);
+
+		await app.request('/api/account/email/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ email: 'user@gmail.com' }),
+		}, customEnv);
+		await waitForSent(sent, 1);
+		const match = /email_verification_token=([^\s]+)/.exec(sent[0]?.raw ?? '');
+		const verifyRes = await app.request('/api/account/email/verify', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ token: decodeURIComponent(match?.[1] ?? '') }),
+		}, customEnv);
+		expect(verifyRes.status).toBe(200);
+
+		const signinRes = await app.request('/api/signin', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'User-Agent': 'Vitest' },
+			body: JSON.stringify({ username: 'user1', password: 'password123' }),
+		}, customEnv);
+		expect(signinRes.status).toBe(200);
+		await waitForSent(sent, 2);
+		expect(sent).toHaveLength(2);
+		expect(sent[1]?.raw).toContain('新しいログイン');
+		expect(sent[1]?.raw).toContain('Vitest');
+	});
+
+	test('requires Turnstile token for email verification when configured', async () => {
+		mockMxLookup();
+		const sent: Array<{ to: string; raw: string }> = [];
+		const customEnv = Object.assign(mailEnv(sent), { TURNSTILE_SECRET: 'secret' });
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		await app.request('/api/account/email/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ email: 'user@gmail.com' }),
+		}, customEnv);
+		await waitForSent(sent, 1);
+		const match = /email_verification_token=([^\s]+)/.exec(sent[0]?.raw ?? '');
+
+		const verifyRes = await app.request('/api/account/email/verify', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ token: decodeURIComponent(match?.[1] ?? '') }),
+		}, customEnv);
+		expect(verifyRes.status).toBe(400);
+		expect(await verifyRes.json()).toEqual(expect.objectContaining({ error: 'TURNSTILE_TOKEN_IS_REQUIRED' }));
+	});
+
+	test('rejects email updates when the recipient domain has no MX record', async () => {
+		mockMxLookup(false);
+		const sent: Array<{ to: string; raw: string }> = [];
+		const customEnv = Object.assign(mailEnv(sent), { MAIL_MX_CHECK_DISABLED: '' });
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const updateRes = await app.request('/api/account/email/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ email: 'user@example.com' }),
+		}, customEnv);
+		expect(updateRes.status).toBe(400);
+		expect(await updateRes.json()).toEqual(expect.objectContaining({ error: 'EMAIL_DOMAIN_HAS_NO_MX' }));
+		await waitForSent(sent, 1);
+		expect(sent).toHaveLength(0);
+	});
+
+	test('rejects Null MX domains for email updates', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+			Status: 0,
+			Answer: [{ type: 15, data: '0 .' }],
+		}), { status: 200, headers: { 'Content-Type': 'application/dns-json' } }));
+		const sent: Array<{ to: string; raw: string }> = [];
+		const customEnv = Object.assign(mailEnv(sent), { MAIL_MX_CHECK_DISABLED: '' });
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const updateRes = await app.request('/api/account/email/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ email: 'user@example.com' }),
+		}, customEnv);
+		expect(updateRes.status).toBe(400);
+		expect(await updateRes.json()).toEqual(expect.objectContaining({ error: 'EMAIL_DOMAIN_HAS_NO_MX' }));
+		expect(sent).toHaveLength(0);
+	});
+
+	test('rejects email updates when PUBLIC_APP_URL is missing', async () => {
+		const sent: Array<{ to: string; raw: string }> = [];
+		const customEnv = Object.assign(mailEnv(sent), { PUBLIC_APP_URL: '' });
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const updateRes = await app.request('/api/account/email/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ email: 'user@gmail.com' }),
+		}, customEnv);
+		expect(updateRes.status).toBe(503);
+		expect(await updateRes.json()).toEqual(expect.objectContaining({ error: 'PUBLIC_APP_URL_NOT_CONFIGURED' }));
+		expect(sent).toHaveLength(0);
 	});
 });
 

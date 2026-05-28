@@ -22,8 +22,15 @@
     // Optional: override the OAuth redirect URI (default: auto-detected from request URL)
     "GOOGLE_REDIRECT_URI": "",
     // JSON object keyed by decimal EVM chain ID. Set production values as Worker vars/secrets.
-    "EVM_CHAIN_RPC_URLS": ""
+    "EVM_CHAIN_RPC_URLS": "",
+    "MAIL_FROM": "",
+    "PUBLIC_APP_URL": ""
   },
+  "send_email": [
+    {
+      "name": "MAILER"
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "R2",

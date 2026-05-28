@@ -7,6 +7,10 @@ import { ApiError, apiError } from './api-error';
 import { getDb } from './db';
 import { getPaymentChainRpcUrl, normalizeEthAddress } from './payment-rpc';
 import { refreshEffectiveQuotaForUser } from './rate-limit';
+import { getPublicAppUrl, reserveEmailNotification, sendAccountEmailLines } from './email';
+import { getAppName } from './app-name';
+import { getBillingReceiptSeller } from './billing-tax';
+import { runBackgroundTask, type WaitUntil } from './background-task';
 
 const TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
 const ORDER_TTL_MS = 30 * 60 * 1000;
@@ -15,11 +19,46 @@ const TX_TIMESTAMP_TOLERANCE_MS = 2_000;
 type OrderForConfirmation = typeof cryptoPaymentOrders.$inferSelect;
 type PaymentVerificationResult = 'confirmed' | 'pending';
 
+async function sendPurchaseReceiptNotification(env: Env, order: OrderForConfirmation, now = Date.now()): Promise<void> {
+	if (!await reserveEmailNotification(env, order.userId, 'purchase_receipt', `purchase:${order.id}`, now)) return;
+	const appName = await getAppName(env);
+	const seller = await getBillingReceiptSeller(env);
+	const amount = formatBaseUnits(order.amountBaseUnits, order.decimals);
+	const taxIncluded = formatBaseUnits(order.taxIncludedAmountBaseUnits, order.decimals);
+	const taxExcluded = formatBaseUnits(order.taxExcludedAmountBaseUnits, order.decimals);
+	const taxAmount = formatBaseUnits(order.taxAmountBaseUnits, order.decimals);
+	await sendAccountEmailLines(env, order.userId, `${appName} レシート`, [
+		`${appName} のプラン購入が完了しました。`,
+		'',
+		'レシート',
+		`購入日時: ${new Date(order.paidAt ?? now).toISOString()}`,
+		`注文ID: ${order.id}`,
+		`プラン: ${order.planName}`,
+		`利用期間: ${new Date(order.quoteEffectiveStartsAt).toISOString()} - ${new Date(order.quoteEffectiveExpiresAt).toISOString()}`,
+		`支払額: ${amount} ${order.tokenSymbol}`,
+		`税: ${order.taxName} (${order.taxRate})`,
+		`税込: ${taxIncluded} ${order.taxCurrency}`,
+		`税抜: ${taxExcluded} ${order.taxCurrency}`,
+		`税額: ${taxAmount} ${order.taxCurrency}`,
+		`チェーン: ${order.chainName}`,
+		`トークン: ${order.tokenName} (${order.tokenSymbol})`,
+		`Tx Hash: ${order.txHash ?? '-'}`,
+		'',
+		'販売者情報',
+		`名称: ${seller.name}`,
+		`住所: ${seller.address || '-'}`,
+		`登録番号: ${seller.invoiceRegistrationNumber || '-'}`,
+		'',
+		'支払い履歴から領収書を確認できます。',
+		`${getPublicAppUrl(env)}/my/payments`,
+	]);
+}
+
 export function getCryptoPaymentOrderExpiresAt(now = Date.now()): number {
 	return now + ORDER_TTL_MS;
 }
 
-export async function confirmCryptoPaymentOrder(env: Env, userId: string, orderId: string, txHash: string): Promise<typeof cryptoPaymentOrders.$inferSelect> {
+export async function confirmCryptoPaymentOrder(env: Env, userId: string, orderId: string, txHash: string, waitUntil?: WaitUntil): Promise<typeof cryptoPaymentOrders.$inferSelect> {
 	const db = getDb(env);
 	const now = Date.now();
 	const order = await db
@@ -79,10 +118,10 @@ export async function confirmCryptoPaymentOrder(env: Env, userId: string, orderI
 	}
 	if (verificationResult === 'pending') return submittedOrder;
 
-	return await markCryptoPaymentOrderPaid(env, submittedOrder, normalizedTxHash, now);
+	return await markCryptoPaymentOrderPaid(env, submittedOrder, normalizedTxHash, now, waitUntil);
 }
 
-export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId: string): Promise<typeof cryptoPaymentOrders.$inferSelect> {
+export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId: string, waitUntil?: WaitUntil): Promise<typeof cryptoPaymentOrders.$inferSelect> {
 	const db = getDb(env);
 	const now = Date.now();
 	const order = await db
@@ -118,10 +157,10 @@ export async function checkCryptoPaymentOrder(env: Env, userId: string, orderId:
 	}
 	if (verificationResult === 'pending') return order;
 
-	return await markCryptoPaymentOrderPaid(env, order, normalizedTxHash, now);
+	return await markCryptoPaymentOrderPaid(env, order, normalizedTxHash, now, waitUntil);
 }
 
-export async function markZeroAmountCryptoPaymentOrderPaid(env: Env, userId: string, orderId: string, now = Date.now()): Promise<typeof cryptoPaymentOrders.$inferSelect> {
+export async function markZeroAmountCryptoPaymentOrderPaid(env: Env, userId: string, orderId: string, now = Date.now(), waitUntil?: WaitUntil): Promise<typeof cryptoPaymentOrders.$inferSelect> {
 	const db = getDb(env);
 	const order = await db
 		.select()
@@ -150,7 +189,8 @@ export async function markZeroAmountCryptoPaymentOrderPaid(env: Env, userId: str
 	const claimedOrder = claimedOrders[0] as OrderForConfirmation;
 
 	await applyPaidOrderPlan(env, claimedOrder, now);
-	await refreshEffectiveQuotaForUser(env, order.userId, now);
+	await refreshEffectiveQuotaForUser(env, order.userId, now, waitUntil);
+	runBackgroundTask(waitUntil, sendPurchaseReceiptNotification(env, claimedOrder, now), 'Failed to send purchase receipt notification:');
 
 	return claimedOrder;
 }
@@ -161,7 +201,7 @@ async function markCryptoPaymentOrderFailed(db: ReturnType<typeof getDb>, orderI
 		.where(and(eq(cryptoPaymentOrders.id, orderId), eq(cryptoPaymentOrders.status, 'pending')));
 }
 
-async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation, normalizedTxHash: Hex, now: number): Promise<OrderForConfirmation> {
+async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation, normalizedTxHash: Hex, now: number, waitUntil?: WaitUntil): Promise<OrderForConfirmation> {
 	const db = getDb(env);
 	const effectivePeriod = getPaidOrderEffectivePeriod(order, now);
 	let claimedOrders: OrderForConfirmation[];
@@ -185,7 +225,8 @@ async function markCryptoPaymentOrderPaid(env: Env, order: OrderForConfirmation,
 	const claimedOrder = claimedOrders[0] as OrderForConfirmation;
 
 	await applyPaidOrderPlan(env, claimedOrder, now);
-	await refreshEffectiveQuotaForUser(env, order.userId, now);
+	await refreshEffectiveQuotaForUser(env, order.userId, now, waitUntil);
+	runBackgroundTask(waitUntil, sendPurchaseReceiptNotification(env, claimedOrder, now), 'Failed to send purchase receipt notification:');
 
 	return claimedOrder;
 }
@@ -412,6 +453,15 @@ export function assertValidBigIntString(value: string): void {
 
 export function assertValidPaymentAddress(address: string): void {
 	if (!isAddress(address)) throw apiError(400, 'PAYMENT_TRANSACTION_INVALID');
+}
+
+function formatBaseUnits(value: string, decimals: number): string {
+	const amount = BigInt(value);
+	const scale = 10n ** BigInt(decimals);
+	const whole = amount / scale;
+	const fraction = amount % scale;
+	if (fraction === 0n) return whole.toString();
+	return `${whole}.${fraction.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
 }
 
 function parseDiscountAssignmentIds(value: string): string[] {

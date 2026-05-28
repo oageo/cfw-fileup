@@ -21,7 +21,8 @@ import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
 import { getAppName } from '../utils/app-name';
-import { runBackgroundTask } from '../utils/background-task';
+import { runBackgroundTask, runContextBackgroundTask } from '../utils/background-task';
+import { sendLoginNotification } from './login-email';
 import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -309,6 +310,14 @@ app.post(
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes, reauthenticatedAt: Date.now() });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'passkey' }, user.id, tokenId);
+		if (body.purpose !== 'reauthenticate') {
+			runContextBackgroundTask(c, sendLoginNotification(c.env, {
+				userId: user.id,
+				method: 'passkey',
+				request: c.req,
+				tokenId,
+			}), 'Failed to send login notification:');
+		}
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/passkey/authenticate/finish'].res),
@@ -462,6 +471,12 @@ app.post(
 		if (tokenBytes === null) throw apiError(500, 'INTERNAL_SERVER_ERROR');
 		await db.insert(tokens).values({ id: tokenId, userId: user.id, token: tokenBytes });
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'backup_code' }, user.id, tokenId);
+		runContextBackgroundTask(c, sendLoginNotification(c.env, {
+			userId: user.id,
+			method: 'backup_code',
+			request: c.req,
+			tokenId,
+		}), 'Failed to send login notification:');
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/passkey/backup-codes/use'].res),

@@ -7,15 +7,25 @@ import { apiPost, type ApiSuccess } from '@/utils/api';
 import { authStore, fetchCurrentUser, setToken } from '@/store/auth';
 import WalletRuntimeProvider from '@/components/WalletRuntimeProvider';
 import WalletSettings from '@/components/WalletSettings.vue';
+import TurnstileWidget from '@/components/TurnstileWidget.vue';
 import type { ApiReq } from '../../../shared/api';
 
 type LinkedMisskeyAccount = ApiSuccess<'/api/account/linked-misskey/list'>['data'][number];
 
+const EMAIL_VERIFICATION_TOKEN_STORAGE_KEY = 'cfw_fileup_email_verification_token';
+
 const indieauthProfileUrl = ref('');
+const emailInput = ref('');
 const currentPassword = ref('');
 const googleLoading = ref(false);
 const indieauthLoading = ref(false);
 const passkeyLoading = ref(false);
+const emailLoading = ref(false);
+const emailVerifyLoading = ref(false);
+const turnstileEnabled = ref(false);
+const turnstileSiteKey = ref('');
+const emailVerifyTurnstileToken = ref<string | null>(null);
+const pendingEmailVerificationToken = ref<string | null>(null);
 const error = ref('');
 const success = ref('');
 const googleAuthEnabled = ref(false);
@@ -25,6 +35,10 @@ const hasGoogle = computed(() => authStore.user?.hasGoogle ?? false);
 const hasPassword = computed(() => authStore.user?.hasPassword ?? true);
 const recentlyAuthenticated = computed(() => authStore.user?.recentlyAuthenticated ?? false);
 const canStartLink = computed(() => recentlyAuthenticated.value || (hasPassword.value && currentPassword.value.length > 0));
+const emailStatus = computed(() => {
+	if (!authStore.user?.email) return '未登録';
+	return authStore.user.emailVerifiedAt === null ? '確認待ち' : '確認済み';
+});
 
 function getMisskeyProfileUrl(account: LinkedMisskeyAccount): string {
 	return account.username ? `${account.issuer}/@${account.username}` : account.misskeyId;
@@ -34,10 +48,14 @@ async function loadMeta(): Promise<void> {
 	try {
 		const res = await fetch('/api/meta');
 		if (!res.ok) return;
-		const data = await res.json() as { googleAuthEnabled?: boolean };
+		const data = await res.json() as { googleAuthEnabled?: boolean; turnstileEnabled?: boolean; turnstileSiteKey?: string };
 		googleAuthEnabled.value = data.googleAuthEnabled ?? false;
+		turnstileEnabled.value = data.turnstileEnabled ?? false;
+		turnstileSiteKey.value = data.turnstileSiteKey ?? '';
 	} catch {
 		googleAuthEnabled.value = false;
+		turnstileEnabled.value = false;
+		turnstileSiteKey.value = '';
 	}
 }
 
@@ -51,11 +69,18 @@ function consumeCallbackParams(): void {
 	const url = new URL(location.href);
 	const linkSuccess = url.searchParams.get('link_success');
 	const linkError = url.searchParams.get('link_error');
-	if (!linkSuccess && !linkError) return;
+	const emailVerificationToken = url.searchParams.get('email_verification_token');
+	if (!linkSuccess && !linkError && !emailVerificationToken) return;
 
 	url.searchParams.delete('link_success');
 	url.searchParams.delete('link_error');
+	url.searchParams.delete('email_verification_token');
 	history.replaceState({}, '', url.toString());
+
+	if (emailVerificationToken) {
+		pendingEmailVerificationToken.value = emailVerificationToken;
+		sessionStorage.setItem(EMAIL_VERIFICATION_TOKEN_STORAGE_KEY, emailVerificationToken);
+	}
 
 	if (linkSuccess === 'google') success.value = 'Googleアカウントを連携しました';
 	if (linkSuccess === 'misskey') success.value = 'Misskeyアカウントを連携しました';
@@ -70,12 +95,81 @@ function consumeCallbackParams(): void {
 	}
 }
 
+async function saveEmail(): Promise<void> {
+	error.value = '';
+	success.value = '';
+	emailLoading.value = true;
+	try {
+		const trimmed = emailInput.value.trim();
+		const result = await apiPost('/api/account/email/update', { email: trimmed === '' ? null : trimmed });
+		if (!result.ok) {
+			error.value = result.data.message || 'メール設定の更新に失敗しました';
+			return;
+		}
+		await fetchCurrentUser();
+		emailInput.value = result.data.email ?? '';
+		success.value = result.data.email ? '確認メールを送信しました' : 'メールアドレスを解除しました';
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		emailLoading.value = false;
+	}
+}
+
+async function resendVerificationEmail(): Promise<void> {
+	error.value = '';
+	success.value = '';
+	emailLoading.value = true;
+	try {
+		const result = await apiPost('/api/account/email/resend-verification');
+		if (!result.ok) {
+			error.value = result.data.message || '確認メールの送信に失敗しました';
+			return;
+		}
+		success.value = '確認メールを再送しました';
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		emailLoading.value = false;
+	}
+}
+
+async function verifyEmail(token: string): Promise<void> {
+	error.value = '';
+	success.value = '';
+	if (turnstileEnabled.value && !emailVerifyTurnstileToken.value) {
+		pendingEmailVerificationToken.value = token;
+		return;
+	}
+	emailVerifyLoading.value = true;
+	try {
+		const result = await apiPost('/api/account/email/verify', {
+			token,
+			turnstileToken: turnstileEnabled.value && emailVerifyTurnstileToken.value ? emailVerifyTurnstileToken.value : undefined,
+		});
+		if (!result.ok) {
+			error.value = result.data.message || 'メール確認に失敗しました';
+			return;
+		}
+		await fetchCurrentUser();
+		emailInput.value = result.data.email;
+		pendingEmailVerificationToken.value = null;
+		emailVerifyTurnstileToken.value = null;
+		sessionStorage.removeItem(EMAIL_VERIFICATION_TOKEN_STORAGE_KEY);
+		success.value = 'メールアドレスを確認しました';
+	} catch (e) {
+		error.value = String(e);
+	} finally {
+		emailVerifyLoading.value = false;
+	}
+}
+
 async function reauthenticateWithPasskey(): Promise<void> {
 	error.value = '';
 	success.value = '';
 	passkeyLoading.value = true;
 	try {
-		const beginResult = await apiPost('/api/passkey/authenticate/begin');
+		const beginResult = await apiPost('/api/passkey/authenticate/begin', { purpose: 'reauthenticate' });
 		if (!beginResult.ok) {
 			error.value = beginResult.data.message || 'パスキー認証の開始に失敗しました';
 			return;
@@ -92,6 +186,7 @@ async function reauthenticateWithPasskey(): Promise<void> {
 		const finishResult = await apiPost('/api/passkey/authenticate/finish', {
 			challengeId: beginResult.data.challengeId,
 			credential: credential as unknown as ApiReq<'/api/passkey/authenticate/finish'>['credential'],
+			purpose: 'reauthenticate',
 		});
 		if (!finishResult.ok) {
 			error.value = finishResult.data.message || 'パスキー認証に失敗しました';
@@ -154,6 +249,11 @@ async function linkIndieAuth({ valid }: { valid: boolean }): Promise<void> {
 onMounted(async () => {
 	consumeCallbackParams();
 	await Promise.all([fetchCurrentUser(), loadMeta()]);
+	pendingEmailVerificationToken.value ??= sessionStorage.getItem(EMAIL_VERIFICATION_TOKEN_STORAGE_KEY);
+	emailInput.value = authStore.user?.email ?? '';
+	if (authStore.user && pendingEmailVerificationToken.value && !turnstileEnabled.value) {
+		await verifyEmail(pendingEmailVerificationToken.value);
+	}
 	await loadMisskeyAccounts();
 });
 </script>
@@ -164,11 +264,63 @@ onMounted(async () => {
       <h2 class="section-title">アカウント連携</h2>
     </div>
 
-    <div v-if="success" class="alert alert-success mb-4">{{ success }}</div>
-    <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
-    <div v-if="!authStore.user" class="alert alert-info">ログインが必要です。</div>
+      <div v-if="success" class="alert alert-success mb-4">{{ success }}</div>
+      <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
+      <div v-if="pendingEmailVerificationToken && turnstileEnabled && !authStore.user?.emailVerifiedAt" :class="['card', $style.card]">
+        <div :class="$style.serviceHeader">
+          <div>
+            <h3 :class="$style.serviceTitle">メールアドレス確認</h3>
+            <p :class="$style.serviceDescription">確認を完了するには認証が必要です。</p>
+          </div>
+        </div>
+        <TurnstileWidget
+          v-if="turnstileSiteKey"
+          :site-key="turnstileSiteKey"
+          @update:token="emailVerifyTurnstileToken = $event"
+        />
+        <Button.Root
+          class="btn btn-primary"
+          :class="$style.verifyButton"
+          :disabled="emailVerifyLoading || !emailVerifyTurnstileToken"
+          :loading="emailVerifyLoading"
+          @click="verifyEmail(pendingEmailVerificationToken)"
+        >
+          <Button.Loading>確認中...</Button.Loading>
+          <Button.Content>メールアドレスを確認</Button.Content>
+        </Button.Root>
+      </div>
+      <div v-if="!authStore.user" class="alert alert-info">ログインが必要です。</div>
 
     <template v-else>
+      <div :class="['card', $style.card]">
+        <div :class="$style.serviceHeader">
+          <div>
+            <h3 :class="$style.serviceTitle">メール通知</h3>
+            <p :class="$style.serviceDescription">ログイン、購入、容量超過のお知らせを受け取るメールアドレスを設定します。</p>
+          </div>
+          <span :class="['badge', authStore.user.emailVerifiedAt ? 'badge-success' : 'badge-info']">{{ emailStatus }}</span>
+        </div>
+        <Form :class="$style.form" @submit="saveEmail">
+          <div :class="$style.formGroup">
+            <label class="form-label" for="account-email">メールアドレス</label>
+            <input id="account-email" v-model="emailInput" class="form-input" type="email" autocomplete="email" placeholder="name@example.com">
+          </div>
+          <div :class="$style.actions">
+            <button class="btn btn-primary" type="submit" :disabled="emailLoading || emailVerifyLoading">
+              {{ emailLoading ? '処理中...' : '保存' }}
+            </button>
+            <Button.Root
+              v-if="authStore.user.email && !authStore.user.emailVerifiedAt"
+              class="btn btn-ghost"
+              :disabled="emailLoading"
+              @click="resendVerificationEmail"
+            >
+              <Button.Content>確認メールを再送</Button.Content>
+            </Button.Root>
+          </div>
+        </Form>
+      </div>
+
       <div :class="['card', $style.card]">
         <template v-if="recentlyAuthenticated">
           <div class="alert alert-success">再認証済みです。</div>
@@ -271,6 +423,16 @@ onMounted(async () => {
   display: grid;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.verifyButton {
+  margin-top: 12px;
 }
 
 .linkedList {

@@ -12,6 +12,8 @@ import { apiDef, type JsonCtx } from '../../shared/api';
 import { omitResAndReq } from '../utils/omit';
 import { recordModerationEvent } from '../utils/moderation';
 import { getInitialEffectiveQuotaForUser } from '../utils/rate-limit';
+import { sendLoginNotification } from './login-email';
+import { runContextBackgroundTask } from '../utils/background-task';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -206,6 +208,12 @@ app.post(
 			token: tokenBytes,
 		});
 		await recordModerationEvent(c, 'user_token_created', { tokenId, method: 'signin' }, user.id, tokenId);
+		runContextBackgroundTask(c, sendLoginNotification(c.env, {
+			userId: user.id,
+			method: 'password',
+			request: c.req,
+			tokenId,
+		}), 'Failed to send login notification:');
 
 		return c.json({ token: tokenValue }, 200);
 	}, apiDef['/api/signin'].res),

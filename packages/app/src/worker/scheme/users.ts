@@ -5,6 +5,8 @@ import { binaryBlob } from './binary-blob';
 export const users = sqliteTable('users', {
 	id: text('id').primaryKey(),
 	username: text('username').notNull().unique(),
+	email: text('email'),
+	emailVerifiedAt: integer('email_verified_at'),
 	passwordHash: binaryBlob('password_hash'),
 	googleId: text('google_id').unique(),
 	misskeyId: text('misskey_id').unique(),
@@ -46,3 +48,27 @@ export const oauthStates = sqliteTable('oauth_states', {
 	signupUsername: text('signup_username'),
 	expiresAt: integer('expires_at').notNull(),
 });
+
+export const emailVerificationTokens = sqliteTable('email_verification_tokens', {
+	id: text('id').primaryKey(),
+	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+	email: text('email').notNull(),
+	token: binaryBlob('token').notNull().unique(),
+	expiresAt: integer('expires_at').notNull(),
+	createdAt: integer('created_at').notNull(),
+	usedAt: integer('used_at'),
+}, (table) => [
+	index('email_verification_tokens_user_id_idx').on(table.userId),
+	index('email_verification_tokens_expires_at_idx').on(table.expiresAt),
+]);
+
+export const emailNotificationEvents = sqliteTable('email_notification_events', {
+	id: text('id').primaryKey(),
+	userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+	eventKey: text('event_key').notNull(),
+	type: text('type', { enum: ['login', 'purchase_receipt', 'quota_exceeded'] }).notNull(),
+	createdAt: integer('created_at').notNull(),
+}, (table) => [
+	uniqueIndex('email_notification_events_user_event_key_idx').on(table.userId, table.eventKey),
+	index('email_notification_events_user_type_idx').on(table.userId, table.type),
+]);

@@ -8,6 +8,13 @@
       "when": 1779897754573,
       "tag": "0000_curly_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779931375850,
+      "tag": "0001_confused_wild_child",
+      "breakpoints": true
     }
   ]
 }

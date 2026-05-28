@@ -16,6 +16,7 @@ import { isPaymentChainRpcConfigured } from '../utils/payment-rpc';
 import { genEaidx } from '../../shared/eaid-x';
 import { assertBillingRegionAllowed, stringifyCfRegionSnapshot } from '../utils/billing-region';
 import { createBillingTaxSnapshot, getBillingReceiptSeller } from '../utils/billing-tax';
+import { getContextWaitUntil } from '../utils/background-task';
 
 const app = new Hono<{ Bindings: Env }>();
 const QUOTE_TTL_MS = 15 * 60 * 1000;
@@ -626,7 +627,7 @@ app.post(
 		};
 		await db.insert(cryptoPaymentOrders).values(order);
 		if (BigInt(order.amountBaseUnits) === 0n) {
-			const paidOrder = await markZeroAmountCryptoPaymentOrderPaid(c.env, user.id, order.id, now);
+			const paidOrder = await markZeroAmountCryptoPaymentOrderPaid(c.env, user.id, order.id, now, getContextWaitUntil(c));
 			await recordModerationEvent(c, 'crypto_payment_order_confirmed', { orderId: paidOrder.id, chainId: paidOrder.chainId, txHash: paidOrder.txHash }, user.id, user.tokenId);
 			return c.json(paidOrder, 200);
 		}
@@ -647,7 +648,7 @@ app.post(
 			.from(cryptoPaymentOrders)
 			.where(and(eq(cryptoPaymentOrders.id, body.orderId), eq(cryptoPaymentOrders.userId, user.id)))
 			.get();
-		const order = await confirmCryptoPaymentOrder(c.env, user.id, body.orderId, body.txHash);
+		const order = await confirmCryptoPaymentOrder(c.env, user.id, body.orderId, body.txHash, getContextWaitUntil(c));
 		if (before?.status !== 'paid' && order.status === 'paid') await recordModerationEvent(c, 'crypto_payment_order_confirmed', { orderId: order.id, chainId: order.chainId, txHash: order.txHash }, user.id, user.tokenId);
 		return c.json(order, 200);
 	}, getResponseDefWithAuth('/api/billing/confirm-crypto-order')),
@@ -666,7 +667,7 @@ app.post(
 			.from(cryptoPaymentOrders)
 			.where(and(eq(cryptoPaymentOrders.id, body.orderId), eq(cryptoPaymentOrders.userId, user.id)))
 			.get();
-		const order = await checkCryptoPaymentOrder(c.env, user.id, body.orderId);
+		const order = await checkCryptoPaymentOrder(c.env, user.id, body.orderId, getContextWaitUntil(c));
 		if (before?.status !== 'paid' && order.status === 'paid') await recordModerationEvent(c, 'crypto_payment_order_confirmed', { orderId: order.id, chainId: order.chainId, txHash: order.txHash }, user.id, user.tokenId);
 		return c.json(order, 200);
 	}, getResponseDefWithAuth('/api/billing/check-crypto-order')),

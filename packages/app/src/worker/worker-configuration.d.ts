@@ -21,6 +21,9 @@ declare namespace Cloudflare {
 		GOOGLE_REDIRECT_URI: string;
 		EVM_CHAIN_RPC_URLS: string;
 		REOWN_PROJECT_ID: string;
+		MAILER: SendEmail;
+		MAIL_FROM: string;
+		PUBLIC_APP_URL: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
