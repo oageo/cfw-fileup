@@ -214,11 +214,11 @@ export const accountApiDef = {
 		req: v.object({
 			username: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_USERNAME_LENGTH), nameFormatValidation)),
 			newPassword: v.optional(v.pipe(v.string(), v.minLength(8), v.maxLength(MAX_PASSPHRASE_LENGTH))),
-			currentPassword: v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH)),
+			currentPassword: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ ok: v.literal(true) }) } } },
-			400: errorResponse('Bad request (missing currentPassword or password too short)', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'INVALID_USERNAME_FORMAT']),
+			400: errorResponse('Bad request (missing currentPassword or password too short)', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'INVALID_USERNAME_FORMAT', 'RECENT_WEBAUTHN_REQUIRED']),
 			404: errorResponse('User not found', ['USER_NOT_FOUND']),
 			409: errorResponse('Username already exists', ['USERNAME_ALREADY_EXISTS']),
 		},

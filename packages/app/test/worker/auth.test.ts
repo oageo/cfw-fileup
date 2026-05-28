@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { env, app, setupDb, clearDb, signup, signin, authHeaders } from './helpers';
+import { generateToken, tokenToDigest } from '../../src/worker/utils/crypto';
 
 beforeAll(async () => {
 	await setupDb();
@@ -282,6 +283,48 @@ describe('POST /api/account/update', () => {
 		// Verify can sign in with new password
 		const { status } = await signin('user1', 'newpassword456');
 		expect(status).toBe(200);
+	});
+
+	test('can set first password with recent WebAuthn bearer token', async () => {
+		const token = generateToken();
+		const tokenDigest = await tokenToDigest(token);
+		expect(tokenDigest).not.toBeNull();
+		await env.DB.prepare('INSERT INTO users (id, username, password_hash, is_admin, is_suspended) VALUES (?, ?, NULL, 0, 0)')
+			.bind('passkey-user', 'passkeyuser')
+			.run();
+		await env.DB.prepare('INSERT INTO tokens (id, user_id, token, reauthenticated_at) VALUES (?, ?, ?, ?)')
+			.bind('token1', 'passkey-user', tokenDigest, Date.now())
+			.run();
+
+		const res = await app.request('/api/account/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ newPassword: 'newpassword456' }),
+		}, env);
+
+		expect(res.status).toBe(200);
+		const { status } = await signin('passkeyuser', 'newpassword456');
+		expect(status).toBe(200);
+	});
+
+	test('cannot set first password without recent WebAuthn bearer token', async () => {
+		const token = generateToken();
+		const tokenDigest = await tokenToDigest(token);
+		expect(tokenDigest).not.toBeNull();
+		await env.DB.prepare('INSERT INTO users (id, username, password_hash, is_admin, is_suspended) VALUES (?, ?, NULL, 0, 0)')
+			.bind('passkey-user', 'passkeyuser')
+			.run();
+		await env.DB.prepare('INSERT INTO tokens (id, user_id, token, reauthenticated_at) VALUES (?, ?, ?, ?)')
+			.bind('token1', 'passkey-user', tokenDigest, Date.now() - 6 * 60 * 1000)
+			.run();
+
+		const res = await app.request('/api/account/update', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ newPassword: 'newpassword456' }),
+		}, env);
+
+		expect(res.status).toBe(400);
 	});
 });
 

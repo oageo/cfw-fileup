@@ -26,7 +26,7 @@ import { getRequestIp } from '../utils/request-ip';
 import { assertRateLimit, rateLimitKey } from '../utils/rate-limit-binding';
 
 const app = new Hono<{ Bindings: Env }>();
-const RECENT_AUTH_MS = 10 * 60 * 1000;
+const RECENT_AUTH_MS = 5 * 60 * 1000;
 const WALLET_LINK_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 
 app.use(authMiddleware);
@@ -388,22 +388,25 @@ app.post(
 		const user = c.get('user');
 		const body = c.req.valid('json');
 
-		if (!body.currentPassword) {
-			throw apiError(400, 'CURRENT_PASSWORD_IS_REQUIRED');
-		}
-
 		const userRecord = await db.select().from(users).where(eq(users.id, user.id)).get();
 
 		if (!userRecord) {
 			throw apiError(404, 'USER_NOT_FOUND');
 		}
 
-		if (!userRecord.passwordHash) {
-			throw apiError(401, 'INVALID_PASSWORD');
-		}
-		const passwordValid = await verifyPassword(body.currentPassword, userRecord.passwordHash);
-		if (!passwordValid) {
-			throw apiError(401, 'INVALID_PASSWORD');
+		const isInitialPasswordSetup = userRecord.passwordHash === null && body.newPassword !== undefined;
+		const hasRecentWebAuthn = user.reauthenticatedAt !== null && Date.now() - user.reauthenticatedAt <= RECENT_AUTH_MS;
+		if (!isInitialPasswordSetup || !hasRecentWebAuthn) {
+			if (!body.currentPassword) {
+				throw apiError(400, userRecord.passwordHash === null ? 'RECENT_WEBAUTHN_REQUIRED' : 'CURRENT_PASSWORD_IS_REQUIRED');
+			}
+			if (!userRecord.passwordHash) {
+				throw apiError(401, 'INVALID_PASSWORD');
+			}
+			const passwordValid = await verifyPassword(body.currentPassword, userRecord.passwordHash);
+			if (!passwordValid) {
+				throw apiError(401, 'INVALID_PASSWORD');
+			}
 		}
 
 		if (body.username) {
