@@ -1,6 +1,10 @@
 packages:
   - packages/*
 
+overrides:
+  esbuild@<=0.24.2: 0.25.12
+  ws@>=8.0.0 <8.20.1: 8.20.1
+
 allowBuilds:
   '@parcel/watcher': true
   '@reown/appkit': false
