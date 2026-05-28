@@ -1,9 +1,7 @@
 import * as v from 'valibot';
-import { eq } from 'drizzle-orm';
 import { DEFAULT_BILLING_REGION_RULES, billingRegionRulesSchema, type BillingRegionRules } from '../../shared/app-settings';
-import { appSettings } from '../scheme/index';
 import { apiError } from './api-error';
-import { getDb } from './db';
+import { getAppSettingCached } from './app-settings-cache';
 
 export type CfRegionSnapshot = {
 	country: string | null;
@@ -73,12 +71,7 @@ function parseBillingRegionRules(value: string): BillingRegionRules {
 }
 
 export async function getBillingRegionRules(env: Env): Promise<BillingRegionRules> {
-	const row = await getDb(env)
-		.select({ value: appSettings.value })
-		.from(appSettings)
-		.where(eq(appSettings.key, 'billing_region_rules'))
-		.get();
-	return parseBillingRegionRules(row?.value ?? DEFAULT_BILLING_REGION_RULES);
+	return parseBillingRegionRules(await getAppSettingCached(env, 'billing_region_rules') ?? DEFAULT_BILLING_REGION_RULES);
 }
 
 function ruleMatches(rule: BillingRegionRules['rules'][number], snapshot: CfRegionSnapshot): boolean {

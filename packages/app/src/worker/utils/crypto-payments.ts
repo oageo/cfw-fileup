@@ -1,16 +1,12 @@
 import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
-import { appSettings, paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
+import { paymentAssetDeployments, paymentAssetPlanPrices, paymentAssets, paymentChains, plans } from '../scheme/index';
 import { getDb } from './db';
 import { getPaymentChainRpcUrls } from './payment-rpc';
+import { getAppSettingCached } from './app-settings-cache';
 
 export async function canAcceptCryptoPayments(env: Env): Promise<boolean> {
 	const db = getDb(env);
-	const setting = await db
-		.select({ value: appSettings.value })
-		.from(appSettings)
-		.where(eq(appSettings.key, 'crypto_payments_enabled'))
-		.get();
-	if (setting?.value !== 'true') return false;
+	if (await getAppSettingCached(env, 'crypto_payments_enabled') !== 'true') return false;
 
 	const rpcUrls = getPaymentChainRpcUrls(env);
 	if (Object.keys(rpcUrls).length === 0) return false;

@@ -3,7 +3,7 @@ import { describeResponse, describeRoute, validator } from 'hono-openapi';
 import { eq, and, gte, desc, sql, count, lt, lte, ne, type SQL } from 'drizzle-orm';
 import { filetypemime } from 'magic-bytes.js';
 import { apiError } from '../utils/api-error';
-import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, appSettings, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
+import { buckets, files, targzFiles, tarFiles, uploadParts, directories, tokens, users, fileAccessTokens, DEFAULT_PART_SIZE, MIN_PART_SIZE } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { getQuotaForUser } from '../utils/rate-limit';
 import { authMiddleware } from '../middleware/auth';
@@ -24,6 +24,7 @@ import { pageParams, type PageInput } from '../utils/pagination';
 import { likePrefix, notLikePrefix, prefixLikePattern } from '../utils/sql-like';
 import { ensureAncestorDirectories } from '../utils/ensure-ancestor-directories';
 import { assertValidTarIndexEntry, assertValidTargzIndexEntry } from '../utils/archive-index-validation';
+import { getAppSettingCached } from '../utils/app-settings-cache';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -294,13 +295,8 @@ async function listFiles(c: { env: Env; req: { header(name: string): string | un
 	};
 }
 
-async function shouldRejectMismatchedFileType(db: ReturnType<typeof getDb>): Promise<boolean> {
-	const setting = await db
-		.select({ value: appSettings.value })
-		.from(appSettings)
-		.where(eq(appSettings.key, 'reject_mismatched_file_type'))
-		.get();
-	return setting?.value === 'true';
+async function shouldRejectMismatchedFileType(env: Env): Promise<boolean> {
+	return await getAppSettingCached(env, 'reject_mismatched_file_type') === 'true';
 }
 
 async function validateArchiveIndexRows(db: ReturnType<typeof getDb>, fileId: string, fileSize: number): Promise<void> {
@@ -745,7 +741,7 @@ app.post(
 		const isUtf8Text = fileSize === 0 || (headerBytes ? looksLikeUtf8Text(headerBytes) : false);
 		const mimeType = storageDetectedMimeType ?? (isUtf8Text ? extensionMimeType : undefined) ?? (!isUtf8Text && extensionMimeType ? 'application/octet-stream' : undefined) ?? r2Object.httpMetadata?.contentType;
 		const mismatch = hasSuspiciousFileType(file.path, mimeType);
-		if (mismatch && await shouldRejectMismatchedFileType(db)) {
+		if (mismatch && await shouldRejectMismatchedFileType(c.env)) {
 			throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');
 		}
 
@@ -1262,7 +1258,7 @@ app.post(
 			if (!file.isClosed) throw apiError(400, 'FILE_IS_NOT_CLOSED');
 
 			const movedBytes = file.size ?? 0;
-			if (hasSuspiciousFileType(normalizedTargetPath, file.mimeType ?? undefined) && await shouldRejectMismatchedFileType(db)) {
+			if (hasSuspiciousFileType(normalizedTargetPath, file.mimeType ?? undefined) && await shouldRejectMismatchedFileType(c.env)) {
 				throw apiError(400, 'FILE_CONTENT_TYPE_DOES_NOT_MATCH_FILE_EXTENSION');
 			}
 			if (sourceBucket.id !== targetBucket.id && movedBytes > 0) {
