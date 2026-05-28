@@ -479,6 +479,20 @@ async function decompressGzipChunk(data: Uint8Array): Promise<Uint8Array<ArrayBu
 	return result;
 }
 
+async function readR2ObjectBody(body: ReadableStream<Uint8Array<ArrayBuffer>>, controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>): Promise<void> {
+	const reader = body.getReader();
+	try {
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			controller.enqueue(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+}
+
 async function handleDownload(c: AppContext, entryPath: string | null): Promise<Response> {
 	const db = getDb(c.env);
 	const fileId = c.req.param('fileId') ?? '';
@@ -769,49 +783,46 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 				: firstDecompressed.slice(indexEntry.rStartOffset);
 			const firstBgzfBlock = await createBgzfBlock(firstTrimmed);
 
+			const intermediateData = !isSingleBlock && indexEntry.aFirstEnd < indexEntry.aFinalStart
+				? await c.env.R2.get(file.r2Key, {
+					range: {
+						offset: indexEntry.aFirstEnd,
+						length: indexEntry.aFinalStart - indexEntry.aFirstEnd,
+					},
+				})
+				: null;
+
+			let lastBgzfBlock: Uint8Array<ArrayBuffer> | null = null;
+			if (!isSingleBlock && indexEntry.aFinalStart < indexEntry.aEnd) {
+				const lastBlockData = await c.env.R2.get(file.r2Key, {
+					range: {
+						offset: indexEntry.aFinalStart,
+						length: indexEntry.aEnd - indexEntry.aFinalStart,
+					},
+				});
+				if (!lastBlockData?.body) {
+					throw apiError(404, 'FAILED_TO_RETRIEVE_FILE');
+				}
+				const lastBytes = await lastBlockData.arrayBuffer();
+				const lastDecompressed = await decompressGzipChunk(new Uint8Array(lastBytes));
+				const endTrimmed = lastDecompressed.slice(0, lastDecompressed.length - indexEntry.rEndOffset);
+				lastBgzfBlock = await createBgzfBlock(endTrimmed);
+			}
+
 			const combinedStream = new ReadableStream<Uint8Array<ArrayBuffer>>({
 				async start(controller) {
-					controller.enqueue(firstBgzfBlock);
-
-					if (!isSingleBlock && indexEntry.aFirstEnd < indexEntry.aFinalStart) {
-						const intermediateData = await c.env.R2.get(file.r2Key, {
-							range: {
-								offset: indexEntry.aFirstEnd,
-								length: indexEntry.aFinalStart - indexEntry.aFirstEnd,
-							},
-						});
+					try {
+						controller.enqueue(firstBgzfBlock);
 						if (intermediateData?.body) {
-							const reader = intermediateData.body.getReader();
-							try {
-								// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-								while (true) {
-									const { done, value } = await reader.read();
-									if (done) break;
-									controller.enqueue(value);
-								}
-							} finally {
-								reader.releaseLock();
-							}
+							await readR2ObjectBody(intermediateData.body, controller);
 						}
-					}
-
-					if (!isSingleBlock && indexEntry.aFinalStart < indexEntry.aEnd) {
-						const lastBlockData = await c.env.R2.get(file.r2Key, {
-							range: {
-								offset: indexEntry.aFinalStart,
-								length: indexEntry.aEnd - indexEntry.aFinalStart,
-							},
-						});
-						if (lastBlockData?.body) {
-							const lastBytes = await lastBlockData.arrayBuffer();
-							const lastDecompressed = await decompressGzipChunk(new Uint8Array(lastBytes));
-							const endTrimmed = lastDecompressed.slice(0, lastDecompressed.length - indexEntry.rEndOffset);
-							const lastBgzfBlock = await createBgzfBlock(endTrimmed);
+						if (lastBgzfBlock !== null) {
 							controller.enqueue(lastBgzfBlock);
 						}
+						controller.close();
+					} catch (error) {
+						controller.error(error);
 					}
-
-					controller.close();
 				},
 			});
 

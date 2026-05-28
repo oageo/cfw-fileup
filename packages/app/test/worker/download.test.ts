@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
-import { createBgzfBlock } from 'bgzf';
+import { createBgzfBlock, createBgzfDecompressor } from 'bgzf';
 import { genEaidx, parseEaidx } from '../../src/shared/eaid-x';
 import { env, app, setupDb, clearDb, signup, authHeaders } from './helpers';
 
@@ -55,6 +55,40 @@ async function getDownloadCount(fileId: string): Promise<number> {
 		.bind(fileId)
 		.first<{ downloadCount: number }>();
 	return row?.downloadCount ?? 0;
+}
+
+async function streamToUint8Array(stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> {
+	const chunks: Uint8Array[] = [];
+	const reader = stream.getReader();
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+	const result = new Uint8Array(totalLength);
+	let offset = 0;
+	for (const chunk of chunks) {
+		result.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return result;
+}
+
+function concatUint8Arrays(chunks: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
+	const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+	const result = new Uint8Array(totalLength);
+	let offset = 0;
+	for (const chunk of chunks) {
+		result.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return result;
 }
 
 async function setupBucket(username: string) {
@@ -998,5 +1032,68 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 		expect(cachedGzipRes.status).toBe(200);
 		expect(cachedGzipRes.headers.get('Content-Encoding')).toBe('gzip');
 		expect(cachedGzipRes.headers.get('Content-Disposition')).toBe('attachment; filename="hello.txt"; filename*=UTF-8\'\'hello.txt');
+	});
+
+	test('downloads a tar.gz entry spanning first, intermediate, and final BGZF blocks', async () => {
+		const { data } = await signup('user1');
+		const token = String(data.token);
+
+		const bucketRes = await app.request('/api/buckets/create', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketName: 'targz_bucket' }),
+		}, env);
+		const { bucketId } = await bucketRes.json() as { bucketId: string };
+
+		const openRes = await app.request('/api/files/create/open', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ bucketId, path: 'archive.tar.gz' }),
+		}, env);
+		const { fileId } = await openRes.json() as { fileId: string };
+
+		const prefix = new Uint8Array(32).fill(0x70);
+		const firstPart = new Uint8Array(64_968).fill(0x61);
+		const middlePart = new Uint8Array(65_000).fill(0x62);
+		const lastPart = new Uint8Array(123).fill(0x63);
+		const suffix = new Uint8Array(77).fill(0x73);
+
+		const firstBlock = await createBgzfBlock(concatUint8Arrays([prefix, firstPart]));
+		const middleBlock = await createBgzfBlock(middlePart);
+		const finalBlock = await createBgzfBlock(concatUint8Arrays([lastPart, suffix]));
+		await env.R2.put(`${bucketId}/archive.tar.gz`, concatUint8Arrays([firstBlock, middleBlock, finalBlock]));
+
+		await app.request('/api/files/create/targz-index', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				fileId,
+				files: [{
+					path: 'large.txt',
+					mimeType: 'text/plain',
+					aStart: 0,
+					aFirstEnd: firstBlock.length,
+					aFinalStart: firstBlock.length + middleBlock.length,
+					aEnd: firstBlock.length + middleBlock.length + finalBlock.length,
+					rStartOffset: prefix.length,
+					rEndOffset: suffix.length,
+				}],
+			}),
+		}, env);
+
+		await app.request('/api/files/create/close', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({ fileId, visibility: 'public' }),
+		}, env);
+
+		const res = await app.request(`/d/${fileId}/%3Aentries/large.txt`, {
+			headers: { 'Accept-Encoding': 'gzip' },
+		}, env);
+		expect(res.status).toBe(200);
+		expect(res.body).not.toBeNull();
+
+		const decompressed = await streamToUint8Array(res.body!.pipeThrough(createBgzfDecompressor()));
+		expect(decompressed).toEqual(concatUint8Arrays([firstPart, middlePart, lastPart]));
 	});
 });
