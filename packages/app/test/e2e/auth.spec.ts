@@ -53,7 +53,10 @@ test.describe('Authentication', () => {
 
 		await page.fill('#signup-username', username);
 		await page.fill('#signup-passphrase', E2E_SIGNUP_PASSPHRASE);
-		await page.getByRole('checkbox', { name: '利用規約に同意する' }).check();
+		const termsCheckbox = page.getByRole('checkbox', { name: '利用規約に同意する' });
+		if (await termsCheckbox.isVisible()) {
+			await termsCheckbox.check();
+		}
 		await page.getByRole('button', { name: '確認して続行' }).click();
 		await page.getByRole('button', { name: 'パスワードで登録' }).click();
 		await page.fill('#signup-password', 'testpassword123');
