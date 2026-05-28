@@ -7,7 +7,6 @@ type ReceiptOrder = Receipt['order'];
 
 const receiptFontName = 'IBMPlexSansJP';
 const receiptFontPath = '/assets/fonts/ibm_plex_sans_jp/IBMPlexSansJP-Regular.ttf';
-const fallbackTaxCurrency = 'USD';
 
 const template: Template = {
 	basePdf: { width: 210, height: 297, padding: [16, 16, 16, 16] },
@@ -43,19 +42,17 @@ const template: Template = {
 	]],
 };
 
-function baseUnitsToNumber(amountBaseUnits: string, decimals: number): number {
+function formatBaseUnits(amountBaseUnits: string, decimals: number): string {
 	const padded = amountBaseUnits.padStart(decimals + 1, '0');
-	const integer = padded.slice(0, -decimals);
-	const fraction = decimals === 0 ? '' : padded.slice(-decimals);
-	return Number(`${integer}${fraction ? `.${fraction}` : ''}`);
+	const rawInteger = padded.slice(0, -decimals);
+	const integer = new Intl.NumberFormat('ja-JP', { useGrouping: true }).format(BigInt(rawInteger || '0'));
+	const fraction = decimals === 0 ? '' : padded.slice(-decimals).replace(/0+$/, '');
+	return `${integer}${fraction ? `.${fraction}` : ''}`;
 }
 
 function formatTaxCurrencyBaseUnits(amountBaseUnits: string, decimals: number, currency: string): string {
 	const normalized = currency.trim().toUpperCase();
-	const safeCurrency = /^[A-Z]{3}$/.test(normalized) ? normalized : fallbackTaxCurrency;
-	const value = baseUnitsToNumber(amountBaseUnits, decimals);
-	if (!Number.isFinite(value)) return '-';
-	return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: safeCurrency }).format(value);
+	return `${formatBaseUnits(amountBaseUnits, decimals)} ${normalized || currency}`;
 }
 
 function formatDate(value: number | null): string {
@@ -63,11 +60,7 @@ function formatDate(value: number | null): string {
 }
 
 function formatAmount(order: ReceiptOrder): string {
-	const decimals = order.decimals;
-	const padded = order.amountBaseUnits.padStart(decimals + 1, '0');
-	const integer = padded.slice(0, -decimals);
-	const fraction = decimals === 0 ? '' : padded.slice(-decimals).replace(/0+$/, '');
-	return `${integer}${fraction ? `.${fraction}` : ''} ${order.tokenSymbol}`;
+	return `${formatBaseUnits(order.amountBaseUnits, order.decimals)} ${order.tokenSymbol}`;
 }
 
 function formatDuration(order: ReceiptOrder): string {
