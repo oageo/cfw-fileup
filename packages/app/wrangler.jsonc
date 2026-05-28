@@ -9,20 +9,16 @@
   },
   "compatibility_date": "2026-05-11",
   "vars": {
-    "SIGNUP_PASSPHRASE": "",
     "MAX_BUCKETS_PER_USER": "",
     "MAX_BUCKET_SIZE_BYTES": "",
     "MAX_FILES_PER_BUCKET": "",
     "MAX_DAILY_UPLOADS": "",
-    "TURNSTILE_SECRET": "",
     "TURNSTILE_SITE_KEY": "",
     // Google OAuth - set GOOGLE_CLIENT_ID here (not a secret)
     // Set GOOGLE_CLIENT_SECRET in .dev.vars for local dev, or as a Worker secret in production
     "GOOGLE_CLIENT_ID": "",
     // Optional: override the OAuth redirect URI (default: auto-detected from request URL)
     "GOOGLE_REDIRECT_URI": "",
-    // JSON object keyed by decimal EVM chain ID. Set production values as Worker vars/secrets.
-    "EVM_CHAIN_RPC_URLS": "",
     "MAIL_FROM": "",
     "PUBLIC_APP_URL": ""
   },

@@ -50,6 +50,25 @@ GOOGLE_REDIRECT_URI=https://<app-origin>/api/auth/google/callback
 
 `GOOGLE_CLIENT_ID` は secret ではないので `packages/app/wrangler.jsonc` の `vars` に設定できます。quick tunnel は起動ごとに URL が変わるため、Google OAuth クライアントのリダイレクト URI もその URL に合わせて更新してください。固定したい場合は named tunnel など安定した HTTPS origin を使います。
 
+## Worker secrets
+
+Production/test Worker に公開するとき、次の値は `wrangler.jsonc` の `vars` ではなく Worker secret として設定します。
+
+```bash
+cd packages/app
+
+pnpm wrangler secret put SIGNUP_PASSPHRASE
+pnpm wrangler secret put TURNSTILE_SECRET
+pnpm wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm wrangler secret put EVM_CHAIN_RPC_URLS
+```
+
+環境を分ける場合は `--env test` のように対象環境を付けます。
+
+```bash
+pnpm wrangler secret put EVM_CHAIN_RPC_URLS --env test
+```
+
 ## Local DB Migration
 ```bash
 pnpm run --filter app db:migrate:local
