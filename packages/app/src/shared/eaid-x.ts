@@ -21,8 +21,10 @@ const NODE2_LENGTH = 2;
 const NOISE_LENGTH = 2;
 const AIDX_LENGTH = TIME_LENGTH + 1 + NODE_LENGTH + 1 + NODE2_LENGTH + NOISE_LENGTH;
 
-const nodeId = customAlphabet('-123456789abcdefghijklmnopqrstuvwxyz', NODE_LENGTH)();
-const nodeId2 = customAlphabet('-123456789abcdefghijklmnopqrstuvwxyz', NODE2_LENGTH)();
+const createNodeId = customAlphabet('-123456789abcdefghijklmnopqrstuvwxyz', NODE_LENGTH);
+const createNodeId2 = customAlphabet('-123456789abcdefghijklmnopqrstuvwxyz', NODE2_LENGTH);
+let nodeId: string | undefined;
+let nodeId2: string | undefined;
 let counter = 0;
 
 export function parseBigInt36(str: string): bigint {
@@ -58,6 +60,8 @@ function getNoise(): string {
 
 export function genEaidx(t: number): string {
 	if (isNaN(t)) throw new Error('Failed to create AIDX: Invalid Date');
+	nodeId ??= createNodeId();
+	nodeId2 ??= createNodeId2();
 	counter++;
 	return `${getTime(t)}-${nodeId}-${nodeId2}${getNoise()}`;
 }
