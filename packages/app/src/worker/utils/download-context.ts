@@ -68,10 +68,11 @@ export function createDownloadCacheRequest(options: {
 	mode: CacheMode;
 	gzip: boolean;
 	auth: CacheAuth;
+	cacheVersion: string;
 	entryPath?: string;
 }): Request {
 	const keyUrl = new URL('https://cache.cfw-fileup.local/download');
-	keyUrl.searchParams.set('v', '1');
+	keyUrl.searchParams.set('v', options.cacheVersion);
 	keyUrl.searchParams.set('fileId', options.fileId);
 	keyUrl.searchParams.set('mode', options.mode);
 	keyUrl.searchParams.set('gzip', options.gzip ? '1' : '0');
@@ -102,7 +103,7 @@ export class DownloadContext {
 	constructor(
 		readonly file: FileRecord,
 		request: Request,
-		options: { entryPath?: string | null } = {},
+		options: { entryPath?: string | null; cacheVersion: string },
 	) {
 		this.url = new URL(request.url);
 		const clientAcceptEncoding = typeof request.cf?.clientAcceptEncoding === 'string'
@@ -114,8 +115,11 @@ export class DownloadContext {
 		this.isListMode = this.url.searchParams.has('list');
 		this.isMetaMode = this.url.searchParams.has('meta');
 		this.lastModified = parseEaidx(file.id).date;
+		this.cacheVersion = options.cacheVersion;
 		this.authContext = file.visibility === 'public' && !file.isModerationForcedPrivate ? { type: 'public' } : { type: 'user' };
 	}
+
+	private readonly cacheVersion: string;
 
 	get isTarFileEntry(): boolean {
 		return this.file.isTar && this.entryPath !== null;
@@ -157,7 +161,7 @@ export class DownloadContext {
 	}
 
 	getETag(entryPath?: string): string {
-		const parts = [this.file.id];
+		const parts = [`v${this.cacheVersion}`, this.file.id];
 		if (entryPath !== undefined) parts.push(entryPath);
 		const suffix = this.acceptsGzip ? '' : '-gz';
 		return `"${parts.map((part) => encodeURIComponent(part)).join('-')}${suffix}"`;
@@ -196,6 +200,7 @@ export class DownloadContext {
 			entryPath,
 			gzip: this.acceptsGzip,
 			auth,
+			cacheVersion: this.cacheVersion,
 		});
 	}
 

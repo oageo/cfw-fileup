@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { appSettings } from '../scheme/index';
 import { getDb } from './db';
+import { getAppSettingCached, setAppSettingCache } from './app-settings-cache';
 
 export const workerCacheBaseNames = {
 	download: 'download',
@@ -16,14 +17,7 @@ const defaultWorkerCacheVersion = '1';
 export type WorkerCacheBaseName = typeof workerCacheBaseNames[keyof typeof workerCacheBaseNames];
 
 export async function getWorkerCacheVersion(env: Env): Promise<string> {
-	const db = getDb(env);
-	const setting = await db
-		.select({ value: appSettings.value })
-		.from(appSettings)
-		.where(eq(appSettings.key, workerCacheVersionSettingKey))
-		.get();
-
-	return setting?.value ?? defaultWorkerCacheVersion;
+	return await getAppSettingCached(env, workerCacheVersionSettingKey) ?? defaultWorkerCacheVersion;
 }
 
 export async function getWorkerCacheName(env: Env, baseName: WorkerCacheBaseName): Promise<string> {
@@ -48,6 +42,7 @@ export async function bumpWorkerCacheVersion(env: Env): Promise<string> {
 			target: appSettings.key,
 			set: { value: version },
 		});
+	await setAppSettingCache(workerCacheVersionSettingKey, version);
 
 	return version;
 }

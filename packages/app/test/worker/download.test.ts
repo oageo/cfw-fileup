@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
 import { createBgzfBlock, createBgzfDecompressor } from 'bgzf';
 import { genEaidx, parseEaidx } from '../../src/shared/eaid-x';
+import { getWorkerCacheVersion } from '../../src/worker/utils/cache-names';
 import { env, app, setupDb, clearDb, signup, authHeaders } from './helpers';
 
 beforeAll(async () => {
@@ -1002,6 +1003,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 			headers: authHeaders(token),
 			body: JSON.stringify({ fileId, visibility: 'public' }),
 		}, env);
+		const cacheVersion = await getWorkerCacheVersion(env);
 
 		const gzipRes = await app.request(`/d/${fileId}/%3Aentries/hello.txt`, {
 			headers: { 'Accept-Encoding': 'gzip' },
@@ -1009,6 +1011,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 		expect(gzipRes.status).toBe(200);
 		expect(gzipRes.headers.get('Content-Encoding')).toBe('gzip');
 		expect(gzipRes.headers.get('Content-Disposition')).toBe('attachment; filename="hello.txt"; filename*=UTF-8\'\'hello.txt');
+		expect(gzipRes.headers.get('ETag')).toBe(`"v${cacheVersion}-${fileId}-hello.txt"`);
 		await gzipRes.arrayBuffer();
 
 		const rangeRes = await app.request(`/d/${fileId}/%3Aentries/hello.txt`, {
@@ -1022,6 +1025,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 		expect(ungzipRes.status).toBe(200);
 		expect(ungzipRes.headers.get('Content-Encoding')).toBeNull();
 		expect(ungzipRes.headers.get('Content-Disposition')).toBe('attachment; filename="hello.txt.gz"; filename*=UTF-8\'\'hello.txt.gz');
+		expect(ungzipRes.headers.get('ETag')).toBe(`"v${cacheVersion}-${fileId}-hello.txt-gz"`);
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		await env.R2.delete(`${bucketId}/archive.tar.gz`);
@@ -1032,6 +1036,7 @@ describe('GET /d/:fileId/%3Aentries/:entryPath (tar.gz individual file)', () => 
 		expect(cachedGzipRes.status).toBe(200);
 		expect(cachedGzipRes.headers.get('Content-Encoding')).toBe('gzip');
 		expect(cachedGzipRes.headers.get('Content-Disposition')).toBe('attachment; filename="hello.txt"; filename*=UTF-8\'\'hello.txt');
+		expect(cachedGzipRes.headers.get('ETag')).toBe(`"v${cacheVersion}-${fileId}-hello.txt"`);
 	});
 
 	test('downloads a tar.gz entry spanning first, intermediate, and final BGZF blocks', async () => {

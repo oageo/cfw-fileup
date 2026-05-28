@@ -7,7 +7,7 @@ import { buckets, files, targzFiles, tarFiles, tokens, users, fileAccessTokens, 
 import { getDb } from '../utils/db';
 import { DownloadContext, downloadCacheInternalHeaders } from '../utils/download-context';
 import { MAX_FILE_PATH_LENGTH, MAX_ID_LENGTH } from '../../shared/const';
-import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
+import { getWorkerCacheVersion, openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 import { apiError, createApiErrorResponse } from '../utils/api-error';
 import { tokenToDigest } from '../utils/crypto';
 import { likePrefix } from '../utils/sql-like';
@@ -514,7 +514,8 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 	const bucket = await db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get();
 	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
 
-	const download = new DownloadContext(file, c.req.raw, { entryPath });
+	const workerCacheVersion = await getWorkerCacheVersion(c.env);
+	const download = new DownloadContext(file, c.req.raw, { entryPath, cacheVersion: workerCacheVersion });
 	const rangeHeader = c.req.header('Range') ?? null;
 	const ifRangeHeader = c.req.header('If-Range') ?? null;
 	let requesterIsOwnerPromise: Promise<boolean> | null = null;
