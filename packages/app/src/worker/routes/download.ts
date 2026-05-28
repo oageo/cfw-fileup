@@ -11,6 +11,7 @@ import { openWorkerCache, workerCacheBaseNames } from '../utils/cache-names';
 import { apiError, createApiErrorResponse } from '../utils/api-error';
 import { tokenToDigest } from '../utils/crypto';
 import { likePrefix } from '../utils/sql-like';
+import { hasSuspiciousFileType, inferMimeTypeByExtension } from '../utils/mime-by-extension';
 
 const app = new Hono<{ Bindings: Env }>();
 const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
@@ -321,6 +322,18 @@ function createMultipartRangeStreamFromR2(options: {
 			controller.close();
 		},
 	});
+}
+
+const VALID_MIME_TYPE = /^[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&\-^_.+]*$/;
+
+function sanitizeEntryMimeType(storedMimeType: string, entryPath: string): string {
+	if (!VALID_MIME_TYPE.test(storedMimeType)) {
+		return inferMimeTypeByExtension(entryPath) ?? 'application/octet-stream';
+	}
+	if (hasSuspiciousFileType(entryPath, storedMimeType)) {
+		return inferMimeTypeByExtension(entryPath) ?? 'application/octet-stream';
+	}
+	return storedMimeType;
 }
 
 function getTargzEntryHeaders(download: DownloadContext, path: string, mimeType: string): HeadersInit {
@@ -715,7 +728,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 
 		const response = new Response(rangeData.body, {
 			headers: download.withDownloadHeaders({
-				'Content-Type': indexEntry.mimeType,
+				'Content-Type': sanitizeEntryMimeType(indexEntry.mimeType, indexEntry.path),
 				'Content-Disposition': download.createContentDisposition(toDownloadBasename(indexEntry.path)),
 				'Content-Length': String(indexEntry.size),
 			}),
@@ -803,7 +816,7 @@ async function handleDownload(c: AppContext, entryPath: string | null): Promise<
 			});
 
 			const response = new Response(combinedStream, {
-				headers: getTargzEntryHeaders(download, indexEntry.path, indexEntry.mimeType),
+				headers: getTargzEntryHeaders(download, indexEntry.path, sanitizeEntryMimeType(indexEntry.mimeType, indexEntry.path)),
 				encodeBody: 'manual',
 			});
 			putDownloadCache(response, 'targz-entry', requestedEntryPath);

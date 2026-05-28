@@ -5,6 +5,20 @@ import { marked } from 'marked';
 import { authHeaders } from '@/store/auth';
 import ShikiCodePreview from './ShikiCodePreview.vue';
 
+// Force all links to open in a new tab with safe rel attributes.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+	if (node instanceof Element && node.tagName === 'A') {
+		node.setAttribute('target', '_blank');
+		node.setAttribute('rel', 'noopener noreferrer');
+	}
+});
+
+const DOMPURIFY_CONFIG: Parameters<typeof DOMPurify.sanitize>[1] = {
+	// Prevent CSS injection and phishing via form elements
+	FORBID_TAGS: ['style', 'form', 'input', 'button', 'select', 'textarea'],
+	FORBID_ATTR: ['style'],
+};
+
 const props = defineProps<{
 	url: string;
 	filename: string;
@@ -23,7 +37,7 @@ const html = computed(() => {
 		gfm: true,
 		breaks: false,
 	});
-	return DOMPurify.sanitize(rendered);
+	return DOMPurify.sanitize(rendered, DOMPURIFY_CONFIG);
 });
 
 watch(

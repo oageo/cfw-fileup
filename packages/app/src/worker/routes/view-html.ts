@@ -88,10 +88,11 @@ function appendLinkHeader(headers: Headers, href: string): void {
 }
 
 function withActivityPubAlternate(response: Response, href: string): Response {
+	const safeHref = href.replace(/"/g, '%22');
 	const transformed = new HTMLRewriter()
 		.on('head', {
 			element(element) {
-				element.append(`<link rel="alternate" type="${activityJsonType}" href="${href}">`, { html: true });
+				element.append(`<link rel="alternate" type="${activityJsonType}" href="${safeHref}">`, { html: true });
 			},
 		})
 		.transform(response);
