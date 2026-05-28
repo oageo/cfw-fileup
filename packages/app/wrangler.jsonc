@@ -9,10 +9,6 @@
   },
   "compatibility_date": "2026-05-11",
   "vars": {
-    "MAX_BUCKETS_PER_USER": "",
-    "MAX_BUCKET_SIZE_BYTES": "",
-    "MAX_FILES_PER_BUCKET": "",
-    "MAX_DAILY_UPLOADS": "",
     "TURNSTILE_SITE_KEY": "",
     // Google OAuth - set GOOGLE_CLIENT_ID here (not a secret)
     // Set GOOGLE_CLIENT_SECRET in .dev.vars for local dev, or as a Worker secret in production

@@ -29,10 +29,6 @@ secret 値は private repo にも commit せず、Cloudflare Workers secrets に
   },
   "compatibility_date": "2026-05-11",
   "vars": {
-    "MAX_BUCKETS_PER_USER": "",
-    "MAX_BUCKET_SIZE_BYTES": "",
-    "MAX_FILES_PER_BUCKET": "",
-    "MAX_DAILY_UPLOADS": "",
     "TURNSTILE_SITE_KEY": "",
     "GOOGLE_CLIENT_ID": "",
     "GOOGLE_REDIRECT_URI": "",
