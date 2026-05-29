@@ -165,13 +165,17 @@ export const accountApiDef = {
 		req: v.object({
 			address: EthereumAddress,
 			chainId: v.pipe(v.number(), v.integer(), v.minValue(1)),
+			currentPassword: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+			turnstileToken: v.optional(v.pipe(v.string(), v.maxLength(MAX_TURNSTILE_TOKEN_LENGTH))),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({
 				nonce: v.string(),
 				message: v.string(),
 			}) } } },
-			400: errorResponse('Invalid wallet link request', ['PAYMENT_CHAIN_RPC_NOT_CONFIGURED', 'PAYMENT_TRANSACTION_INVALID', 'WALLET_ALREADY_LINKED']),
+			400: errorResponse('Invalid wallet link request', ['PAYMENT_CHAIN_RPC_NOT_CONFIGURED', 'PAYMENT_TRANSACTION_INVALID', 'TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED', 'WALLET_ALREADY_LINKED']),
+			401: errorResponse('Recent authentication or current password required', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'RECENT_AUTHENTICATION_REQUIRED']),
+			404: errorResponse('User not found', ['USER_NOT_FOUND']),
 		},
 	},
 	'/api/account/wallets/link/verify': {

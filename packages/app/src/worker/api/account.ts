@@ -223,6 +223,7 @@ app.post(
 		const db = getDb(c.env);
 		const user = c.get('user');
 		const body = c.req.valid('json');
+		await assertSensitiveActionAuth(c.env, user.id, body.currentPassword, body.turnstileToken, user.reauthenticatedAt);
 		const rpcUrl = getPaymentChainRpcUrl(c.env, body.chainId);
 		if (!rpcUrl) throw apiError(400, 'PAYMENT_CHAIN_RPC_NOT_CONFIGURED');
 

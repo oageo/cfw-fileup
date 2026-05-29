@@ -2,9 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { apiPost, type ApiSuccess } from '@/utils/api';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import SensitiveActionAuth from '@/components/SensitiveActionAuth.vue';
 import { useWallet } from '@/composables/useWallet';
 import { getChainMetadata } from '@/utils/chain-metadata';
 import { useWalletRuntimeReload } from '@/components/WalletRuntimeProvider';
+import { authStore } from '@/store/auth';
 
 type LinkedWallet = ApiSuccess<'/api/account/wallets/list'>['data'][number];
 type WalletLinkChain = ApiSuccess<'/api/account/wallets/link/chains'>['data'][number];
@@ -26,6 +28,10 @@ const walletRequestTitle = ref('');
 const walletRequestDescription = ref('');
 const walletRequestCancelRequested = ref(false);
 const disconnectingConnectorUid = ref<string | null>(null);
+const currentPassword = ref('');
+const linkTurnstileToken = ref<string | null>(null);
+const turnstileEnabled = ref(false);
+const turnstileSiteKey = ref('');
 const error = ref('');
 const success = ref('');
 const { walletAddress, walletChainId, activeWalletConnectorUid, connectedWalletConnections, walletConnectors, connectWallet, disconnectWalletConnection, clearWalletConnectStorage, switchWalletConnection, switchOrAddWalletChain, signWalletMessage } = useWallet();
@@ -40,6 +46,13 @@ const emit = defineEmits<{
 }>();
 
 const selectedWalletLinkChain = computed(() => walletLinkChains.value.find(chain => chain.chainId === selectedWalletLinkChainId.value) ?? walletLinkChains.value[0] ?? null);
+const recentlyAuthenticated = computed(() => authStore.user?.recentlyAuthenticated ?? false);
+const passwordLinkReady = computed(() =>
+	(authStore.user?.hasPassword ?? true)
+	&& currentPassword.value.length > 0
+	&& (!turnstileEnabled.value || linkTurnstileToken.value !== null),
+);
+const canStartLink = computed(() => recentlyAuthenticated.value || passwordLinkReady.value);
 const selectedWalletConnector = computed(() => walletConnectors.value.find(connector => connector.uid === selectedWalletConnectorUid.value) ?? walletConnectors.value[0] ?? null);
 const isSelectedWalletConnectorActive = computed(() => selectedWalletConnector.value != null && activeWalletConnectorUid.value === selectedWalletConnector.value.uid);
 const connectedLinkedWallet = computed(() => {
@@ -137,6 +150,19 @@ async function loadWallets(): Promise<void> {
 	}
 }
 
+async function loadMeta(): Promise<void> {
+	try {
+		const res = await fetch('/api/meta');
+		if (!res.ok) return;
+		const data = await res.json() as { turnstileEnabled?: boolean; turnstileSiteKey?: string };
+		turnstileEnabled.value = data.turnstileEnabled ?? false;
+		turnstileSiteKey.value = data.turnstileSiteKey ?? '';
+	} catch {
+		turnstileEnabled.value = false;
+		turnstileSiteKey.value = '';
+	}
+}
+
 async function linkWallet(): Promise<void> {
 	error.value = '';
 	success.value = '';
@@ -179,7 +205,16 @@ async function linkWallet(): Promise<void> {
 			shouldReloadWalletRuntime = true;
 			return;
 		}
-		const beginResult = await apiPost('/api/account/wallets/link/begin', { address, chainId: linkChain.chainId });
+		if (!canStartLink.value) {
+			error.value = 'ウォレットを連携するには、先に本人確認欄で再認証してください。';
+			return;
+		}
+		const beginResult = await apiPost('/api/account/wallets/link/begin', {
+			address,
+			chainId: linkChain.chainId,
+			currentPassword: currentPassword.value || undefined,
+			turnstileToken: currentPassword.value ? linkTurnstileToken.value ?? undefined : undefined,
+		});
 		if (!beginResult.ok) {
 			error.value = beginResult.data.message || 'ウォレット連携の開始に失敗しました';
 			return;
@@ -361,7 +396,9 @@ async function disconnectWalletConnectorByUid(connectorUid: string): Promise<voi
 	}
 }
 
-onMounted(loadWallets);
+onMounted(async () => {
+	await Promise.all([loadWallets(), loadMeta()]);
+});
 
 watch(walletConnectors, connectors => {
 	if (selectedWalletConnectorUid.value && connectors.some(connector => connector.uid === selectedWalletConnectorUid.value)) return;
@@ -391,6 +428,18 @@ watch(walletConnectors, connectors => {
     <div v-else-if="wallets.length > 0" :class="$style.walletNotice">
       接続先を変えたい場合は、ウォレットアプリ側で連携済みアドレスを選択してください。接続中の連携済みウォレットだけをここで選択できます。
     </div>
+    <SensitiveActionAuth
+      v-model:currentPassword="currentPassword"
+      :class="$style.reauthPanel"
+      description="ウォレット連携の前に、パスキーで本人確認します。パスワード設定済みの場合だけ、現在のパスワードでも続行できます。"
+      password-input-id="wallet-link-current-password"
+      password-hint="パスキーで再認証した場合、この入力は不要です。"
+      :turnstile-enabled="turnstileEnabled"
+      :turnstile-site-key="turnstileSiteKey"
+      v-model:turnstile-token="linkTurnstileToken"
+      @success="(message: string) => { error = ''; success = message; }"
+      @error="(message: string) => { success = ''; error = message; }"
+    />
     <div v-if="wallets.length > 0" :class="$style.linkedList">
       <div v-for="wallet in sortedWallets" :key="wallet.id" :class="[$style.linkedItem, isSelectedWallet(wallet) ? $style.linkedItemActive : '']">
         <div :class="$style.walletInfo">
@@ -429,6 +478,9 @@ watch(walletConnectors, connectors => {
     <div v-if="wallets.length === 0" :class="$style.emptyLinked">連携済みウォレットはありません。</div>
     <section :class="$style.linkSection">
       <h4 :class="$style.connectorTitle">新しいウォレットを連携</h4>
+      <div v-if="!canStartLink" class="alert alert-info mb-3">
+        ウォレットを連携するには、本人確認欄でパスキーかパスワードで再認証してください。
+      </div>
       <div :class="$style.formGroup">
         <label class="form-label" for="wallet-link-chain">連携するチェーン</label>
         <select id="wallet-link-chain" v-model.number="selectedWalletLinkChainId" class="form-input" :disabled="walletLoading || walletLinkChains.length === 0">
@@ -441,7 +493,7 @@ watch(walletConnectors, connectors => {
           :key="connector.uid"
           class="btn btn-primary btn-sm"
           type="button"
-          :disabled="walletLoading || selectedWalletLinkChain == null"
+          :disabled="walletLoading || selectedWalletLinkChain == null || !canStartLink"
           @click="connectWithConnector(connector.uid)"
         >
           <span v-if="walletLoading && selectedWalletConnectorUid === connector.uid" class="btn-spinner" aria-hidden="true" />
@@ -527,6 +579,13 @@ watch(walletConnectors, connectors => {
   display: grid;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+.reauthPanel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
 }
 
 .linkedList {

@@ -328,6 +328,43 @@ describe('POST /api/account/update', () => {
 	});
 });
 
+describe('POST /api/account/wallets/link/begin authentication', () => {
+	test('requires recent authentication or current password before SIWE challenge', async () => {
+		const { data } = await signup('walletuser');
+		const token = String(data.token);
+
+		const res = await app.request('/api/account/wallets/link/begin', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				chainId: 8453,
+				address: '0x3333333333333333333333333333333333333333',
+			}),
+		}, env);
+
+		expect(res.status).toBe(401);
+		expect(await res.json()).toEqual(expect.objectContaining({ error: 'CURRENT_PASSWORD_IS_REQUIRED' }));
+	});
+
+	test('rejects wrong current password before SIWE challenge', async () => {
+		const { data } = await signup('walletuser');
+		const token = String(data.token);
+
+		const res = await app.request('/api/account/wallets/link/begin', {
+			method: 'POST',
+			headers: authHeaders(token),
+			body: JSON.stringify({
+				chainId: 8453,
+				address: '0x3333333333333333333333333333333333333333',
+				currentPassword: 'wrongpassword',
+			}),
+		}, env);
+
+		expect(res.status).toBe(401);
+		expect(await res.json()).toEqual(expect.objectContaining({ error: 'INVALID_PASSWORD' }));
+	});
+});
+
 describe('POST /api/account/email', () => {
 	function mailEnv(sent: Array<{ to: string; raw: string }>): typeof env {
 		return Object.assign({}, env, {

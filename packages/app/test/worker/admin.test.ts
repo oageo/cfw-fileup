@@ -1107,6 +1107,7 @@ describe('Crypto payment administration', () => {
 			body: JSON.stringify({
 				chainId: 8453,
 				address: '0x3333333333333333333333333333333333333333',
+				currentPassword: 'password123',
 			}),
 		}, env);
 		expect(beginRes.status).toBe(200);
