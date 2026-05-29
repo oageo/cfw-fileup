@@ -6,17 +6,14 @@ import BrowseDirectory from './browse.directory.vue';
 import BrowseFile from './browse.file.vue';
 import BrowseFileTokens from './browse.file-tokens.vue';
 import TurnstileWidget from '@/components/TurnstileWidget.vue';
-import MarkdownPreview from '@/components/MarkdownPreview.vue';
-import RawTextPreview from '@/components/RawTextPreview.vue';
-import JsonPreview from '@/components/JsonPreview.vue';
 import NirA from '@/components/NirA.vue';
 import { authStore, authHeaders, updateTermsAgreedAt } from '@/store/auth';
 import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
 import { Nirax, type RouteDef } from '@/nirax';
 import { formatBytes } from '@/utils/byte-size';
-import { Download } from '@lucide/vue';
 import { createBgzfDecompressor } from 'bgzf';
+import { hasMimeTypeMismatch as detectMimeTypeMismatch, inferMimeTypeByExtension, isExecutableMimeType, selectStoredOrSniffedMimeType } from '../../shared/mime-by-extension';
 
 const props = withDefaults(defineProps<{
 	bucketName: string;
@@ -71,6 +68,11 @@ type InnerArchiveEntry =
 
 const innerMeta = ref<InnerArchiveEntry | null>(null);
 const innerObjectUrl = ref('');
+const innerDetectedMimeType = ref<string | null>(null);
+const innerExtensionMimeType = ref<string | null>(null);
+const innerHasMimeTypeMismatch = ref(false);
+const innerHasExecutableContent = ref(false);
+const validMimeType = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/;
 
 const innerDownloadUrl = computed(() => {
 	if (!fileId.value) return '';
@@ -78,6 +80,7 @@ const innerDownloadUrl = computed(() => {
 	return autoToken.value ? `${base}?token=${autoToken.value}` : base;
 });
 const innerPreviewUrl = computed(() => isTargz.value ? innerObjectUrl.value : innerDownloadUrl.value);
+const innerDownloadFilename = computed(() => entryPath.value?.split('/').filter(Boolean).at(-1) || 'download');
 const innerDownloadError = ref('');
 
 const isInnerImage = computed(() => {
@@ -143,7 +146,7 @@ function sliceStream(stream: ReadableStream<Uint8Array<ArrayBuffer>>, start: num
 	}));
 }
 
-async function streamToBlob(stream: ReadableStream<Uint8Array<ArrayBuffer>>, mimeType: string, trimEndBytes = 0): Promise<Blob> {
+async function streamToBytes(stream: ReadableStream<Uint8Array<ArrayBuffer>>, trimEndBytes = 0): Promise<Uint8Array<ArrayBuffer>> {
 	const chunks: Uint8Array[] = [];
 	const reader = stream.getReader();
 	try {
@@ -155,7 +158,7 @@ async function streamToBlob(stream: ReadableStream<Uint8Array<ArrayBuffer>>, mim
 	} finally {
 		reader.releaseLock();
 	}
-	if (chunks.length === 0) return new Blob([], { type: mimeType });
+	if (chunks.length === 0) return new Uint8Array(0) as Uint8Array<ArrayBuffer>;
 	const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
 	const bytes = new Uint8Array(totalLength);
 	let offset = 0;
@@ -164,7 +167,24 @@ async function streamToBlob(stream: ReadableStream<Uint8Array<ArrayBuffer>>, mim
 		offset += chunk.byteLength;
 	}
 	const end = Math.max(0, bytes.byteLength - trimEndBytes);
-	return new Blob([bytes.slice(0, end)], { type: mimeType });
+	return bytes.slice(0, end);
+}
+
+function applyInnerSniffedMimeType(entry: InnerArchiveEntry & { type: 'targz' }, bytes: Uint8Array<ArrayBuffer>): string {
+	const detectedMimeType = selectStoredOrSniffedMimeType({
+		path: entry.path,
+		storedMimeType: entry.mimeType,
+		sniffBytes: bytes,
+		isValidStoredMimeType: mimeType => validMimeType.test(mimeType),
+	});
+	const extensionMimeType = inferMimeTypeByExtension(entry.path) ?? null;
+	const mismatch = detectMimeTypeMismatch(entry.path, detectedMimeType);
+	innerDetectedMimeType.value = detectedMimeType;
+	innerExtensionMimeType.value = extensionMimeType;
+	innerHasMimeTypeMismatch.value = mismatch;
+	innerHasExecutableContent.value = mismatch && isExecutableMimeType(detectedMimeType);
+	innerMeta.value = { ...entry, mimeType: detectedMimeType };
+	return detectedMimeType;
 }
 
 async function createInnerEntryBlob(): Promise<Blob> {
@@ -176,7 +196,9 @@ async function createInnerEntryBlob(): Promise<Blob> {
 	const stream = await fetchArchiveRange(entry.aStart, entry.aEnd - 1);
 	const decompressed = stream.pipeThrough(createBgzfDecompressor());
 	const sliced = sliceStream(decompressed, entry.rStartOffset);
-	return streamToBlob(sliced, entry.mimeType, entry.rEndOffset);
+	const bytes = await streamToBytes(sliced, entry.rEndOffset);
+	const mimeType = applyInnerSniffedMimeType(entry, bytes);
+	return new Blob([bytes], { type: mimeType });
 }
 
 function revokeInnerObjectUrl(): void {
@@ -211,7 +233,7 @@ async function downloadInnerEntry(event: MouseEvent): Promise<void> {
 		innerObjectUrl.value = url;
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = entryPath.value?.split('/').pop() || 'download';
+		a.download = innerDownloadFilename.value;
 		document.body.append(a);
 		a.click();
 		a.remove();
@@ -423,6 +445,10 @@ async function fetchInnerMeta(): Promise<void> {
 				? { type: 'tar', path: entry.path, mimeType: entry.mimeType, size: entry.size }
 				: { type: 'targz', path: entry.path, mimeType: entry.mimeType, size: entry.size, aStart: entry.aStart, aFirstEnd: entry.aFirstEnd, aFinalStart: entry.aFinalStart, aEnd: entry.aEnd, rStartOffset: entry.rStartOffset, rEndOffset: entry.rEndOffset }
 			: null;
+		innerDetectedMimeType.value = null;
+		innerExtensionMimeType.value = null;
+		innerHasMimeTypeMismatch.value = false;
+		innerHasExecutableContent.value = false;
 		await refreshInnerObjectUrl();
 	} catch { /* silent */ }
 }
@@ -440,6 +466,10 @@ async function fetchMeta(): Promise<void> {
 	metaLoading.value = true;
 	metaError.value = '';
 	innerMeta.value = null;
+	innerDetectedMimeType.value = null;
+	innerExtensionMimeType.value = null;
+	innerHasMimeTypeMismatch.value = false;
+	innerHasExecutableContent.value = false;
 	innerDownloadError.value = '';
 	revokeInnerObjectUrl();
 	fileId.value = null;
@@ -688,6 +718,10 @@ watch(() => [props.bucketName, props.filePath], () => {
 	canUseDownloadCount.value = false;
 	ownerCanDisableFileAds.value = false;
 	innerDownloadError.value = '';
+	innerDetectedMimeType.value = null;
+	innerExtensionMimeType.value = null;
+	innerHasMimeTypeMismatch.value = false;
+	innerHasExecutableContent.value = false;
 	revokeInnerObjectUrl();
 	clearExpiryTimer();
 	fetchBrowseTerms();
@@ -765,7 +799,7 @@ onUnmounted(revokeInnerObjectUrl);
     </div>
     <div v-else-if="metaError" class="alert alert-error">{{ metaError }}</div>
     <template v-else>
-      <div v-if="!isDirectory && hasMimeTypeMismatch" :class="['alert', 'alert-warning', 'mb-3', $style.fileTypeWarning]">
+      <div v-if="!isDirectory && !isEntryFile && hasMimeTypeMismatch" :class="['alert', 'alert-warning', 'mb-3', $style.fileTypeWarning]">
         <p :class="$style.fileTypeWarningLine">ファイル名の拡張子と内容が一致していない可能性があります。</p>
         <p v-if="hasExecutableContent" :class="$style.fileTypeWarningLine">実行可能ファイルとして検出されています。</p>
         <p v-if="fileMimeType || fileExtensionMimeType" :class="$style.fileTypeWarningLine">内容: {{ fileMimeType ?? '不明' }} / 拡張子: {{ fileExtensionMimeType ?? '不明' }}</p>
@@ -773,19 +807,25 @@ onUnmounted(revokeInnerObjectUrl);
 
       <!-- アーカイブ内ファイルビュー (ログイン有無問わず) -->
       <template v-if="(isTargz || isTar) && isEntryFile">
-        <div v-if="innerDownloadError" class="alert alert-error mb-3">{{ innerDownloadError }}</div>
-        <div class="card file-actions">
-          <a :href="innerPreviewUrl || innerDownloadUrl" download class="btn btn-primary" @click="downloadInnerEntry">
-            <Download :size="16" :stroke-width="2" aria-hidden="true" />
-            ダウンロード
-          </a>
-        </div>
-        <div v-if="innerPreviewUrl && isInnerImage" :class="$style.innerImagePreview">
-          <img :src="innerPreviewUrl" :alt="entryPath ?? ''" class="file-preview-image">
-        </div>
-        <MarkdownPreview v-else-if="innerPreviewUrl && isInnerMarkdown" :url="innerPreviewUrl" :filename="entryPath ?? ''" :class="$style.innerMarkdownPreview" />
-        <JsonPreview v-else-if="innerPreviewUrl && isInnerJson" :url="innerPreviewUrl" :filename="entryPath ?? ''" :class="$style.innerJsonPreview" />
-        <RawTextPreview v-else-if="innerPreviewUrl && isInnerTextLike" :url="innerPreviewUrl" :filename="entryPath ?? ''" :class="$style.innerRawPreview" />
+        <BrowseFile
+          :bucketName="bucketName"
+          :filePath="entryPath ?? ''"
+          :fileId="fileId ?? ''"
+          :bucketId="null"
+          :token="autoToken ?? undefined"
+          :downloadUrlOverride="innerPreviewUrl || innerDownloadUrl"
+          :previewUrl="innerPreviewUrl"
+          :downloadFilename="innerDownloadFilename"
+          :downloadErrorOverride="innerDownloadError"
+          :mimeType="innerDetectedMimeType ?? innerMeta?.mimeType ?? null"
+          :extensionMimeType="innerExtensionMimeType"
+          :hasMimeTypeMismatch="innerHasMimeTypeMismatch"
+          :hasExecutableContent="innerHasExecutableContent"
+          :report-path="`${baseFilePath}/${archiveEntryMount.slice(1)}/${entryPath ?? ''}`"
+          :hideManagement="true"
+          :showAds="false"
+          @download="downloadInnerEntry"
+        />
       </template>
 
       <!-- ファイル・ログイン済み: タブ付きパネル -->
@@ -886,22 +926,6 @@ onUnmounted(revokeInnerObjectUrl);
 <style module lang="scss">
 .breadcrumbsNoMargin {
   margin-bottom: 0;
-}
-
-.innerImagePreview {
-  margin-top: 16px;
-}
-
-.innerMarkdownPreview {
-  margin-top: 16px;
-}
-
-.innerJsonPreview {
-  margin-top: 16px;
-}
-
-.innerRawPreview {
-  margin-top: 16px;
 }
 
 .termsGate {

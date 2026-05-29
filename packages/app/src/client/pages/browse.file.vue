@@ -27,17 +27,36 @@ const props = defineProps<{
 	isModerationForcedPrivate?: boolean;
 	ownerCanDisableFileAds?: boolean;
 	token?: string;
+	downloadUrlOverride?: string;
+	previewUrl?: string;
+	downloadFilename?: string;
+	downloadErrorOverride?: string;
+	mimeType?: string | null;
+	extensionMimeType?: string | null;
+	hasMimeTypeMismatch?: boolean;
+	hasExecutableContent?: boolean;
+	reportPath?: string;
+	hideManagement?: boolean;
+	showAds?: boolean;
 }>();
 
 const emit = defineEmits<{
 	(e: 'update:isModerationForcedPrivate', value: boolean): void;
+	(e: 'download', event: MouseEvent): void;
 }>();
 
 const downloadUrl = computed(() => {
+	if (props.downloadUrlOverride) return props.downloadUrlOverride;
 	if (!props.fileId) return '';
 	const base = `/d/${props.fileId}`;
 	return props.token ? `${base}?token=${props.token}` : base;
 });
+const previewUrl = computed(() => props.previewUrl || downloadUrl.value);
+const downloadFilename = computed(() => props.downloadFilename || props.filePath.split('/').filter(Boolean).at(-1) || 'download');
+const visibleMimeType = computed(() => props.mimeType ?? null);
+const visibleExtensionMimeType = computed(() => props.extensionMimeType ?? null);
+const canReport = computed(() => !props.isOwner && (!props.hideManagement || props.reportPath != null));
+const reportPathContext = computed(() => props.reportPath ? `対象パス: ${props.reportPath}` : '');
 const isGz = computed(() => {
 	const lower = props.filePath.toLowerCase();
 	return lower.endsWith('.gz') && !lower.endsWith('.tar.gz');
@@ -82,6 +101,7 @@ const turnstileEnabled = ref(false);
 const turnstileSiteKey = ref('');
 const reportTurnstileToken = ref<string | null>(null);
 const downloadError = ref('');
+const visibleDownloadError = computed(() => props.downloadErrorOverride || downloadError.value);
 const downloadProgress = ref<DownloadTransformProgress | null>(null);
 let downloadTransformWorker: Worker | null = null;
 let downloadTransformRequestId = 0;
@@ -107,6 +127,12 @@ const canSubmitReport = computed(() =>
 const reporterNameMissing = computed(() => reporterName.value.trim() === '');
 const reporterEmailMissing = computed(() => reporterEmail.value.trim() === '');
 const requiredReportFieldRule = (value: unknown): true | string => typeof value === 'string' && value.trim() !== '' || '入力してください。';
+
+function reportDetailWithContext(): string {
+	if (!props.reportPath) return reportDetail.value;
+	const detail = reportDetail.value.trim();
+	return detail ? `${reportPathContext.value}\n\n${detail}`.slice(0, 4000) : reportPathContext.value;
+}
 
 async function openReportDialog(): Promise<void> {
 	reportDialog.value = true;
@@ -141,7 +167,7 @@ async function submitReport(): Promise<void> {
 			relationshipId: reportRelationshipId.value || null,
 			contact: reportContact.value.trim() || null,
 			summary: reportSummary.value,
-			detail: reportDetail.value,
+			detail: reportDetailWithContext(),
 			turnstileToken: turnstileEnabled.value && reportTurnstileToken.value ? reportTurnstileToken.value : undefined,
 		});
 		if (!result.ok) throw new Error(result.data.message || '通報を送信できませんでした');
@@ -297,29 +323,35 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
+    <div v-if="hasMimeTypeMismatch" :class="['alert', 'alert-warning', 'mb-3', $style.fileTypeWarning]">
+      <p :class="$style.fileTypeWarningLine">ファイル名の拡張子と内容が一致していない可能性があります。</p>
+      <p v-if="hasExecutableContent" :class="$style.fileTypeWarningLine">実行可能ファイルとして検出されています。</p>
+      <p v-if="visibleMimeType || visibleExtensionMimeType" :class="$style.fileTypeWarningLine">内容: {{ visibleMimeType ?? '不明' }} / 拡張子: {{ visibleExtensionMimeType ?? '不明' }}</p>
+    </div>
+
     <div class="card file-actions">
-      <a :href="downloadUrl" download class="btn btn-primary">
+      <a :href="downloadUrl" :download="downloadFilename" class="btn btn-primary" @click="emit('download', $event)">
         <Download :size="16" :stroke-width="2" aria-hidden="true" />
         ダウンロード
       </a>
-      <button v-if="isGz" type="button" class="btn btn-secondary" :disabled="downloadProgress != null" @click="startDecompressedDownload">
+      <button v-if="!hideManagement && isGz" type="button" class="btn btn-secondary" :disabled="downloadProgress != null" @click="startDecompressedDownload">
         <PackageOpen :size="16" :stroke-width="2" aria-hidden="true" />
         展開してダウンロード
       </button>
-      <Button.Root v-if="authStore.user && bucketId" class="btn btn-ghost" @click="moveDialog = true">
+      <Button.Root v-if="!hideManagement && authStore.user && bucketId" class="btn btn-ghost" @click="moveDialog = true">
         <Button.Content>
           <TextCursorInput :size="16" :stroke-width="2" aria-hidden="true" />
           移動/名前変更
         </Button.Content>
       </Button.Root>
-      <Button.Root v-if="authStore.user" class="btn btn-ghost-danger" @click="deleteDialog = true">
+      <Button.Root v-if="!hideManagement && authStore.user" class="btn btn-ghost-danger" @click="deleteDialog = true">
         <Button.Content>
           <Trash2 :size="16" :stroke-width="2" aria-hidden="true" />
           削除
         </Button.Content>
       </Button.Root>
       <Button.Root
-        v-if="authStore.user?.isAdmin || authStore.user?.isModerator"
+        v-if="!hideManagement && (authStore.user?.isAdmin || authStore.user?.isModerator)"
         :class="['btn', isModerationForcedPrivate ? 'btn-ghost' : 'btn-ghost-danger']"
         :disabled="moderationSaving"
         @click="requestModerationForcedPrivate(!isModerationForcedPrivate)"
@@ -330,7 +362,7 @@ onBeforeUnmount(() => {
           {{ isModerationForcedPrivate ? '強制非公開を解除' : '強制非公開' }}
         </Button.Content>
       </Button.Root>
-      <Button.Root v-if="!isOwner" class="btn btn-ghost" @click="openReportDialog">
+      <Button.Root v-if="canReport" class="btn btn-ghost" @click="openReportDialog">
         <Button.Content>
           <Flag :size="16" :stroke-width="2" aria-hidden="true" />
           通報
@@ -338,16 +370,16 @@ onBeforeUnmount(() => {
       </Button.Root>
     </div>
 
-    <AdSlot :owner-can-disable-file-ads="ownerCanDisableFileAds" />
+    <AdSlot v-if="showAds !== false" :owner-can-disable-file-ads="ownerCanDisableFileAds" />
 
     <div v-if="isImage" :class="$style.imagePreview">
-      <img :src="downloadUrl" :alt="filePath" class="file-preview-image">
+      <img :src="previewUrl" :alt="filePath" class="file-preview-image">
     </div>
-    <MarkdownPreview v-else-if="isMarkdown" :url="downloadUrl" :filename="filePath" :class="$style.markdownPreview" />
-    <JsonPreview v-else-if="isJson" :url="downloadUrl" :filename="filePath" :class="$style.jsonPreview" />
-    <RawTextPreview v-else-if="isTextLike" :url="downloadUrl" :filename="filePath" :class="$style.rawPreview" />
+    <MarkdownPreview v-else-if="isMarkdown" :url="previewUrl" :filename="filePath" :class="$style.markdownPreview" />
+    <JsonPreview v-else-if="isJson" :url="previewUrl" :filename="filePath" :class="$style.jsonPreview" />
+    <RawTextPreview v-else-if="isTextLike" :url="previewUrl" :filename="filePath" :class="$style.rawPreview" />
 
-    <div v-if="downloadError" class="alert alert-error mt-3">{{ downloadError }}</div>
+    <div v-if="visibleDownloadError" class="alert alert-error mt-3">{{ visibleDownloadError }}</div>
     <div v-if="deleteError" class="alert alert-error mt-3">{{ deleteError }}</div>
     <div v-if="moderationError" class="alert alert-error mt-3">{{ moderationError }}</div>
 
@@ -468,6 +500,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="form-group">
             <label class="form-label" for="reportDetail">通報の詳細</label>
+            <div v-if="reportPathContext" :class="$style.reportPathContext">{{ reportPathContext }}</div>
             <textarea id="reportDetail" v-model="reportDetail" class="form-input" :class="$style.reportTextarea" maxlength="4000" />
           </div>
           <TurnstileWidget
@@ -505,6 +538,15 @@ onBeforeUnmount(() => {
 
 .rawPreview {
   margin-top: 16px;
+}
+
+.fileTypeWarning {
+  display: grid;
+  gap: 4px;
+}
+
+.fileTypeWarningLine {
+  margin: 0;
 }
 
 .reportDialog {
@@ -573,6 +615,13 @@ onBeforeUnmount(() => {
 .reportTextarea {
   min-height: 140px;
   resize: vertical;
+}
+
+.reportPathContext {
+  margin-bottom: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }
 
 .reportActions {
