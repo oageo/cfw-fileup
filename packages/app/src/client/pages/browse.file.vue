@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from 'vue';
+import { ref, computed, onBeforeUnmount, watch } from 'vue';
 import { AlertDialog, Button, Input } from '@vuetify/v0';
 import { Download, Flag, PackageOpen, ShieldCheck, ShieldOff, TextCursorInput, Trash2 } from '@lucide/vue';
 import { authHeaders, authStore } from '@/store/auth';
@@ -17,6 +17,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue';
 import RawTextPreview from '@/components/RawTextPreview.vue';
 import JsonPreview from '@/components/JsonPreview.vue';
 import AdSlot from '@/components/AdSlot.vue';
+import { parseExifDisplayItems, type ExifDisplayItem } from '@/utils/exif';
 
 const props = defineProps<{
 	bucketName: string;
@@ -53,6 +54,7 @@ const downloadUrl = computed(() => {
 });
 const previewUrl = computed(() => props.previewUrl || downloadUrl.value);
 const downloadFilename = computed(() => props.downloadFilename || props.filePath.split('/').filter(Boolean).at(-1) || 'download');
+const displayFilename = computed(() => props.filePath.split('/').filter(Boolean).at(-1) || props.filePath || 'download');
 const visibleMimeType = computed(() => props.mimeType ?? null);
 const visibleExtensionMimeType = computed(() => props.extensionMimeType ?? null);
 const canReport = computed(() => !props.isOwner && (!props.hideManagement || props.reportPath != null));
@@ -103,6 +105,7 @@ const reportTurnstileToken = ref<string | null>(null);
 const downloadError = ref('');
 const visibleDownloadError = computed(() => props.downloadErrorOverride || downloadError.value);
 const downloadProgress = ref<DownloadTransformProgress | null>(null);
+const exifItems = ref<ExifDisplayItem[]>([]);
 let downloadTransformWorker: Worker | null = null;
 let downloadTransformRequestId = 0;
 const downloadTransformRequests = new Map<string, {
@@ -283,6 +286,25 @@ function decompressedFilename(path: string): string {
 	return path.toLowerCase().endsWith('.gz') ? path.slice(0, -3) : path;
 }
 
+async function loadExif(): Promise<void> {
+	exifItems.value = [];
+	if (!isImage.value || !previewUrl.value) return;
+	const requestUrl = previewUrl.value;
+	try {
+		const res = await fetch(requestUrl, {
+			headers: {
+				...authHeaders(),
+				Range: 'bytes=0-262143',
+			},
+		});
+		if (requestUrl !== previewUrl.value) return;
+		if (!res.ok) return;
+		const bytes = new Uint8Array(await res.arrayBuffer());
+		if (requestUrl !== previewUrl.value) return;
+		exifItems.value = parseExifDisplayItems(bytes);
+	} catch { /* no EXIF preview */ }
+}
+
 async function startDecompressedDownload(): Promise<void> {
 	downloadError.value = '';
 	downloadProgress.value = null;
@@ -319,6 +341,9 @@ onBeforeUnmount(() => {
 	downloadTransformWorker?.terminate();
 	downloadTransformWorker = null;
 });
+watch([isImage, previewUrl], () => {
+	void loadExif();
+}, { immediate: true });
 </script>
 
 <template>
@@ -372,8 +397,17 @@ onBeforeUnmount(() => {
 
     <AdSlot v-if="showAds !== false" :owner-can-disable-file-ads="ownerCanDisableFileAds" />
 
-    <div v-if="isImage" :class="$style.imagePreview">
+    <div v-if="isImage" :class="[$style.imagePreview, exifItems.length > 0 ? $style.imagePreviewWithExif : null]">
       <img :src="previewUrl" :alt="filePath" class="file-preview-image">
+      <aside v-if="exifItems.length > 0" :class="$style.exifPanel" aria-label="EXIF情報">
+        <h3 :class="$style.exifTitle" :title="displayFilename">{{ displayFilename }}</h3>
+        <dl :class="$style.exifList">
+          <template v-for="item in exifItems" :key="item.label">
+            <dt>{{ item.label }}</dt>
+            <dd>{{ item.value }}</dd>
+          </template>
+        </dl>
+      </aside>
     </div>
     <MarkdownPreview v-else-if="isMarkdown" :url="previewUrl" :filename="filePath" :class="$style.markdownPreview" />
     <JsonPreview v-else-if="isJson" :url="previewUrl" :filename="filePath" :class="$style.jsonPreview" />
@@ -528,6 +562,49 @@ onBeforeUnmount(() => {
   margin-top: 16px;
 }
 
+.imagePreviewWithExif {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(220px, 320px);
+  align-items: start;
+  gap: 16px;
+}
+
+.exifPanel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+}
+
+.exifTitle {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.exifList {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 14px;
+  margin: 0;
+  font-size: 0.85rem;
+
+  dt {
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    padding: 8px 0;
+  }
+
+  dd {
+    border-top: 1px solid var(--color-border);
+    margin: 0;
+    padding: 8px 0;
+    overflow-wrap: anywhere;
+  }
+}
+
 .markdownPreview {
   margin-top: 16px;
 }
@@ -631,6 +708,14 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  .imagePreviewWithExif {
+    grid-template-columns: 1fr;
+  }
+
+  .exifPanel {
+    width: 100%;
+  }
+
   .reportGrid {
     grid-template-columns: 1fr;
   }
