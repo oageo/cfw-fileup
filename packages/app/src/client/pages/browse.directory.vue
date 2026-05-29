@@ -1841,7 +1841,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
 
 .gridView {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
   gap: 12px;
 }
 
@@ -1905,7 +1905,7 @@ watch([isPartiallySelected, isAllSelected], async () => {
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 150px;
+  height: 175px;
   color: var(--color-text-muted);
   text-decoration: none;
   background: var(--color-bg);
