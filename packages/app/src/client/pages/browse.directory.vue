@@ -1978,6 +1978,8 @@ watch([isPartiallySelected, isAllSelected], async () => {
   gap: 4px;
   margin-top: auto;
   padding-top: 2px;
+  flex-wrap: wrap;
+  justify-content: end;
 }
 
 .gridCardActionButton {
