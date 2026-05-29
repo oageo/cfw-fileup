@@ -27,6 +27,7 @@ const ports = new Set<MessagePort>();
 const jobs: UploadJobSnapshot[] = [];
 const queue: Array<{ id: string; request: UploadJobRequest }> = [];
 let running = false;
+const NON_RESUME_UPLOAD_LIMIT_BYTES = 32 * 1024 * 1024;
 
 self.onconnect = (event) => {
 	const port = event.ports[0];
@@ -198,10 +199,31 @@ async function tusUpload(fileId: string, blob: Blob, path: string, partSize: num
 	}
 }
 
+async function nonResumeUpload(fileId: string, blob: Blob, path: string, request: UploadJobRequest, onProgress: (uploaded: number) => void): Promise<void> {
+	const res = await fetch(`/upload/${fileId}`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': blob.type || 'application/octet-stream',
+			'Content-Length': String(blob.size),
+			...authHeaders(request.authToken),
+		},
+		body: blob,
+	});
+	if (!res.ok) {
+		const err = (await res.json().catch(() => ({}))) as ApiFailure;
+		throw new Error(`アップロード失敗 (${path}): ${err.message ?? res.status}`);
+	}
+	onProgress(blob.size);
+}
+
 async function uploadBlob(blob: Blob, path: string, request: UploadJobRequest, onProgress: (uploaded: number) => void): Promise<void> {
 	const { fileId, partSize } = await openUpload(path, request);
 	try {
-		await tusUpload(fileId, blob, path, partSize, request, onProgress);
+		if (blob.size < NON_RESUME_UPLOAD_LIMIT_BYTES) {
+			await nonResumeUpload(fileId, blob, path, request, onProgress);
+		} else {
+			await tusUpload(fileId, blob, path, partSize, request, onProgress);
+		}
 		await closeUpload(fileId, request);
 	} catch (err) {
 		await deleteExistingFile(path, request).catch(() => {});

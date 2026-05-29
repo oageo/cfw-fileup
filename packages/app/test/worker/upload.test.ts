@@ -30,6 +30,47 @@ async function setupFileForUpload() {
 	return { token, bucketId, fileId };
 }
 
+describe('PUT /upload/:fileId', () => {
+	test('uploads a small file without starting multipart resume upload', async () => {
+		const { token, fileId } = await setupFileForUpload();
+		const data = new Uint8Array([1, 2, 3, 4, 5]);
+
+		const res = await app.request(`/upload/${fileId}`, {
+			method: 'PUT',
+			headers: {
+				Authorization: `Bearer ${token}`,
+				'Content-Type': 'application/octet-stream',
+				'Content-Length': String(data.length),
+			},
+			body: data.buffer,
+		}, env);
+		expect(res.status).toBe(204);
+
+		const object = await env.R2.get(fileId);
+		expect(object).not.toBeNull();
+		expect(new Uint8Array(await object!.arrayBuffer())).toEqual(data);
+
+		const row = await env.DB.prepare('SELECT upload_id FROM files WHERE id = ?').bind(fileId).first<{ upload_id: string | null }>();
+		expect(row?.upload_id).toBeNull();
+	});
+
+	test('rejects the removed non-resume suffix route', async () => {
+		const { token, fileId } = await setupFileForUpload();
+		const data = new Uint8Array([1, 2, 3]);
+
+		const res = await app.request(`/upload/${fileId}/non-resume`, {
+			method: 'PUT',
+			headers: {
+				Authorization: `Bearer ${token}`,
+				'Content-Type': 'application/octet-stream',
+				'Content-Length': String(data.length),
+			},
+			body: data.buffer,
+		}, env);
+		expect(res.status).toBe(404);
+	});
+});
+
 describe('GET /upload/:fileId/resume', () => {
 	test('returns 200 with Upload-Offset: 0 before upload', async () => {
 		const { token, fileId } = await setupFileForUpload();

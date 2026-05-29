@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { eq, max, sql } from 'drizzle-orm';
-import { buckets, files, uploadParts } from '../scheme/index';
+import { buckets, DEFAULT_PART_SIZE, files, uploadParts } from '../scheme/index';
 import { getDb } from '../utils/db';
 import { abortUpload } from '../utils/abort-upload';
 import { authMiddleware } from '../middleware/auth';
@@ -11,6 +11,63 @@ import { getQuotaForUser } from '../utils/rate-limit';
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('/upload/*', authMiddleware);
+
+// Do not remove this plain PUT upload path. Files smaller than DEFAULT_PART_SIZE
+// intentionally avoid R2 multipart/TUS resume to reduce Class A operations and upload overhead.
+app.put('/upload/:fileId', async (c) => {
+	const db = getDb(c.env);
+	const user = c.get('user');
+	const fileId = c.req.param('fileId');
+
+	const file = await db.select().from(files).where(eq(files.id, fileId)).get();
+
+	if (!file) {
+		throw apiError(404, 'FILE_NOT_FOUND');
+	}
+
+	if (file.userId !== user.id && !user.isAdmin) {
+		throw apiError(403, 'FORBIDDEN');
+	}
+
+	if (file.uploadExpiresAt < Date.now()) {
+		await abortUpload(file, c.env);
+		throw apiError(410, 'UPLOAD_EXPIRED');
+	}
+
+	if (file.uploadId) {
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER');
+	}
+
+	const existingObject = await c.env.R2.head(file.r2Key);
+	if (existingObject) {
+		throw apiError(409, 'FILE_ALREADY_EXISTS');
+	}
+
+	const contentLength = parseInt(c.req.header('Content-Length') ?? '0', 10);
+	if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER');
+	}
+	if (contentLength >= DEFAULT_PART_SIZE) {
+		throw apiError(400, 'INVALID_UPLOAD_OFFSET_HEADER', `non-resume upload must be smaller than ${DEFAULT_PART_SIZE} bytes`);
+	}
+
+	const [bucket, quota] = await Promise.all([
+		db.select().from(buckets).where(eq(buckets.id, file.bucketId)).get(),
+		getQuotaForUser(c.env, file.userId),
+	]);
+	if (!bucket) throw apiError(404, 'BUCKET_NOT_FOUND');
+	if (quota.maxBucketSizeBytes !== null && bucket.usedBytes + contentLength > quota.maxBucketSizeBytes) {
+		throw apiError(429, 'BUCKET_LIMIT_EXCEEDED');
+	}
+
+	await c.env.R2.put(file.r2Key, c.req.raw.body ?? new Uint8Array(0), {
+		httpMetadata: {
+			contentType: c.req.header('Content-Type') || undefined,
+		},
+	});
+
+	return new Response(null, { status: 204 });
+});
 
 app.get('/upload/:fileId/resume', async (c) => {
 	const db = getDb(c.env);
