@@ -17,12 +17,10 @@ const EMAIL_VERIFICATION_TOKEN_STORAGE_KEY = 'cfw_fileup_email_verification_toke
 const indieauthProfileUrl = ref('');
 const emailInput = ref('');
 const currentPassword = ref('');
-const newPassword = ref('');
 const googleLoading = ref(false);
 const indieauthLoading = ref(false);
 const passkeyLoading = ref(false);
 const emailLoading = ref(false);
-const passwordLoading = ref(false);
 const emailVerifyLoading = ref(false);
 const turnstileEnabled = ref(false);
 const turnstileSiteKey = ref('');
@@ -34,9 +32,8 @@ const googleAuthEnabled = ref(false);
 const misskeyAccounts = ref<LinkedMisskeyAccount[]>([]);
 
 const hasGoogle = computed(() => authStore.user?.hasGoogle ?? false);
-const hasPassword = computed(() => authStore.user?.hasPassword ?? true);
 const recentlyAuthenticated = computed(() => authStore.user?.recentlyAuthenticated ?? false);
-const canStartLink = computed(() => recentlyAuthenticated.value || (hasPassword.value && currentPassword.value.length > 0));
+const canStartLink = computed(() => recentlyAuthenticated.value || ((authStore.user?.hasPassword ?? true) && currentPassword.value.length > 0));
 const emailStatus = computed(() => {
 	if (!authStore.user?.email) return '未登録';
 	return authStore.user.emailVerifiedAt === null ? '確認待ち' : '確認済み';
@@ -163,49 +160,6 @@ async function verifyEmail(token: string): Promise<void> {
 		error.value = String(e);
 	} finally {
 		emailVerifyLoading.value = false;
-	}
-}
-
-async function saveInitialPassword(): Promise<void> {
-	error.value = '';
-	success.value = '';
-	passwordLoading.value = true;
-	try {
-		const result = await apiPost('/api/account/update', { newPassword: newPassword.value });
-		if (!result.ok) {
-			error.value = result.data.message || 'パスワード設定に失敗しました';
-			return;
-		}
-		newPassword.value = '';
-		await fetchCurrentUser();
-		success.value = 'パスワードを設定しました';
-	} catch (e) {
-		error.value = String(e);
-	} finally {
-		passwordLoading.value = false;
-	}
-}
-
-async function savePassword(): Promise<void> {
-	error.value = '';
-	success.value = '';
-	passwordLoading.value = true;
-	try {
-		const result = await apiPost('/api/account/update', {
-			currentPassword: currentPassword.value,
-			newPassword: newPassword.value,
-		});
-		if (!result.ok) {
-			error.value = result.data.message || 'パスワード変更に失敗しました';
-			return;
-		}
-		currentPassword.value = '';
-		newPassword.value = '';
-		success.value = 'パスワードを変更しました';
-	} catch (e) {
-		error.value = String(e);
-	} finally {
-		passwordLoading.value = false;
 	}
 }
 
@@ -376,51 +330,6 @@ onMounted(async () => {
             <Button.Content>パスキーで再認証</Button.Content>
           </Button.Root>
         </template>
-      </div>
-
-      <div v-if="hasPassword" :class="['card', $style.card]">
-        <div :class="$style.serviceHeader">
-          <div>
-            <h3 :class="$style.serviceTitle">パスワード</h3>
-            <p :class="$style.serviceDescription">ログインとバックアップコード認証に使うパスワードを変更します。</p>
-          </div>
-          <span class="badge badge-success">設定済み</span>
-        </div>
-        <Form :class="$style.form" @submit="savePassword">
-          <div :class="$style.formGroup">
-            <label class="form-label" for="current-password">現在のパスワード</label>
-            <input id="current-password" v-model="currentPassword" class="form-input" type="password" autocomplete="current-password" required>
-          </div>
-          <div :class="$style.formGroup">
-            <label class="form-label" for="new-password">新しいパスワード</label>
-            <input id="new-password" v-model="newPassword" class="form-input" type="password" autocomplete="new-password" minlength="8" required>
-          </div>
-          <button class="btn btn-primary" type="submit" :disabled="passwordLoading || !currentPassword || newPassword.length < 8">
-            {{ passwordLoading ? '処理中...' : 'パスワードを変更' }}
-          </button>
-        </Form>
-      </div>
-
-      <div v-if="!hasPassword" :class="['card', $style.card]">
-        <div :class="$style.serviceHeader">
-          <div>
-            <h3 :class="$style.serviceTitle">パスワード</h3>
-            <p :class="$style.serviceDescription">バックアップコードでログインするときに使います。</p>
-          </div>
-          <span class="badge badge-info">未設定</span>
-        </div>
-        <Form :class="$style.form" @submit="saveInitialPassword">
-          <div :class="$style.formGroup">
-            <label class="form-label" for="initial-new-password">新しいパスワード</label>
-            <input id="initial-new-password" v-model="newPassword" class="form-input" type="password" autocomplete="new-password" minlength="8" required>
-          </div>
-          <div v-if="!recentlyAuthenticated" class="alert alert-info">
-            パスワードを設定するにはパスキーで再認証してください。
-          </div>
-          <button class="btn btn-primary" type="submit" :disabled="passwordLoading || !recentlyAuthenticated || newPassword.length < 8">
-            {{ passwordLoading ? '処理中...' : 'パスワードを設定' }}
-          </button>
-        </Form>
       </div>
 
       <div v-if="googleAuthEnabled" :class="['card', $style.card]">

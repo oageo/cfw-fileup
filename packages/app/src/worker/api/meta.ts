@@ -7,6 +7,7 @@ import { getPaymentChainRpcUrl } from '../utils/payment-rpc';
 import { isTurnstileConfigured } from '../utils/turnstile';
 import { DEFAULT_APP_NAME, DEFAULT_BILLING_RESIDENCY_STATEMENT } from '../../shared/app-settings';
 import { runBackgroundTask } from '../utils/background-task';
+import { isGoogleAuthConfigured } from './google-auth';
 
 const app = new Hono<{ Bindings: Env }>();
 const metaCacheName = 'api-meta-response';
@@ -83,7 +84,7 @@ app.get('/meta', async (c) => {
 		const appName = settings.get('app_name')?.trim() || DEFAULT_APP_NAME;
 		const mode = settings.get('registration_mode') ?? 'passphrase';
 		const googleRequired = settings.get('google_required') === 'true';
-		const googleAuthEnabled = (c.env.GOOGLE_CLIENT_ID as string) !== '' && (c.env.GOOGLE_CLIENT_SECRET as string) !== '';
+		const googleAuthEnabled = isGoogleAuthConfigured(c.env);
 		const cryptoPaymentsEnabled = await canAcceptCryptoPayments(c.env);
 		const walletConnectChains = cryptoPaymentsEnabled
 			? await db

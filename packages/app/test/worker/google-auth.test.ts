@@ -21,9 +21,20 @@ const noGoogleEnv = Object.assign({}, env, {
 	GOOGLE_REDIRECT_URI: '',
 });
 
+const undefinedGoogleEnv = Object.assign({}, env, {
+	GOOGLE_CLIENT_ID: undefined,
+	GOOGLE_CLIENT_SECRET: undefined,
+	GOOGLE_REDIRECT_URI: undefined,
+});
+
 describe('GET /api/auth/google', () => {
 	test('returns 503 when Google OAuth is not configured', async () => {
 		const res = await app.request('/api/auth/google', { method: 'GET' }, noGoogleEnv);
+		expect(res.status).toBe(503);
+	});
+
+	test('returns 503 when Google OAuth env vars are undefined', async () => {
+		const res = await app.request('/api/auth/google', { method: 'GET' }, undefinedGoogleEnv);
 		expect(res.status).toBe(503);
 	});
 
@@ -199,4 +210,5 @@ describe('google_required setting', () => {
 		expect(typeof data.googleAuthEnabled).toBe('boolean');
 		expect(typeof data.googleRequired).toBe('boolean');
 	});
+
 });

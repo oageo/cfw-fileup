@@ -34,10 +34,14 @@ interface GoogleTokenResponse {
 }
 
 function getRedirectUri(env: Env, url: URL): string {
-	if ((env.GOOGLE_REDIRECT_URI as string) !== '') {
+	if ((env.GOOGLE_REDIRECT_URI as string | undefined)?.trim()) {
 		return env.GOOGLE_REDIRECT_URI;
 	}
 	return `${url.protocol}//${url.host}/api/auth/google/callback`;
+}
+
+export function isGoogleAuthConfigured(env: Env): boolean {
+	return !!(env.GOOGLE_CLIENT_ID as string | undefined)?.trim() && !!(env.GOOGLE_CLIENT_SECRET as string | undefined)?.trim();
 }
 
 function googleErrorLocation(error: string, path: '/signin' | '/signup' = '/signin'): string {
@@ -68,7 +72,7 @@ function createAuthCompleteHtml(token: string, redirectPath = '/my/buckets'): st
 const app = new Hono<{ Bindings: Env }>();
 
 export async function createGoogleAuthUrl(env: Env, requestUrl: URL, linkUserId?: string, signupPassphrase?: string, signupUsername?: string): Promise<string> {
-	if ((env.GOOGLE_CLIENT_ID as string) === '' || (env.GOOGLE_CLIENT_SECRET as string) === '') {
+	if (!isGoogleAuthConfigured(env)) {
 		throw apiError(503, 'GOOGLE_OAUTH_IS_NOT_CONFIGURED');
 	}
 
@@ -112,7 +116,7 @@ app.get('/', async (c) => {
 });
 
 app.get('/callback', async (c) => {
-	if ((c.env.GOOGLE_CLIENT_ID as string) === '' || (c.env.GOOGLE_CLIENT_SECRET as string) === '') {
+	if (!isGoogleAuthConfigured(c.env)) {
 		throw apiError(503, 'GOOGLE_OAUTH_IS_NOT_CONFIGURED');
 	}
 

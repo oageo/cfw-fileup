@@ -68,14 +68,19 @@ export const ROUTE_DEF = [
 		component: page(() => import('@/pages/about.vue')),
 	},
 	{
+		path: '/my/security',
+		name: 'my-security',
+		component: page(() => import('@/pages/my/security.vue')),
+	},
+	{
 		path: '/my/passkeys',
 		name: 'my-passkeys',
-		component: page(() => import('@/pages/my/passkeys.vue')),
+		component: page(() => import('@/pages/my/security.vue')),
 	},
 	{
 		path: '/my/tokens',
 		name: 'my-tokens',
-		component: page(() => import('@/pages/my/tokens.vue')),
+		component: page(() => import('@/pages/my/security.vue')),
 	},
 	{
 		path: '/my/account',

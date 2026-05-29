@@ -139,11 +139,8 @@ function toggleTheme(): void {
                   <Button.Root :as="NirA" to="/my/payments" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>支払い管理</Button.Content>
                   </Button.Root>
-                  <Button.Root :as="NirA" to="/my/passkeys" class="btn btn-ghost w-full" @click="closeAppNav">
-                    <Button.Content>パスキー</Button.Content>
-                  </Button.Root>
-                  <Button.Root :as="NirA" to="/my/tokens" class="btn btn-ghost w-full" @click="closeAppNav">
-                    <Button.Content>アクセストークン</Button.Content>
+                  <Button.Root :as="NirA" to="/my/security" class="btn btn-ghost w-full" @click="closeAppNav">
+                    <Button.Content>セキュリティー</Button.Content>
                   </Button.Root>
                   <Button.Root :as="NirA" to="/my/account" class="btn btn-ghost w-full" @click="closeAppNav">
                     <Button.Content>アカウント連携</Button.Content>
