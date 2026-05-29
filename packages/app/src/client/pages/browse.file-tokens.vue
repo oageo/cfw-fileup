@@ -254,6 +254,9 @@ onMounted(loadTokens);
     <!-- 発行フォーム -->
     <div v-if="fileVisibility === 'public'" :class="[$style.sectionCard, 'card', 'mb-3']">
       <div :class="[$style.sectionHeading, 'text-muted', 'mb-2']">共有URL</div>
+      <p :class="[$style.shareHint, 'text-muted']">
+        「ファイル一覧とActivityPubに表示」がオンの公開ファイルは、ActivityPub対応サービスからこのリンクを照会できます。
+      </p>
       <div class="flex items-center gap-2 flex-wrap">
         <code :class="$style.tokenUrl">{{ viewUrl() }}</code>
         <Button.Root class="btn btn-secondary" @click="copyPublicUrl">
@@ -263,6 +266,9 @@ onMounted(loadTokens);
     </div>
     <div v-else :class="[$style.sectionCard, 'card', 'mb-3']">
       <div :class="[$style.sectionHeading, 'text-muted', 'mb-2']">新しい共有URLを発行</div>
+      <p :class="[$style.shareHint, 'text-muted']">
+        ActivityPubでのリンク照会は、公開ファイルで「ファイル一覧とActivityPubに表示」をオンにした場合に有効です。
+      </p>
 
       <div class="flex items-center gap-3 flex-wrap">
         <select v-model="expiryMode" :class="[$style.expiryModeSelect, 'form-input']">
@@ -410,6 +416,12 @@ onMounted(loadTokens);
 .sectionHeading {
   font-size: 0.875rem;
   font-weight: 600;
+}
+
+.shareHint {
+  margin: -4px 0 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
 }
 
 .expiryModeSelect {

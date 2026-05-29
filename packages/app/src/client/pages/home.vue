@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Archive, Cloud, Download, EyeOff, Image, ShieldCheck, Upload } from '@lucide/vue';
+import { Archive, Cloud, Download, EyeOff, Image, RadioTower, ShieldCheck, Upload } from '@lucide/vue';
 import NirA from '@/components/NirA.vue';
 import { authStore } from '@/store/auth';
 import { appName } from '@/store/app-meta';
@@ -42,6 +42,11 @@ const featureItems: FeatureItem[] = [
 		title: 'ダウンロードと公開範囲を管理',
 		description: 'アクセストークン、広告表示、ダウンロード数など、公開後の運用に必要な制御を備えています。',
 		icon: ShieldCheck,
+	},
+	{
+		title: 'ActivityPubから照会',
+		description: '表示設定を有効にした公開ファイルは、対応サービスからリンクを照会できる形式で公開されます。',
+		icon: RadioTower,
 	},
 	{
 		title: '画像をローカルで圧縮',
