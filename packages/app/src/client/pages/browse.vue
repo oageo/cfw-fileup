@@ -203,17 +203,18 @@ async function refreshInnerObjectUrl(): Promise<void> {
 
 async function downloadInnerEntry(event: MouseEvent): Promise<void> {
 	if (!isTargz.value) return;
+	if (innerObjectUrl.value) return;
 	event.preventDefault();
 	try {
 		const blob = await createInnerEntryBlob();
 		const url = URL.createObjectURL(blob);
+		innerObjectUrl.value = url;
 		const a = document.createElement('a');
 		a.href = url;
 		a.download = entryPath.value?.split('/').pop() || 'download';
 		document.body.append(a);
 		a.click();
 		a.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 30_000);
 	} catch (error) {
 		innerDownloadError.value = error instanceof Error ? error.message : String(error);
 	}
@@ -774,7 +775,7 @@ onUnmounted(revokeInnerObjectUrl);
       <template v-if="(isTargz || isTar) && isEntryFile">
         <div v-if="innerDownloadError" class="alert alert-error mb-3">{{ innerDownloadError }}</div>
         <div class="card file-actions">
-          <a :href="innerDownloadUrl" download class="btn btn-primary" @click="downloadInnerEntry">
+          <a :href="innerPreviewUrl || innerDownloadUrl" download class="btn btn-primary" @click="downloadInnerEntry">
             <Download :size="16" :stroke-width="2" aria-hidden="true" />
             ダウンロード
           </a>
