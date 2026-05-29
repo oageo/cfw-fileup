@@ -16,6 +16,7 @@ import { mainRouter } from '@/router';
 import { Nirax, type RouteDef } from '@/nirax';
 import { formatBytes } from '@/utils/byte-size';
 import { Download } from '@lucide/vue';
+import { createBgzfDecompressor } from 'bgzf';
 
 const props = withDefaults(defineProps<{
 	bucketName: string;
@@ -64,13 +65,20 @@ const queryToken = computed(() => {
 const isEntryFile = computed(() => entryPath.value !== null && !entryPath.value.endsWith('/'));
 const isEntryDirectory = computed(() => entryPath.value !== null && entryPath.value.endsWith('/'));
 
-const innerMeta = ref<{ mimeType: string; size?: number } | null>(null);
+type InnerArchiveEntry =
+	| { type: 'tar'; path: string; mimeType: string; size: number }
+	| { type: 'targz'; path: string; mimeType: string; size?: number; aStart: number; aFirstEnd: number; aFinalStart: number; aEnd: number; rStartOffset: number; rEndOffset: number };
+
+const innerMeta = ref<InnerArchiveEntry | null>(null);
+const innerObjectUrl = ref('');
 
 const innerDownloadUrl = computed(() => {
 	if (!fileId.value) return '';
 	const base = `/d/${fileId.value}/${encodeURIComponent(':entries')}/${encodeURIComponent(entryPath.value ?? '')}`;
 	return autoToken.value ? `${base}?token=${autoToken.value}` : base;
 });
+const innerPreviewUrl = computed(() => isTargz.value ? innerObjectUrl.value : innerDownloadUrl.value);
+const innerDownloadError = ref('');
 
 const isInnerImage = computed(() => {
 	const mime = innerMeta.value?.mimeType ?? '';
@@ -98,6 +106,118 @@ const isInnerTextLike = computed(() => {
 	const lower = entryPath.value?.toLowerCase() ?? '';
 	return /\.(?:txt|md|markdown|json|csv|ts|js|mjs|jsx|tsx|vue|css|scss|html|xml|ya?ml|c|cc|cpp|cs|go|h|hpp|java|kt|php|py|rb|rs|sh|sql|svelte|swift)$/.test(lower);
 });
+
+function archiveDownloadUrl(): string {
+	if (!fileId.value) return '';
+	const base = `/d/${fileId.value}`;
+	return autoToken.value ? `${base}?token=${autoToken.value}` : base;
+}
+
+function archiveFetchHeaders(range?: { start: number; end: number }): HeadersInit {
+	return {
+		...authHeaders(),
+		...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+	};
+}
+
+async function fetchArchiveRange(start: number, end: number): Promise<ReadableStream<Uint8Array<ArrayBuffer>>> {
+	const res = await fetch(archiveDownloadUrl(), {
+		headers: archiveFetchHeaders({ start, end }),
+	});
+	if (!res.ok || !res.body) throw new Error(`Failed to fetch archive range: HTTP ${res.status}`);
+	return res.body;
+}
+
+function sliceStream(stream: ReadableStream<Uint8Array<ArrayBuffer>>, start: number): ReadableStream<Uint8Array<ArrayBuffer>> {
+	let position = 0;
+	return stream.pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+		transform(chunk, controller) {
+			const chunkStart = position;
+			position += chunk.byteLength;
+			const chunkEndExclusive = position;
+			const startInChunk = Math.max(start - chunkStart, 0);
+			const endInChunk = chunk.byteLength;
+			if (chunkEndExclusive <= start || startInChunk >= endInChunk) return;
+			controller.enqueue(chunk.slice(startInChunk, endInChunk));
+		},
+	}));
+}
+
+async function streamToBlob(stream: ReadableStream<Uint8Array<ArrayBuffer>>, mimeType: string, trimEndBytes = 0): Promise<Blob> {
+	const chunks: Uint8Array[] = [];
+	const reader = stream.getReader();
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	if (chunks.length === 0) return new Blob([], { type: mimeType });
+	const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+	const bytes = new Uint8Array(totalLength);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	const end = Math.max(0, bytes.byteLength - trimEndBytes);
+	return new Blob([bytes.slice(0, end)], { type: mimeType });
+}
+
+async function createInnerEntryBlob(): Promise<Blob> {
+	const entry = innerMeta.value;
+	if (!entry) throw new Error('Archive entry is not loaded');
+	if (entry.type === 'tar') {
+		throw new Error('Client-side extraction is only used for tar.gz entries');
+	}
+	const stream = await fetchArchiveRange(entry.aStart, entry.aEnd - 1);
+	const decompressed = stream.pipeThrough(createBgzfDecompressor());
+	const sliced = sliceStream(decompressed, entry.rStartOffset);
+	return streamToBlob(sliced, entry.mimeType, entry.rEndOffset);
+}
+
+function revokeInnerObjectUrl(): void {
+	if (innerObjectUrl.value) {
+		URL.revokeObjectURL(innerObjectUrl.value);
+		innerObjectUrl.value = '';
+	}
+}
+
+async function refreshInnerObjectUrl(): Promise<void> {
+	revokeInnerObjectUrl();
+	innerDownloadError.value = '';
+	if (!isTargz.value) return;
+	if (!isEntryFile.value || !innerMeta.value) return;
+	if (!isInnerImage.value && !isInnerMarkdown.value && !isInnerJson.value && !isInnerTextLike.value) return;
+	try {
+		const blob = await createInnerEntryBlob();
+		innerObjectUrl.value = URL.createObjectURL(blob);
+	} catch (error) {
+		revokeInnerObjectUrl();
+		innerDownloadError.value = error instanceof Error ? error.message : String(error);
+	}
+}
+
+async function downloadInnerEntry(event: MouseEvent): Promise<void> {
+	if (!isTargz.value) return;
+	event.preventDefault();
+	try {
+		const blob = await createInnerEntryBlob();
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = entryPath.value?.split('/').pop() || 'download';
+		document.body.append(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 30_000);
+	} catch (error) {
+		innerDownloadError.value = error instanceof Error ? error.message : String(error);
+	}
+}
 
 const breadcrumbs = computed(() => {
 	const parts = baseFilePath.value ? baseFilePath.value.replace(/\/$/, '').split('/') : [];
@@ -292,9 +412,17 @@ async function fetchInnerMeta(): Promise<void> {
 	try {
 		const res = await fetch(url, { headers: authHeaders() });
 		if (!res.ok) return;
-		const data = await res.json() as Array<{ path: string; mimeType: string; size?: number }>;
+		const data = await res.json() as Array<
+			| { path: string; mimeType: string; size: number; offset: number }
+			| { path: string; mimeType: string; size?: number; aStart: number; aFirstEnd: number; aFinalStart: number; aEnd: number; rStartOffset: number; rEndOffset: number }
+		>;
 		const entry = data.find(e => e.path === entryPath.value);
-		innerMeta.value = entry ? { mimeType: entry.mimeType, size: entry.size } : null;
+		innerMeta.value = entry
+			? 'offset' in entry
+				? { type: 'tar', path: entry.path, mimeType: entry.mimeType, size: entry.size }
+				: { type: 'targz', path: entry.path, mimeType: entry.mimeType, size: entry.size, aStart: entry.aStart, aFirstEnd: entry.aFirstEnd, aFinalStart: entry.aFinalStart, aEnd: entry.aEnd, rStartOffset: entry.rStartOffset, rEndOffset: entry.rEndOffset }
+			: null;
+		await refreshInnerObjectUrl();
 	} catch { /* silent */ }
 }
 
@@ -311,6 +439,8 @@ async function fetchMeta(): Promise<void> {
 	metaLoading.value = true;
 	metaError.value = '';
 	innerMeta.value = null;
+	innerDownloadError.value = '';
+	revokeInnerObjectUrl();
 	fileId.value = null;
 	fileBucketId.value = null;
 	fileIsOwner.value = false;
@@ -556,18 +686,23 @@ watch(() => [props.bucketName, props.filePath], () => {
 	fileIsDownloadCountVisible.value = false;
 	canUseDownloadCount.value = false;
 	ownerCanDisableFileAds.value = false;
+	innerDownloadError.value = '';
+	revokeInnerObjectUrl();
 	clearExpiryTimer();
 	fetchBrowseTerms();
 });
 onUnmounted(clearExpiryTimer);
 watch(() => [entryPath.value, queryToken.value], () => {
 	innerMeta.value = null;
+	innerDownloadError.value = '';
+	revokeInnerObjectUrl();
 	if (queryToken.value !== autoToken.value) {
 		fetchBrowseTerms();
 		return;
 	}
 	if (!browseTermsBlocked.value && isEntryFile.value) fetchInnerMeta();
 });
+onUnmounted(revokeInnerObjectUrl);
 </script>
 
 <template>
@@ -637,18 +772,19 @@ watch(() => [entryPath.value, queryToken.value], () => {
 
       <!-- アーカイブ内ファイルビュー (ログイン有無問わず) -->
       <template v-if="(isTargz || isTar) && isEntryFile">
+        <div v-if="innerDownloadError" class="alert alert-error mb-3">{{ innerDownloadError }}</div>
         <div class="card file-actions">
-          <a :href="innerDownloadUrl" download class="btn btn-primary">
+          <a :href="innerDownloadUrl" download class="btn btn-primary" @click="downloadInnerEntry">
             <Download :size="16" :stroke-width="2" aria-hidden="true" />
             ダウンロード
           </a>
         </div>
-        <div v-if="isInnerImage" :class="$style.innerImagePreview">
-          <img :src="innerDownloadUrl" :alt="entryPath ?? ''" class="file-preview-image">
+        <div v-if="innerPreviewUrl && isInnerImage" :class="$style.innerImagePreview">
+          <img :src="innerPreviewUrl" :alt="entryPath ?? ''" class="file-preview-image">
         </div>
-        <MarkdownPreview v-else-if="isInnerMarkdown" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerMarkdownPreview" />
-        <JsonPreview v-else-if="isInnerJson" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerJsonPreview" />
-        <RawTextPreview v-else-if="isInnerTextLike" :url="innerDownloadUrl" :filename="entryPath ?? ''" :class="$style.innerRawPreview" />
+        <MarkdownPreview v-else-if="innerPreviewUrl && isInnerMarkdown" :url="innerPreviewUrl" :filename="entryPath ?? ''" :class="$style.innerMarkdownPreview" />
+        <JsonPreview v-else-if="innerPreviewUrl && isInnerJson" :url="innerPreviewUrl" :filename="entryPath ?? ''" :class="$style.innerJsonPreview" />
+        <RawTextPreview v-else-if="innerPreviewUrl && isInnerTextLike" :url="innerPreviewUrl" :filename="entryPath ?? ''" :class="$style.innerRawPreview" />
       </template>
 
       <!-- ファイル・ログイン済み: タブ付きパネル -->
