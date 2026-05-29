@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { Button, Form } from '@vuetify/v0';
-import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
-import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+import { startRegistration } from '@simplewebauthn/browser';
+import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
 import { apiPost } from '@/utils/api';
-import { authStore, clearAuth, fetchCurrentUser, setToken } from '@/store/auth';
+import { authStore, clearAuth, fetchCurrentUser } from '@/store/auth';
 import { mainRouter } from '@/router';
 import InfiniteTableRow from '@/components/InfiniteTableRow.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import SensitiveActionAuth from '@/components/SensitiveActionAuth.vue';
 import type { ApiReq } from '../../../shared/api';
 
 interface PasskeyItem {
@@ -34,7 +35,6 @@ const pageSuccess = ref('');
 
 const passwordForm = reactive({ currentPassword: '', newPassword: '' });
 const passwordLoading = ref(false);
-const passkeyReauthLoading = ref(false);
 const hasPassword = computed(() => authStore.user?.hasPassword ?? true);
 const recentlyAuthenticated = computed(() => authStore.user?.recentlyAuthenticated ?? false);
 
@@ -104,45 +104,6 @@ async function savePassword(): Promise<void> {
 		pageError.value = String(e);
 	} finally {
 		passwordLoading.value = false;
-	}
-}
-
-async function reauthenticateWithPasskey(): Promise<void> {
-	pageError.value = '';
-	pageSuccess.value = '';
-	passkeyReauthLoading.value = true;
-	try {
-		const beginResult = await apiPost('/api/passkey/authenticate/begin', { purpose: 'reauthenticate' });
-		if (!beginResult.ok) {
-			pageError.value = beginResult.data.message || 'パスキー認証の開始に失敗しました';
-			return;
-		}
-
-		let credential;
-		try {
-			credential = await startAuthentication({ optionsJSON: beginResult.data.options as unknown as PublicKeyCredentialRequestOptionsJSON });
-		} catch (e) {
-			pageError.value = `パスキー認証がキャンセルされました: ${String(e)}`;
-			return;
-		}
-
-		const finishResult = await apiPost('/api/passkey/authenticate/finish', {
-			challengeId: beginResult.data.challengeId,
-			credential: credential as unknown as ApiReq<'/api/passkey/authenticate/finish'>['credential'],
-			purpose: 'reauthenticate',
-		});
-		if (!finishResult.ok) {
-			pageError.value = finishResult.data.message || 'パスキー認証に失敗しました';
-			return;
-		}
-
-		setToken(finishResult.data.token);
-		await fetchCurrentUser();
-		pageSuccess.value = 'パスキーで再認証しました';
-	} catch (e) {
-		pageError.value = String(e);
-	} finally {
-		passkeyReauthLoading.value = false;
 	}
 }
 
@@ -323,17 +284,13 @@ onMounted(async () => {
 
     <template v-else>
       <section :class="$style.section">
-        <div :class="['card', $style.card]">
-          <template v-if="recentlyAuthenticated">
-            <div class="alert alert-success">再認証済みです。</div>
-          </template>
-          <template v-else>
-            <Button.Root class="btn btn-ghost" :disabled="passkeyReauthLoading" :loading="passkeyReauthLoading" @click="reauthenticateWithPasskey">
-              <Button.Loading>認証中...</Button.Loading>
-              <Button.Content>パスキーで再認証</Button.Content>
-            </Button.Root>
-          </template>
-        </div>
+        <SensitiveActionAuth
+          :class="['card', $style.card]"
+          :show-password-fallback="false"
+          description="パスワード未設定のアカウントでパスワードを設定するには、先にパスキーで本人確認します。"
+          @success="(message: string) => { pageError = ''; pageSuccess = message; }"
+          @error="(message: string) => { pageSuccess = ''; pageError = message; }"
+        />
 
         <div :class="['card', $style.card]">
           <div :class="$style.serviceHeader">

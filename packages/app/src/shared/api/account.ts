@@ -93,9 +93,11 @@ export const accountApiDef = {
 		tags: ['account'],
 		req: v.object({
 			currentPassword: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+			turnstileToken: v.optional(v.pipe(v.string(), v.maxLength(MAX_TURNSTILE_TOKEN_LENGTH))),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ url: v.string() }) } } },
+			400: errorResponse('Bad request or Turnstile failure', ['TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED']),
 			401: errorResponse('Recent authentication or current password required', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'RECENT_AUTHENTICATION_REQUIRED']),
 			404: errorResponse('User not found', ['USER_NOT_FOUND']),
 			503: errorResponse('Google OAuth is not configured', ['GOOGLE_OAUTH_IS_NOT_CONFIGURED']),
@@ -107,10 +109,11 @@ export const accountApiDef = {
 		req: v.object({
 			profileUrl: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(2048)),
 			currentPassword: v.optional(v.pipe(v.string(), v.maxLength(MAX_PASSPHRASE_LENGTH))),
+			turnstileToken: v.optional(v.pipe(v.string(), v.maxLength(MAX_TURNSTILE_TOKEN_LENGTH))),
 		}),
 		res: {
 			200: { description: 'Success', content: { 'application/json': { vSchema: v.object({ url: v.string() }) } } },
-			400: errorResponse('Bad request', ['INVALID_PROFILE_URL', 'INDIEAUTH_DISCOVERY_FAILED']),
+			400: errorResponse('Bad request', ['INVALID_PROFILE_URL', 'INDIEAUTH_DISCOVERY_FAILED', 'TURNSTILE_TOKEN_IS_REQUIRED', 'TURNSTILE_VERIFICATION_FAILED']),
 			401: errorResponse('Recent authentication or current password required', ['CURRENT_PASSWORD_IS_REQUIRED', 'INVALID_PASSWORD', 'RECENT_AUTHENTICATION_REQUIRED']),
 			403: errorResponse('Blocked server', ['THIS_MISSKEY_SERVER_IS_NOT_ALLOWED']),
 			404: errorResponse('User not found', ['USER_NOT_FOUND']),

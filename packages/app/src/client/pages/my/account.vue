@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { Button, Form } from '@vuetify/v0';
-import { startAuthentication } from '@simplewebauthn/browser';
-import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
 import { apiPost, type ApiSuccess } from '@/utils/api';
-import { authStore, fetchCurrentUser, setToken } from '@/store/auth';
+import { authStore, fetchCurrentUser } from '@/store/auth';
 import WalletRuntimeProvider from '@/components/WalletRuntimeProvider';
 import WalletSettings from '@/components/WalletSettings.vue';
 import TurnstileWidget from '@/components/TurnstileWidget.vue';
-import type { ApiReq } from '../../../shared/api';
+import SensitiveActionAuth from '@/components/SensitiveActionAuth.vue';
 
 type LinkedMisskeyAccount = ApiSuccess<'/api/account/linked-misskey/list'>['data'][number];
 
@@ -19,12 +17,12 @@ const emailInput = ref('');
 const currentPassword = ref('');
 const googleLoading = ref(false);
 const indieauthLoading = ref(false);
-const passkeyLoading = ref(false);
 const emailLoading = ref(false);
 const emailVerifyLoading = ref(false);
 const turnstileEnabled = ref(false);
 const turnstileSiteKey = ref('');
 const emailVerifyTurnstileToken = ref<string | null>(null);
+const linkTurnstileToken = ref<string | null>(null);
 const pendingEmailVerificationToken = ref<string | null>(null);
 const error = ref('');
 const success = ref('');
@@ -33,7 +31,17 @@ const misskeyAccounts = ref<LinkedMisskeyAccount[]>([]);
 
 const hasGoogle = computed(() => authStore.user?.hasGoogle ?? false);
 const recentlyAuthenticated = computed(() => authStore.user?.recentlyAuthenticated ?? false);
-const canStartLink = computed(() => recentlyAuthenticated.value || ((authStore.user?.hasPassword ?? true) && currentPassword.value.length > 0));
+const passwordLinkReady = computed(() =>
+	(authStore.user?.hasPassword ?? true)
+	&& currentPassword.value.length > 0
+	&& (!turnstileEnabled.value || linkTurnstileToken.value !== null),
+);
+const canStartLink = computed(() => recentlyAuthenticated.value || passwordLinkReady.value);
+const googleLinkButtonLabel = computed(() => {
+	if (hasGoogle.value) return '連携済み';
+	if (!canStartLink.value) return '再認証してからGoogleを連携';
+	return 'Googleを連携';
+});
 const emailStatus = computed(() => {
 	if (!authStore.user?.email) return '未登録';
 	return authStore.user.emailVerifiedAt === null ? '確認待ち' : '確認済み';
@@ -163,51 +171,15 @@ async function verifyEmail(token: string): Promise<void> {
 	}
 }
 
-async function reauthenticateWithPasskey(): Promise<void> {
-	error.value = '';
-	success.value = '';
-	passkeyLoading.value = true;
-	try {
-		const beginResult = await apiPost('/api/passkey/authenticate/begin', { purpose: 'reauthenticate' });
-		if (!beginResult.ok) {
-			error.value = beginResult.data.message || 'パスキー認証の開始に失敗しました';
-			return;
-		}
-
-		let credential;
-		try {
-			credential = await startAuthentication({ optionsJSON: beginResult.data.options as unknown as PublicKeyCredentialRequestOptionsJSON });
-		} catch (e) {
-			error.value = `パスキー認証がキャンセルされました: ${String(e)}`;
-			return;
-		}
-
-		const finishResult = await apiPost('/api/passkey/authenticate/finish', {
-			challengeId: beginResult.data.challengeId,
-			credential: credential as unknown as ApiReq<'/api/passkey/authenticate/finish'>['credential'],
-			purpose: 'reauthenticate',
-		});
-		if (!finishResult.ok) {
-			error.value = finishResult.data.message || 'パスキー認証に失敗しました';
-			return;
-		}
-
-		setToken(finishResult.data.token);
-		await fetchCurrentUser();
-		success.value = 'パスキーで再認証しました';
-	} catch (e) {
-		error.value = String(e);
-	} finally {
-		passkeyLoading.value = false;
-	}
-}
-
 async function linkGoogle(): Promise<void> {
 	error.value = '';
 	success.value = '';
 	googleLoading.value = true;
 	try {
-		const result = await apiPost('/api/account/link/google/begin', { currentPassword: currentPassword.value || undefined });
+		const result = await apiPost('/api/account/link/google/begin', {
+			currentPassword: currentPassword.value || undefined,
+			turnstileToken: currentPassword.value ? linkTurnstileToken.value ?? undefined : undefined,
+		});
 		if (!result.ok) {
 			error.value = result.data.message || 'Google連携の開始に失敗しました';
 			return;
@@ -232,7 +204,11 @@ async function linkIndieAuth({ valid }: { valid: boolean }): Promise<void> {
 
 	indieauthLoading.value = true;
 	try {
-		const result = await apiPost('/api/account/link/indieauth/begin', { profileUrl, currentPassword: currentPassword.value || undefined });
+		const result = await apiPost('/api/account/link/indieauth/begin', {
+			profileUrl,
+			currentPassword: currentPassword.value || undefined,
+			turnstileToken: currentPassword.value ? linkTurnstileToken.value ?? undefined : undefined,
+		});
 		if (!result.ok) {
 			error.value = result.data.message || 'Misskey連携の開始に失敗しました';
 			return;
@@ -320,17 +296,18 @@ onMounted(async () => {
         </Form>
       </div>
 
-      <div :class="['card', $style.card]">
-        <template v-if="recentlyAuthenticated">
-          <div class="alert alert-success">再認証済みです。</div>
-        </template>
-        <template v-else>
-          <Button.Root class="btn btn-ghost" :disabled="passkeyLoading" :loading="passkeyLoading" @click="reauthenticateWithPasskey">
-            <Button.Loading>認証中...</Button.Loading>
-            <Button.Content>パスキーで再認証</Button.Content>
-          </Button.Root>
-        </template>
-      </div>
+      <SensitiveActionAuth
+        v-model:currentPassword="currentPassword"
+        :class="['card', $style.card]"
+        description="外部アカウント連携の前に、パスキーで本人確認します。パスワード設定済みの場合だけ、現在のパスワードでも続行できます。"
+        password-input-id="account-link-current-password"
+        password-hint="パスキーで再認証した場合、この入力は不要です。"
+        :turnstile-enabled="turnstileEnabled"
+        :turnstile-site-key="turnstileSiteKey"
+        v-model:turnstile-token="linkTurnstileToken"
+        @success="(message: string) => { error = ''; success = message; }"
+        @error="(message: string) => { success = ''; error = message; }"
+      />
 
       <div v-if="googleAuthEnabled" :class="['card', $style.card]">
         <div :class="$style.serviceHeader">
@@ -342,9 +319,12 @@ onMounted(async () => {
             {{ hasGoogle ? '連携済み' : '未連携' }}
           </span>
         </div>
+        <div v-if="!hasGoogle && !canStartLink" class="alert alert-info mb-3">
+          Googleを連携するには、本人確認欄でパスキーかパスワードで再認証してください。
+        </div>
         <Button.Root class="btn btn-primary" :disabled="googleLoading || hasGoogle || !canStartLink" :loading="googleLoading" @click="linkGoogle">
           <Button.Loading>処理中...</Button.Loading>
-          <Button.Content>{{ hasGoogle ? '連携済み' : 'Googleを連携' }}</Button.Content>
+          <Button.Content>{{ googleLinkButtonLabel }}</Button.Content>
         </Button.Root>
       </div>
 
@@ -357,6 +337,9 @@ onMounted(async () => {
           <span :class="['badge', misskeyAccounts.length > 0 ? 'badge-success' : 'badge-info']">
             {{ misskeyAccounts.length > 0 ? `${misskeyAccounts.length}件連携済み` : '未連携' }}
           </span>
+        </div>
+        <div v-if="!canStartLink" class="alert alert-info mb-3">
+          Misskeyを連携するには、本人確認欄でパスキーかパスワードで再認証してください。
         </div>
         <Form :class="$style.form" @submit="linkIndieAuth">
           <div :class="$style.formGroup">

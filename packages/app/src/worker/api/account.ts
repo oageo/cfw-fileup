@@ -57,7 +57,7 @@ async function sendEmailVerification(env: Env, userId: string, email: string, re
 	]), 'Failed to send email verification:');
 }
 
-async function assertSensitiveActionAuth(env: Env, userId: string, currentPassword: string | undefined, reauthenticatedAt: number | null): Promise<void> {
+async function assertSensitiveActionAuth(env: Env, userId: string, currentPassword: string | undefined, turnstileToken: string | undefined, reauthenticatedAt: number | null): Promise<void> {
 	if (reauthenticatedAt !== null && Date.now() - reauthenticatedAt <= RECENT_AUTH_MS) return;
 
 	const db = getDb(env);
@@ -67,6 +67,13 @@ async function assertSensitiveActionAuth(env: Env, userId: string, currentPasswo
 		throw apiError(401, userRecord.passwordHash ? 'CURRENT_PASSWORD_IS_REQUIRED' : 'RECENT_AUTHENTICATION_REQUIRED');
 	}
 	if (!userRecord.passwordHash) throw apiError(401, 'INVALID_PASSWORD');
+	await assertRateLimit(env, 'AUTH_RATE_LIMITER', rateLimitKey('sensitive-action-password', userId));
+	if (isTurnstileConfigured(env)) {
+		if (!turnstileToken) throw apiError(400, 'TURNSTILE_TOKEN_IS_REQUIRED');
+		if (!await verifyTurnstile(turnstileToken, env.TURNSTILE_SECRET)) {
+			throw apiError(400, 'TURNSTILE_VERIFICATION_FAILED');
+		}
+	}
 	const passwordValid = await verifyPassword(currentPassword, userRecord.passwordHash);
 	if (!passwordValid) throw apiError(401, 'INVALID_PASSWORD');
 }
@@ -108,7 +115,7 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/account/link/google/begin', Env>) => {
 		const user = c.get('user');
 		const body = c.req.valid('json');
-		await assertSensitiveActionAuth(c.env, user.id, body.currentPassword, user.reauthenticatedAt);
+		await assertSensitiveActionAuth(c.env, user.id, body.currentPassword, body.turnstileToken, user.reauthenticatedAt);
 		return c.json({ url: await createGoogleAuthUrl(c.env, new URL(c.req.url), user.id) }, 200);
 	}, getResponseDefWithAuth('/api/account/link/google/begin')),
 );
@@ -120,7 +127,7 @@ app.post(
 	describeResponse(async (c: JsonCtx<'/api/account/link/indieauth/begin', Env>) => {
 		const user = c.get('user');
 		const body = c.req.valid('json');
-		await assertSensitiveActionAuth(c.env, user.id, body.currentPassword, user.reauthenticatedAt);
+		await assertSensitiveActionAuth(c.env, user.id, body.currentPassword, body.turnstileToken, user.reauthenticatedAt);
 		return c.json({ url: await createIndieAuthUrl(c.env, new URL(c.req.url), body.profileUrl, user.id) }, 200);
 	}, getResponseDefWithAuth('/api/account/link/indieauth/begin')),
 );
