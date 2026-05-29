@@ -12,6 +12,7 @@ import { apiPost } from '@/utils/api';
 import { mainRouter } from '@/router';
 import { Nirax, type RouteDef } from '@/nirax';
 import { formatBytes } from '@/utils/byte-size';
+import { archiveEntryDownloadUrl } from '@/utils/archive-entry-url';
 import { createBgzfDecompressor } from 'bgzf';
 import { hasMimeTypeMismatch as detectMimeTypeMismatch, inferMimeTypeByExtension, isExecutableMimeType, selectStoredOrSniffedMimeType } from '../../shared/mime-by-extension';
 
@@ -76,8 +77,7 @@ const validMimeType = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/;
 
 const innerDownloadUrl = computed(() => {
 	if (!fileId.value) return '';
-	const base = `/d/${fileId.value}/${encodeURIComponent(':entries')}/${encodeURIComponent(entryPath.value ?? '')}`;
-	return autoToken.value ? `${base}?token=${autoToken.value}` : base;
+	return archiveEntryDownloadUrl(fileId.value, entryPath.value ?? '', autoToken.value);
 });
 const innerPreviewUrl = computed(() => isTargz.value ? innerObjectUrl.value : innerDownloadUrl.value);
 const innerDownloadFilename = computed(() => entryPath.value?.split('/').filter(Boolean).at(-1) || 'download');

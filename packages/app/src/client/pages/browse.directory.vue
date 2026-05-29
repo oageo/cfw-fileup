@@ -24,6 +24,7 @@ import { getOpfsTempFile, removeOpfsTempFile } from '@/workers/opfs-temp';
 import { completeDownloadStatus, failDownloadStatus, startDownloadStatus, updateDownloadStatus } from '@/store/download-status';
 import { registerDownloadedOpfsFile } from '@/store/download-cleanup';
 import { formatBytes } from '@/utils/byte-size';
+import { archiveEntryDownloadUrl } from '@/utils/archive-entry-url';
 import type { DistributiveOmit } from '../../shared/type-hack';
 
 const props = defineProps<{
@@ -810,17 +811,17 @@ function buildArchiveEntries(): void {
 		const rest = e.path.slice(archivePath.value.length);
 		const slashIdx = rest.indexOf('/');
 		if (slashIdx === -1) {
-			//const previewUrl = isImageMime(e.mimeType) ? `/d/${props.fileId}/${encodeURIComponent(':entries')}/${encodeURIComponent(e.path)}` : undefined;
+			const previewUrl = props.isTar && props.fileId && isImageMime(e.mimeType) ? archiveEntryDownloadUrl(props.fileId, e.path, props.token) : undefined;
 			result.push({
 				key: e.id,
 				name: rest,
 				link: archiveEntryBrowseUrl(e.path),
-				//previewUrl,
 				isDir: false,
 				fullPath: e.path,
 				size: e.size,
 				fileId: e.id,
 				label: e.mimeType,
+				previewUrl,
 			});
 		} else {
 			const dirName = rest.slice(0, slashIdx);
